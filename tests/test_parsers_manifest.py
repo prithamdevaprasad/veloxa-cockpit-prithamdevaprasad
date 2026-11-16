@@ -47,7 +47,8 @@ def test_xlsx_rows_skip_title_rows_and_keep_exact_sheet_row_locators(tmp_path):
     envs = parse_xlsx_rows((pack / "data_room" / "hr" / "Employee_Master.xlsx").read_bytes())
     assert [e.locator["row"] for e in envs] == [4, 5]  # title row 1, blank row 2, header row 3
     assert all(e.locator["header_row"] == 3 for e in envs)
-    assert envs[0].payload == {"Emp ID": "T001", "Full Name": "Person Alpha", "Department": "Testing"}
+    assert envs[0].payload["Emp ID"] == "T001" and envs[0].payload["Full Name"] == "Person Alpha"
+    assert envs[0].payload["Manager ID"] is None and envs[1].payload["Manager ID"] == "T001"
 
 
 def test_ledger_payroll_line_is_classed_as_payroll_aggregate(tmp_path):

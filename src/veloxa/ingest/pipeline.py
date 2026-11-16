@@ -32,6 +32,7 @@ from .. import audit
 from ..catalogue import Rule, load_catalogue
 from ..db import tenant_tx
 from ..releases import AdmissionRefused, Pack, Schedule, check_admissible
+from .contracts import validate_rows
 from .manifest import build_manifest, manifest_sha256
 from .parsers import parse
 
@@ -95,7 +96,10 @@ def admit_pack(
 
     parsed = []  # (entry, data class, envelope)
     for entry in entries:
-        for env in parse(entry.data, entry.suffix, entry.rule.records):
+        envelopes = parse(entry.data, entry.suffix, entry.rule.records)
+        if entry.rule.contract is not None:  # schema and semantic checks; refuses the whole pack on failure
+            validate_rows(entry.relpath, entry.rule.contract, [(e.locator, e.payload) for e in envelopes])
+        for env in envelopes:
             parsed.append((entry, entry.rule.class_for_row(env.payload), env))
 
     # 3. One transaction: lock -> re-check -> batch -> raw manifest -> records -> seal -> audit.

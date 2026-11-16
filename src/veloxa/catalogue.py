@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import config
+from .ingest.contracts import Contract
 
 DATA_CLASSES = {
     "internal", "confidential", "personal", "sensitive_personal",
@@ -24,6 +25,7 @@ class Rule:
     data_class: str
     records: str
     row_class: dict | None = None
+    contract: Contract | None = None
 
     def class_for_row(self, payload: dict) -> str:
         if self.row_class:
@@ -43,7 +45,9 @@ def load_catalogue(path: Path | None = None) -> list[Rule]:
     rules = []
     for raw in tomllib.loads(path.read_text(encoding="utf-8"))["rule"]:
         rule = Rule(raw["pattern"], raw["kind"], raw["system"], raw["data_class"], raw["records"],
-                    raw.get("row_class"))
+                    raw.get("row_class"), Contract.from_toml(raw.get("contract")))
+        if rule.contract and rule.records != "rows":
+            raise ValueError(f"a contract is only defined for row exports ({rule.pattern!r})")
         if rule.data_class not in DATA_CLASSES or rule.records not in RECORD_MODES:
             raise ValueError(f"invalid catalogue rule {rule.pattern!r}")
         if rule.row_class and rule.row_class.get("class") not in DATA_CLASSES:

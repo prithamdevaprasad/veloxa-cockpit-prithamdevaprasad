@@ -3,10 +3,13 @@
 # Fields:
 #   kind        : what the file is (export, document, email, transcript, brief, readme, template)
 #   system      : source system the file comes from (as named in the data room README)
-#   data_class  : ARCHITECTURE.md §6.3 data class. Draft classification for owner review (ASSUMPTIONS.md A-024).
+#   data_class  : ARCHITECTURE.md §6.3 data class. D1 mapping approved by the owner (ASSUMPTIONS.md A-024);
+#                 classes for later packs are drafts until approved.
 #   records     : how records are extracted: "rows" (one per spreadsheet data row), "document" (one per file),
 #                 or "none" (registered in the raw manifest only; never admitted as evidence)
 #   row_class   : optional per-row override, {column = value} -> data_class, for mixed exports
+#   contract    : optional validation contract for row exports (required columns, uniqueness, ISO dates,
+#                 numeric types, arithmetic identities). A violation refuses the whole pack (fail closed).
 # The most restrictive class is used where a source mixes content. Unmatched files are rejected (fail closed).
 
 [[rule]]
@@ -36,6 +39,11 @@ kind = "export"
 system = "keka_hrms"
 data_class = "personal"
 records = "rows"
+[rule.contract]
+required_columns = ["Emp ID", "Full Name", "Department", "Title", "Manager ID", "Join Date", "Status", "Exit Date"]
+optional = ["Manager ID", "Exit Date"]
+unique = ["Emp ID"]
+iso_dates = ["Join Date", "Exit Date"]
 
 [[rule]]
 pattern = "data_room/finance/Payroll_Register_*.xlsx"
@@ -43,6 +51,12 @@ kind = "export"
 system = "payroll_register"
 data_class = "sensitive_personal"
 records = "rows"
+[rule.contract]
+required_columns = ["Emp ID", "Month", "Days in Month", "Days Payable", "Gross (Rs.)", "Deductions (Rs.)", "Net (Rs.)", "Processed By"]
+month_labels = ["Month"]
+integers = ["Days in Month", "Days Payable", "Gross (Rs.)", "Deductions (Rs.)", "Net (Rs.)"]
+identities = [["Gross (Rs.)", "Deductions (Rs.)", "Net (Rs.)"]]
+not_greater = [["Days Payable", "Days in Month"]]
 
 [[rule]]
 pattern = "data_room/finance/GL_Export_*.xlsx"
@@ -52,6 +66,11 @@ data_class = "confidential"
 records = "rows"
 # Ledger payroll lines are payroll aggregates (ARCHITECTURE.md §15.3).
 row_class = { "Vendor / Payee" = "Salaries (payroll)", class = "payroll_aggregate" }
+[rule.contract]
+required_columns = ["Txn Date", "Voucher", "Vendor / Payee", "Cost Centre", "Amount (Rs.)", "Narration"]
+unique = ["Voucher"]
+iso_dates = ["Txn Date"]
+integers = ["Amount (Rs.)"]
 
 [[rule]]
 pattern = "data_room/documents/*.pdf"

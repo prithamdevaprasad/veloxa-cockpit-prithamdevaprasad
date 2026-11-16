@@ -19,6 +19,12 @@ EXPECTED_BY_CLASS = {
 }
 
 
+HR_COLUMNS = ["Emp ID", "Full Name", "Department", "Title", "Manager ID", "Join Date", "Status", "Exit Date"]
+PAYROLL_COLUMNS = ["Emp ID", "Month", "Days in Month", "Days Payable", "Gross (Rs.)", "Deductions (Rs.)", "Net (Rs.)",
+                   "Processed By"]
+GL_COLUMNS = ["Txn Date", "Voucher", "Vendor / Payee", "Cost Centre", "Amount (Rs.)", "Narration"]
+
+
 def _xlsx(path: Path, title: str, header: list[str], rows: list[list]) -> None:
     import openpyxl
 
@@ -50,16 +56,15 @@ def make_d1(root: Path) -> Path:
     (pack / "data_room").mkdir(parents=True, exist_ok=True)
     (pack / "data_room" / "README.txt").write_text("Synthetic data room.\n\nhr/ test folder\n", encoding="utf-8")
     _xlsx(pack / "data_room" / "templates" / "Blank_Template.xlsx", "Template", ["A", "B", "C"], [])
-    _xlsx(pack / "data_room" / "hr" / "Employee_Master.xlsx", "Synthetic HR export",
-          ["Emp ID", "Full Name", "Department"],
-          [["T001", "Person Alpha", "Testing"], ["T002", "Person Beta", "Testing"]])
-    _xlsx(pack / "data_room" / "finance" / "Payroll_Register_Synthetic.xlsx", "Synthetic payroll",
-          ["Emp ID", "Month", "Gross"], [["T001", "Jan-2099", 1000], ["T002", "Jan-2099", 2000]])
-    _xlsx(pack / "data_room" / "finance" / "GL_Export_Synthetic.xlsx", "Synthetic ledger",
-          ["Txn Date", "Vendor / Payee", "Amount"],
-          [["2099-01-01", "Vendor One", 10],
-           ["2099-01-28", "Salaries (payroll)", 3000],
-           ["2099-02-01", "Vendor Two", 20]])
+    _xlsx(pack / "data_room" / "hr" / "Employee_Master.xlsx", "Synthetic HR export", HR_COLUMNS,
+          [["T001", "Person Alpha", "Testing", "Tester", None, "2099-01-01", "Active", None],
+           ["T002", "Person Beta", "Testing", "Tester", "T001", "2099-01-02", "Active", None]])
+    _xlsx(pack / "data_room" / "finance" / "Payroll_Register_Synthetic.xlsx", "Synthetic payroll", PAYROLL_COLUMNS,
+          [["T001", "Jan-2099", 31, 31, 1000, 100, 900, "XX"], ["T002", "Jan-2099", 31, 31, 2000, 200, 1800, "XX"]])
+    _xlsx(pack / "data_room" / "finance" / "GL_Export_Synthetic.xlsx", "Synthetic ledger", GL_COLUMNS,
+          [["2099-01-01", "V-1", "Vendor One", "CC-A", 10, "Synthetic line"],
+           ["2099-01-28", "V-2", "Salaries (payroll)", "CC-P", 3000, "Synthetic payroll line"],
+           ["2099-02-01", "V-3", "Vendor Two", "CC-A", 20, "Synthetic line"]])
     (pack / "data_room" / "email").mkdir(parents=True, exist_ok=True)
     (pack / "data_room" / "email" / "01.eml").write_text(
         "From: Person Alpha <alpha@example.test>\nTo: Person Beta <beta@example.test>\n"
