@@ -560,3 +560,76 @@ This log records the main tasks given to AI tools, what they produced, where the
 - No source truth decided; no identity resolved; no owner conclusion or rationale written.
 - No frontend decision. `ARCHITECTURE.md` unchanged. No Day 2–4 material admitted, queried or published.
 - No force-push and no history rewrite. Commits authored by the owner's account, without an AI co-author trailer.
+
+---
+
+## Mon 16 Nov 2026 — Unweighted risk comparison, interim briefing, D-15 gate, requester authentication
+
+### Task given to AI
+
+| # | Task (owner instruction) | AI output |
+|---|---|---|
+| 16 | Implement option 2 for M5: a risk comparison with no invented weights, scores, thresholds, tiers or tie-breaks. Dominance only when a risk is at least as bad on every comparable approved measure and worse on one. Never force a comparison over missing, uncertain or incompatible measures. Build an interim `GET /v1/briefing` (unranked watchlist, `top_three` null, explicit ranking mode and D-15 status). Make D-15 an enforceable, audited, versioned gate, and prepare a blank owner decision sheet. Fix `/v1/ask` assuming the CEO by default: fail closed without a trusted authenticated principal, with any development fixture explicit and isolated. Keep release, evidence, privacy and tenant controls; no change to `ARCHITECTURE.md`; no owner value judgements | Risk engine v0 (`src/veloxa/risk/`), migration `0005`, `GET /v1/briefing` and `GET /v1/briefing/{snapshot_id}`, `veloxa policy record-d15`, `src/veloxa/auth.py`, the decision sheet `docs/D-15_owner_decision_sheet.md`, 38 new tests. Committed and pushed by AI under the owner's standing authorization for verified milestones |
+
+**What was built**
+
+- **Comparison** (`compare.py`): interval dominance over C1–C5 (§16.2–§16.3) and nothing else.
+  - A pair is compared only if every criterion that applies to either risk is measured for both, with the identical measure definition, version and unit.
+  - "Missing", "uncertain", or "not applicable" on one side only, make a pair *not comparable*. They are never read as zero.
+  - The other outcomes are *dominates*, *trade-off* (needs the D-15 weights) and *indistinguishable* (no tie-break).
+  - The relation is transitive and is never completed into a ranking.
+- **Detector** (`detectors.py`): one detector, for C4.
+  - It compares a figure reported in a formal document with a governed metric, only for pairings the owner has approved in `config/figure_mappings.toml`. None are approved, so on real data it checks nothing.
+  - A signal says the sources differ, never which is right.
+- **Briefing** (`briefing.py`): an unranked watchlist in `risk_id` order, labelled as carrying no priority.
+  - Each entry carries evidence, time context, measures, unknowns and its comparison.
+  - The briefing also lists signals needing data. `top_three` is null.
+  - Every briefing is an append-only snapshot recording the read basis, engine version, D-15 status, version and hash, and an input hash. An identical request reuses its snapshot; a later policy creates a new one.
+- **D-15 gate** (`governance.py`, migration `0005`):
+  - Decisions live in `policy.ranking_decision`. The privileged command line writes them; the application role can only read them.
+  - Decisions are approved-only, consecutive-versioned, append-only, hashed and audited.
+  - `weighted_ranking` refuses while D-15 is pending, and refuses even after approval, because no weighted implementation exists.
+  - The database rejects a snapshot recorded as weighted without an approved policy.
+- **Authentication** (`auth.py`):
+  - by default no authenticator is configured, and `/v1/ask` and `/v1/briefing` return 401;
+  - the development fixture needs three explicit settings with no defaults: the flag, a secret of 32 or more characters, and an employee ID;
+  - the API refuses to start if the fixture is half-configured;
+  - the principal comes from server configuration, never from the request;
+  - `VELOXA_PRINCIPAL_TITLE` was removed.
+
+### Points for owner attention (not decided by AI)
+
+- **Directions of the natural scales** (higher exposure is worse; fewer days to a commitment is worse) are implemented as read from the §16.2 wording. They are listed for confirmation in the decision sheet (item A).
+- **The C4 measure** `C4.absolute_discrepancy@1` (absolute difference in the metric's unit) is an implementation reading of §16.2. It is listed for confirmation (item B).
+- **The C4 detector's criterion declarations:**
+  - C1, C3 and C5 are "not applicable" to a reporting discrepancy;
+  - C2 is "missing" when the paired figures are currency, so such risks stay unquantified and are not compared.
+- **The real Day 1 briefing is an empty watchlist.** That is honest, not a defect hidden by filler: no figure pairing is approved, and the other criteria have no detector yet.
+- **Production authentication remains to be built:** identity-provider integration, principal resolution through the tenant directory, ReBAC/ABAC, revocation. The fixture is a single static token for local development only.
+
+### Where AI was wrong, and what changed
+
+| # | AI error or weakness | Who caught it | Correction |
+|---|---|---|---|
+| E45 | The Ask Veloxa v0 milestone answered as the CEO by default (a configured title, default `CEO`). Any caller who could reach the API received the CEO's view | Owner review | Requester endpoints now need an authenticated principal and fail closed with 401. The development fixture is explicit, needs a secret, and acts as a configured employee ID, never a title. Tests prove that unauthenticated or spoofed requests get nothing |
+| E46 | Shell here-documents mangled escape sequences in two scripted edits; one produced a syntactically broken test helper | AI, from the immediate syntax error | Edits are written as script files instead; the helper was rewritten and verified by parsing a generated document |
+
+### Verification actually run (16 Nov 2026)
+
+- `ruff check .`: passed.
+- `pytest` against PostgreSQL 18.7: **226 passed**, including the four real-data tests. `pytest -m "not realdata"` (what CI runs): 222 passed.
+- **Real Day 1 pack:** the briefing returns D-15 pending, `top_three` null, an empty watchlist, and the reasons in `signals_needing_data`. No source truth was changed.
+- `docker compose up -d --build --wait` on the development database:
+  - `init` applied `0005`;
+  - health reported `auth: none`;
+  - `/v1/ask` and `/v1/briefing` returned 401, including with a spoofed title header.
+- Then, with the fixture enabled explicitly:
+  - a wrong token got 401;
+  - the briefing and ask worked for the configured principal.
+- The stack was then restored to the default (`auth: none`).
+
+### Confirmations
+
+- No weights, anchors, thresholds, tiers or tie-breaks chosen; no figure pairing approved; D-15 owner fields left blank; no weighted ranking started.
+- No source truth, classification, identity or historical evidence decision changed. `ARCHITECTURE.md` unchanged.
+- No Day 2–4 material admitted, queried or published. No force-push and no history rewrite.

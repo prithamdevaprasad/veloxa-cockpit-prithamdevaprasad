@@ -24,8 +24,10 @@ The design is a production-first reference architecture, approved as baseline v1
 | **Temporal model** | **Working and tested.** Read basis and query modes (CURRENT, KNOWN_AT, RECORDED_BY, VALID_AT), a date meaning end of day in IST, a SQL predicate builder with bind parameters only, and leakage canaries at every batch boundary |
 | **Governed metrics and query tools** | **Working and tested.** Rebuildable projections over sealed batches; declared, versioned metric definitions compiled to parameterised SQL; eight declared query tools (person, headcount, finance totals, payroll total, board statements, timeline, conflicts, text search) |
 | **Ask Veloxa v0** (`POST /v1/ask`) | **Working and tested, facts-only mode.** Refusal pre-screen, temporal parse, bounded deterministic planner, authorised execution, evidence pack, deterministic verifier, grade and status, and recording of every answer with its citations and audit event |
-| HTTP API | `/health`, `/v1/meta/clock`, `/v1/meta/releases`, `POST /v1/ask` |
-| Risk briefing, agents, gold tests, model planner and composer | **Not implemented yet** (Days 2–4) |
+| **Risk engine v0 and interim briefing** (`GET /v1/briefing`) | **Partial, tested.** Weight-free dominance comparison over the approved criteria; the D-15 governance gate; immutable briefing snapshots. **Incomplete:** only one detector exists (C4, which needs owner-approved figure pairings, none recorded yet). With D-15 pending, the briefing is an unranked watchlist and `top_three` is null |
+| **Requester authentication** | **Fails closed.** No identity provider is integrated, so `/v1/ask` and `/v1/briefing` return 401 unless the explicit local development fixture is enabled |
+| HTTP API | `/health`, `/v1/meta/clock`, `/v1/meta/releases`, `POST /v1/ask`, `GET /v1/briefing`, `GET /v1/briefing/{snapshot_id}` |
+| Ranked briefing (D-15), agents, gold tests, model planner and composer | **Not implemented yet** (Days 2–4; weighted ranking only after the owner approves D-15) |
 | Frontend | **Deferred.** Technology not chosen; the backend stays frontend-independent (`ARCHITECTURE.md` §19, §26.2) |
 
 ## Quick start (one command)
@@ -60,10 +62,24 @@ If a released pack fails admission, the API keeps serving the latest sealed batc
 curl http://127.0.0.1:8000/health             # {"status":"ok","selfcheck":"pass",...}
 curl http://127.0.0.1:8000/v1/meta/releases   # D1 admitted; later packs not yet released
 curl -X POST http://127.0.0.1:8000/v1/ask -H "content-type: application/json" \
-     -d '{"question": "What is our headcount by department?"}'
-curl -X POST http://127.0.0.1:8000/v1/ask -H "content-type: application/json" \
-     -d '{"question": "What is the ledger spend?", "as_known_at": "2026-11-16T12:00+05:30"}'
+     -d '{"question": "What is our headcount?"}'      # 401 not_authenticated: requester endpoints fail closed
 ```
+
+**Requester authentication.**
+- No identity provider is integrated yet, so `/v1/ask` and `/v1/briefing` refuse every request with 401 by default. No identity, title or role is assumed, and none is accepted from the request.
+- **For local development only**, an explicit fixture can be enabled in `.env`. It needs all three settings, has no defaults, and the API refuses to start if it is half-configured:
+  - `VELOXA_DEV_AUTH=1`;
+  - `VELOXA_DEV_TOKEN`, a random secret of at least 32 characters;
+  - `VELOXA_DEV_PRINCIPAL`, the employee ID the fixture acts as.
+- With the fixture enabled, `/health` reports `"auth": "development_fixture"`, and requests send the token:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/ask -H "Authorization: Bearer $VELOXA_DEV_TOKEN" \
+     -H "content-type: application/json" -d '{"question": "What is our headcount by department?"}'
+curl -H "Authorization: Bearer $VELOXA_DEV_TOKEN" "http://127.0.0.1:8000/v1/briefing?as_known_at=2026-11-16"
+```
+
+Never enable the fixture on a shared or production deployment. Production needs the identity-provider integration of `ARCHITECTURE.md` §19.1 (see *Current limitations*).
 
 `/v1/ask` returns the `Answer` contract (`ARCHITECTURE.md` §19.4):
 - `status`, with precedence refused > abstained > conflict > qualified > answered;
@@ -73,11 +89,25 @@ curl -X POST http://127.0.0.1:8000/v1/ask -H "content-type: application/json" \
 - `facts`, `evidence` (excerpt, source path, locator, data class, batch) and `unknowns`;
 - `read_basis` with a banner, and an `audit_id`.
 
-A refusal is a normal answer with `status: "refused"` and a policy ID, reason and alternative. Typed errors are `not_authorised` (403) and `invalid_time` (422).
+A refusal is a normal answer with `status: "refused"` and a policy ID, reason and alternative. Typed errors are `not_authenticated` (401), `not_authorised` (403) and `invalid_time` (422).
 
 **Facts-only mode.** v0 runs the architecture's degraded path (C16): the planner is deterministic, and each claim is a verbatim rendering of a fact or excerpt that a declared operation returned. Answers are therefore at most `qualified`. The model planner and composer will run behind the same stages; the verifier and grading stay the same.
 
-**Principal.** There is no identity provider in the hackathon profile. The API answers as the single person whose title in the latest sealed HR export equals `VELOXA_PRINCIPAL_TITLE` (default `CEO`). Emails are usable as evidence only for the people who were party to them.
+**Principal.** The authenticated principal must resolve to exactly one person in the latest sealed HR export, or the request gets 403. Emails are usable as evidence only for the people who were party to them.
+
+**Briefing (`GET /v1/briefing`), interim while D-15 is pending.** It accepts the time parameters `as_known_at`, or `mode` with `as_of`; ranking options are never accepted. It returns:
+- `ranking_mode: "unweighted_partial_order"`, `owner_decision_status: "D-15 pending"`, `top_three: null` and an explanation;
+- a `watchlist` in `risk_id` order. That order is a stable technical order and **carries no priority**.
+- Each risk carries:
+  - its description, evidence (record IDs, source paths, locators, batch) and time context;
+  - its value on each criterion: an interval with its measure definition, or missing, uncertain or not applicable;
+  - its unknowns;
+  - its comparison result: which risks demonstrably dominate it, which it dominates, trade-offs, and which risks are indistinguishable from it or cannot be compared with it, with an explanation.
+- `comparisons`, `signals_needing_data` and the read basis.
+
+A risk dominates another only if it is demonstrably at least as bad on every applicable criterion, with identical measure definitions, and worse on at least one. Missing evidence is never read as zero. "Not dominated" and "dominated" are not priority tiers.
+
+Every briefing is stored as an append-only snapshot with the D-15 policy status and version in force. `GET /v1/briefing/{snapshot_id}` replays it exactly as served. The owner's D-15 choices are listed, blank, in [`docs/D-15_owner_decision_sheet.md`](docs/D-15_owner_decision_sheet.md).
 
 The database and API listen on `127.0.0.1` only. The Compose file contains local-development passwords for that localhost-only database. Override them in `.env` for anything else.
 
@@ -91,7 +121,7 @@ pip install --constraint requirements.lock -e ".[dev]"
 VELOXA_DATA_PATH=/path/to/packs docker compose up -d --wait db
 export VELOXA_TEST_ADMIN_DSN="postgresql://veloxa_admin:local-dev-admin@127.0.0.1:55432/veloxa"
 ruff check .
-pytest                       # everything (188 tests), including the real-data tests if VELOXA_DATA_PATH is set
+pytest                       # everything (226 tests), including the real-data tests if VELOXA_DATA_PATH is set
 pytest -m "not realdata"     # what CI runs: synthetic data only
 ```
 
@@ -114,6 +144,7 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
 | `veloxa selfcheck --role app\|ingest` | Startup self-checks (§9.3) |
 | `veloxa init` | Privileged one-shot step: migrate, admit released packs, self-check (needs the privileged credentials) |
 | `veloxa serve` | Run the API with the application role only |
+| `veloxa policy record-d15 --file <toml>` | Record an owner-approved D-15 decision as the next policy version (privileged; the API cannot do this). It does not switch weighted ranking on |
 
 `VELOXA_CLOCK` is a **test-only** setting. It is honoured only together with `VELOXA_TEST_MODE=1`, can move the clock back but never forward, and setting it outside test mode is an error.
 
@@ -121,7 +152,7 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
 
 | Path | Contents | Architecture |
 |---|---|---|
-| `src/veloxa/migrations/` | Bootstrap (role set, `btree_gist`, `pgvector`); `0001_foundation.sql` (schemas, tenant directory, admission batches, raw manifest, source records, audit chain, triggers, RLS, grants); `0002_hardening.sql` (record-to-manifest hash key, time-ordering checks, protected-pay policy); `0003_projections.sql` (read models, projection role, protected-pay policies); `0004_answers.sql` (append-only answers and citations). Applied migrations are never rewritten | §6, §8.2, §9.3, §9.4, §15, §21.3 |
+| `src/veloxa/migrations/` | Bootstrap (role set, `btree_gist`, `pgvector`); `0001_foundation.sql` (schemas, tenant directory, admission batches, raw manifest, source records, audit chain, triggers, RLS, grants); `0002_hardening.sql` (record-to-manifest hash key, time-ordering checks, protected-pay policy); `0003_projections.sql` (read models, projection role, protected-pay policies); `0004_answers.sql` (append-only answers and citations); `0005_briefing.sql` (D-15 decision register and briefing snapshots). Applied migrations are never rewritten | §6, §8.2, §9.3, §9.4, §15, §21.3 |
 | `src/veloxa/ingest/` | File-drop connector: manifest (SHA-256 per file), versioned parsers (xlsx rows, docx, pdf, eml, txt), single-transaction admission and sealing | §7, §8.2 |
 | `src/veloxa/releases.py`, `config/release_schedule.toml` | Release schedule and clock; admission decided before any file is opened | §8.2, §25.1 |
 | `config/source_catalogue.toml` | Classification of each pack file (kind, source system, data class). Unknown files are rejected | §6.3, §7.2 |
@@ -132,8 +163,11 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
 | `src/veloxa/projector.py`, `metrics.py`, `config/metrics.toml` | Projections over sealed batches; governed metric definitions and their compiler | §6.2, §11 |
 | `src/veloxa/tools.py` | The declared query operations a planner may call, each returning facts with lineage and evidence | §13.1–13.2 |
 | `src/veloxa/ask/` | Ask Veloxa v0: refusal catalogue (`policy.py`), temporal parse, planner, verifier and pipeline | §13, §19.4 |
-| `src/veloxa/api.py`, `src/veloxa/cli.py` | API (health, time metadata, ask) and command line | §19 |
-| `tests/` | 188 tests: release rules and clock, parsers, contracts, database guarantees, concurrency, temporal modes and leakage canaries, metrics and tools, the ask pipeline and API, availability on failed admission, real-data checks | §21.2 |
+| `src/veloxa/risk/` | Risk engine v0: criteria vocabulary (`model.py`), weight-free comparison (`compare.py`), the C4 detector (`detectors.py`), the D-15 gate (`governance.py`), the briefing and its snapshots (`briefing.py`) | §16, §19.3 |
+| `config/figure_mappings.toml` | Owner-approved pairings of reported figures with governed metrics (none approved yet) | §16.2 C4 |
+| `src/veloxa/auth.py` | Requester authentication: fail closed by default; explicit local development fixture | §19.1 |
+| `src/veloxa/api.py`, `src/veloxa/cli.py` | API (health, time metadata, ask, briefing) and command line | §19 |
+| `tests/` | 226 tests: release rules and clock, parsers, contracts, database guarantees, concurrency, temporal modes and leakage canaries, metrics and tools, the ask pipeline, risk comparison, D-15 gate, briefing snapshots, authentication, the API, availability on failed admission, real-data checks | §21.2 |
 | `Dockerfile`, `docker-compose.yml`, `.github/workflows/ci.yml` | One-command run; CI with lint, tests and a fresh-clone Compose job | §25.1, H-30 |
 
 ## Guarantees enforced today (and tested)
@@ -156,10 +190,17 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
 ## Current limitations
 
 - Ingestion runs in the app container's start-up sequence, before the API starts. It does not yet use the durable workflow runtime (DBOS) or an isolated document-parsing sandbox (§7.2, §17).
-- There is no authentication on the API yet. It binds to `127.0.0.1` only, and `/v1/ask` answers as the single configured principal.
+- **Authentication is not production-ready.** Requester endpoints fail closed. The only way in is the local development fixture, a single static token mapped to one configured employee. Production still needs:
+  - identity-provider integration (bearer tokens validated against the provider: issuer, audience, signature, expiry);
+  - principal resolution through the tenant directory (`user:<id>`, groups, §10.3) instead of the HR export;
+  - ReBAC/ABAC authorization (§10);
+  - token revocation and session handling.
+- **The risk engine is incomplete.**
+  - There is no detector for C1, C2, C3 or C5, and the C4 detector needs owner-approved figure pairings, so the real Day 1 briefing is an empty watchlist.
+  - There is no weighted ranking, no guardrail tiers and no probabilities. These wait for D-15, then a separately approved implementation.
 - Projections carry no recorded-time or valid-time columns yet, so metrics and tools accept CURRENT and KNOWN_AT only; RECORDED_BY and VALID_AT are refused rather than silently unfiltered.
 - `/v1/ask` runs in facts-only mode (deterministic planner, no model composition, no model entailment pass). The disclosure auditor is not built, so payroll aggregates are refused.
-- Not built yet: entity resolution, ReBAC/ABAC adapters, the historical ACL evaluator, the risk engine and the agents.
+- Not built yet: entity resolution, ReBAC/ABAC adapters, the historical ACL evaluator and the agents.
 - Release packs must be supplied as an extracted folder, not as the zip file.
 - Each pack is held in memory while it is hashed and parsed. This suits the hackathon pack sizes; large packs need streaming.
 - From a later pack's release time, `init` tries to admit it. Until that pack's parsers and catalogue rules are added (Day 2 onward), its admission is refused, so the API serves the earlier sealed batches and reports the pack as pending.
@@ -174,6 +215,7 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
 | [`ASSUMPTIONS.md`](ASSUMPTIONS.md) | Ground rules, observed facts and assumptions, each with its source, confidence and what would change the owner's mind |
 | [`TRANSCRIPT_NOTES.md`](TRANSCRIPT_NOTES.md) | Suspected mishearings and contradictions, with evidence and the owner's conclusions |
 | [`AI_LOG.md`](AI_LOG.md) | Tasks given to AI, where it was wrong, and what changed |
+| [`docs/D-15_owner_decision_sheet.md`](docs/D-15_owner_decision_sheet.md) | The owner's pending risk-ranking decisions, with every choice left blank |
 
 **Release gating of documentation.** Content that depends on a release pack is added on that pack's release day (16–19 Nov, 10:00 IST), matching the system's rule that later material must not leak into earlier answers.
 
