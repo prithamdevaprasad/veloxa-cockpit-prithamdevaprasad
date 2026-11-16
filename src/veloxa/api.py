@@ -1,4 +1,5 @@
-"""HTTP API (ARCHITECTURE.md §19): health, time metadata and Ask Veloxa v0 (POST /v1/ask, facts-only mode).
+"""HTTP API (ARCHITECTURE.md §19): health, time metadata, Ask Veloxa v0 (POST /v1/ask, facts-only mode) and the
+interim briefing (GET /v1/briefing, an unranked watchlist while D-15 is pending).
 
 Least privilege: the API connects ONLY as veloxa_app and refuses to start if privileged database credentials
 (administrator, migrator or ingest passwords) are present in its environment. Migrations and admission run in a
@@ -7,24 +8,30 @@ separate one-shot process (`veloxa init`).
 The client never passes a tenant ID: the hackathon profile resolves the single configured tenant (§19.1).
 Metadata endpoints return release times and counts, never record values. /v1/ask returns an `Answer` (§19.4)
 whose claims are verified against evidence the configured principal may see at the read basis; a refusal is a
-successful response (status "refused"), and typed errors are `not_authorised` (403) and `invalid_time` (422).
+successful response (status "refused"), and typed errors are `not_authenticated` (401), `not_authorised` (403)
+and `invalid_time` (422).
+
+Requester-facing endpoints need an authenticated principal (auth.py). No identity provider is integrated yet, so
+by default they FAIL CLOSED with 401; only the explicit local development fixture authenticates anyone.
 """
 
 from __future__ import annotations
 
 import os
+import uuid
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import config, ledger, selfcheck, tools
-from .ask import pipeline
+from . import auth, config, ledger, selfcheck, tools
+from .ask import pipeline, timeparse
 from .db import connect
 from .releases import current_time, load_schedule
+from .risk import briefing
 from .temporal import Mode, resolve_basis
 
 PRIVILEGED_ENV = ("VELOXA_DB_ADMIN_PASSWORD", "VELOXA_DB_ADMIN_USER", "VELOXA_MIGRATOR_PASSWORD",
@@ -56,6 +63,7 @@ def _app_dsn() -> str:
 def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = None) -> FastAPI:
     """`clock` is a test-only injection point (a code parameter, not configuration)."""
     assert_unprivileged()
+    auth_settings = auth.settings_from_env()  # raises if the development fixture is half-configured
     schedule = load_schedule()
     tenant_id = config.tenant_uuid(schedule.tenant_slug)
     now_fn = clock or current_time
@@ -104,6 +112,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             "status": "ok" if not failures and not pending else "degraded",
             "selfcheck": "pass" if not failures else "fail",
             "pending_admission": pending,
+            "auth": auth_settings.mode,
         }
 
     @app.get("/v1/meta/clock")
@@ -118,23 +127,66 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             now, _, rows = _pack_states(conn)
         return {"now": now.isoformat(), "packs": rows}
 
+    def _principal(conn, authorization: str | None, now: datetime):
+        """The authenticated principal, or an error response. Never derived from request content."""
+        emp_id = auth_settings.authenticate(authorization)
+        if emp_id is None:
+            detail = ("an authenticated principal is required; no identity provider is configured, so "
+                      "requester-facing endpoints are closed" if auth_settings.mode == "none"
+                      else "an authenticated principal is required")
+            return JSONResponse(status_code=401, headers={"WWW-Authenticate": "Bearer"},
+                                content={"error": "not_authenticated", "detail": detail})
+        current = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), Mode.CURRENT, None,
+                                schedule.time_zone, now)
+        principal = tools.resolve_principal_by_emp_id(conn, current, emp_id) if current.batch_seq else None
+        if principal is None:
+            return JSONResponse(status_code=403, content={
+                "error": "not_authorised",
+                "detail": "the authenticated principal does not resolve to exactly one person in the latest sealed "
+                          "HR export"})
+        return principal
+
     @app.post("/v1/ask")
-    def ask(body: AskRequest):
+    def ask(body: AskRequest, authorization: str | None = Header(default=None)):
         now = now_fn()
         with connect(state["dsn"]) as conn:
-            current = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), Mode.CURRENT, None,
-                                    schedule.time_zone, now)
-            principal = (tools.resolve_principal_by_title(conn, current, config.principal_title())
-                         if current.batch_seq else None)
-            if principal is None:
-                return JSONResponse(status_code=403, content={
-                    "error": "not_authorised",
-                    "detail": "the configured principal does not resolve to exactly one person in the latest "
-                              "sealed HR export"})
+            principal = _principal(conn, authorization, now)
+            if isinstance(principal, JSONResponse):
+                return principal
             try:
                 return pipeline.answer(conn, tenant_id, schedule.time_zone, principal, body.question, now,
                                        mode=body.mode, as_of=body.as_of, as_known_at=body.as_known_at)
             except pipeline.InvalidTime as e:
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
+
+    @app.get("/v1/briefing")
+    def get_briefing(mode: str | None = None, as_of: str | None = None, as_known_at: str | None = None,
+                     authorization: str | None = Header(default=None)):
+        """Interim unranked watchlist (top_three is null while D-15 is pending). No weights, tiers or ranking
+        options are accepted from the request."""
+        now = now_fn()
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now)
+            if isinstance(principal, JSONResponse):
+                return principal
+            try:
+                spec = timeparse.parse("", now, schedule.time_zone, mode, as_of, as_known_at)
+                basis = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), spec.mode, spec.as_of,
+                                      schedule.time_zone, now)
+            except ValueError as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
+            return briefing.serve(conn, tenant_id, principal, basis, now)
+
+    @app.get("/v1/briefing/{snapshot_id}")
+    def get_briefing_snapshot(snapshot_id: uuid.UUID, authorization: str | None = Header(default=None)):
+        """A recorded briefing exactly as served, with the D-15 policy version in force at the time."""
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            found = briefing.fetch(conn, tenant_id, principal, str(snapshot_id))
+        if found is None:
+            return JSONResponse(status_code=404, content={"error": "not_found"})
+        return found
 
     return app

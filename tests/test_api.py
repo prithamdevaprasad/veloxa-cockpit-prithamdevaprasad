@@ -1,11 +1,6 @@
 from datetime import datetime
 
 import pytest
-from conftest import D1_DAY
-
-from veloxa import config
-from veloxa.db import connect
-from veloxa.ingest.pipeline import admit_pack
 
 pytestmark = pytest.mark.db
 
@@ -13,15 +8,9 @@ pytestmark = pytest.mark.db
 @pytest.fixture(scope="session")
 def veloxa_d1(db, tmp_path_factory):
     """Admit one synthetic D1 pack into the configured 'veloxa' tenant, once per test session."""
-    from synthetic_pack import make_d1
+    from conftest import ensure_configured_d1
 
-    from veloxa.releases import load_schedule
-
-    root = tmp_path_factory.mktemp("veloxa_pack")
-    make_d1(root)
-    schedule = load_schedule()
-    with connect(db.dsn("ingest")) as conn:
-        admit_pack(conn, config.tenant_uuid(schedule.tenant_slug), schedule, "D1", root, D1_DAY)
+    ensure_configured_d1(db, tmp_path_factory.mktemp("veloxa_pack"))
     return db.dsn("app")
 
 
@@ -42,7 +31,8 @@ def test_health_and_time_metadata(veloxa_d1, monkeypatch):
     monkeypatch.setenv("VELOXA_CLOCK", "2026-11-16T12:00:00+05:30")
 
     with TestClient(create_app(dsn=veloxa_d1)) as client:
-        assert client.get("/health").json() == {"status": "ok", "selfcheck": "pass", "pending_admission": []}
+        assert client.get("/health").json() == {"status": "ok", "selfcheck": "pass", "pending_admission": [],
+                                                "auth": "none"}
 
         clock = client.get("/v1/meta/clock").json()
         assert clock["sealed_watermark"] == 1 and clock["time_zone"] == "Asia/Kolkata"
@@ -63,7 +53,7 @@ def test_api_keeps_serving_the_latest_sealed_batch_when_a_released_pack_is_not_a
     after_d2_release = datetime.fromisoformat("2026-11-17T12:00:00+05:30")  # D2 released, never admitted here
     with TestClient(create_app(dsn=veloxa_d1, clock=lambda: after_d2_release)) as client:
         health = client.get("/health").json()
-        assert health == {"status": "degraded", "selfcheck": "pass", "pending_admission": ["D2"]}
+        assert health == {"status": "degraded", "selfcheck": "pass", "pending_admission": ["D2"], "auth": "none"}
         assert client.get("/v1/meta/clock").json()["sealed_watermark"] == 1
         packs = {p["pack"]: p for p in client.get("/v1/meta/releases").json()["packs"]}
         assert packs["D1"]["status"] == "sealed"

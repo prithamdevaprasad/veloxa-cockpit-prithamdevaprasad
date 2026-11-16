@@ -150,3 +150,26 @@ def test_real_d1_ask_v0(db, ingest_conn, app_conn, tenant, schedule, data_root):
         assert all(e["batch_seq"] == 1 and e["data_class"] not in ("sensitive_personal", "payroll_aggregate")
                    for e in a["evidence"])
         assert not any(e["kind"] == "email" for e in a["evidence"])  # the CEO is not a party to the D1 emails
+
+
+def test_real_d1_briefing(db, ingest_conn, app_conn, tenant, schedule, data_root):
+    """Interim briefing over the real D1 pack. With no owner-approved figure pairing and no other detector, the
+    honest result is an empty watchlist: nothing is invented to fill it. Structure only; no value compared."""
+    from datetime import UTC, datetime
+
+    from veloxa import projector, tools
+    from veloxa.db import connect
+    from veloxa.risk import briefing
+    from veloxa.temporal import Mode, resolve_basis
+
+    now = datetime.now(UTC)
+    pipeline.admit_pack(ingest_conn, tenant, schedule, "D1", data_root, now)
+    with connect(db.dsn("projection")) as prj:
+        projector.build(prj, tenant)
+    basis = resolve_basis(tenant, ledger.sealed_releases(app_conn, tenant), Mode.CURRENT, None, "Asia/Kolkata", now)
+    ceo = tools.resolve_principal_by_title(app_conn, basis, "CEO")  # test-only lookup; the API never uses titles
+    b = briefing.serve(app_conn, tenant, ceo, basis, now)
+    assert b["read_basis"]["batch_seq"] == 1 and b["owner_decision_status"] == "D-15 pending"
+    assert b["top_three"] is None and b["ranking_mode"] == "unweighted_partial_order"
+    assert b["watchlist"] == [] and b["comparisons"] == []
+    assert any("no owner-approved pairing" in n for n in b["signals_needing_data"])

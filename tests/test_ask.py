@@ -7,7 +7,7 @@ import psycopg
 import pytest
 from conftest import D1_DAY
 
-from veloxa import config, projector, tools
+from veloxa import projector, tools
 from veloxa.ask import pipeline, planner, policy, timeparse
 from veloxa.ask.verifier import Claim, verify
 from veloxa.db import connect, tenant_tx
@@ -364,37 +364,19 @@ def test_answers_do_not_leak_later_material(db, app_conn, tenant, tmp_path):
 
 
 @pytest.mark.db
-def test_ask_endpoint_answers_as_the_configured_principal_and_returns_typed_errors(db, monkeypatch, tmp_path):
-    from fastapi.testclient import TestClient
-    from synthetic_pack import make_d1
+def test_ask_endpoint_answers_only_an_authenticated_principal_and_returns_typed_errors(db, monkeypatch, tmp_path):
+    from conftest import DEV_TOKEN, api_client, dev_fixture, ensure_configured_d1
 
-    from veloxa.api import PRIVILEGED_ENV, create_app
-    from veloxa.ingest.pipeline import admit_pack
-    from veloxa.releases import load_schedule
-
-    schedule = load_schedule()
-    tid = config.tenant_uuid(schedule.tenant_slug)
-    with connect(db.dsn("app")) as conn, tenant_tx(conn, tid):
-        admitted = conn.execute("SELECT count(*) AS n FROM ledger.admission_batch").fetchone()["n"]
-    if not admitted:  # the configured tenant may already hold the session's synthetic D1 (test_api)
-        make_d1(tmp_path)
-        with connect(db.dsn("ingest")) as conn:
-            admit_pack(conn, tid, schedule, "D1", tmp_path, D1_DAY)
-    with connect(db.dsn("projection")) as conn:
-        projector.build(conn, tid)
-    for name in PRIVILEGED_ENV:
-        monkeypatch.delenv(name, raising=False)
-    clock = datetime.fromisoformat("2026-11-16T15:00:00+05:30")
-    monkeypatch.setenv("VELOXA_PRINCIPAL_TITLE", "Lead Tester")
-    with TestClient(create_app(dsn=db.dsn("app"), clock=lambda: clock)) as client:
-        ok = client.post("/v1/ask", json={"question": "What is the ledger spend?"})
+    tid = ensure_configured_d1(db, tmp_path)
+    auth = {"Authorization": f"Bearer {DEV_TOKEN}"}
+    with api_client(db, monkeypatch, **dev_fixture("T001")) as client:
+        ok = client.post("/v1/ask", json={"question": "What is the ledger spend?"}, headers=auth)
         assert ok.status_code == 200 and ok.json()["status"] == "qualified" and ok.json()["audit_id"]
-        refused = client.post("/v1/ask", json={"question": "What is Person Beta's salary?"}).json()
+        refused = client.post("/v1/ask", json={"question": "What is Person Beta's salary?"}, headers=auth).json()
         assert refused["status"] == "refused" and refused["refusal"]["policy"] == "POL-PAY-01"
-        bad = client.post("/v1/ask", json={"question": "headcount", "as_known_at": "2999-01-01"})
+        bad = client.post("/v1/ask", json={"question": "headcount", "as_known_at": "2999-01-01"}, headers=auth)
         assert bad.status_code == 422 and bad.json()["error"] == "invalid_time"
-        assert client.post("/v1/ask", json={"question": "q", "tenant_id": str(tid)}).status_code == 422
-    monkeypatch.setenv("VELOXA_PRINCIPAL_TITLE", "Tester-in-chief")
-    with TestClient(create_app(dsn=db.dsn("app"), clock=lambda: clock)) as client:
-        denied = client.post("/v1/ask", json={"question": "What is the ledger spend?"})
+        assert client.post("/v1/ask", json={"question": "q", "tenant_id": str(tid)}, headers=auth).status_code == 422
+    with api_client(db, monkeypatch, **dev_fixture("T999")) as client:  # authenticated, but not in the HR export
+        denied = client.post("/v1/ask", json={"question": "What is the ledger spend?"}, headers=auth)
         assert denied.status_code == 403 and denied.json()["error"] == "not_authorised"

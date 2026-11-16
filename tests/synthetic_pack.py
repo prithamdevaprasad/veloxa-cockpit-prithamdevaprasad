@@ -51,6 +51,39 @@ def _docx(path: Path, paragraphs: list[str]) -> None:
     d.save(str(path))
 
 
+def _pdf(path: Path, lines: list[str]) -> None:
+    """A minimal one-page text PDF (no PDF library needed); pdfplumber reads each line back as a line."""
+    def esc(s: str) -> str:
+        return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    ops = ["BT", "/F1 11 Tf", "14 TL", "50 780 Td"] + [f"({esc(ln)}) Tj T*" for ln in lines] + ["ET"]
+    stream = "\n".join(ops).encode("latin-1")
+    objs = [b"<< /Type /Catalog /Pages 2 0 R >>", b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 842] /Resources << /Font << /F1 4 0 R >> >>"
+            b" /Contents 5 0 R >>",
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream"]
+    out, offsets = bytearray(b"%PDF-1.4\n"), []
+    for i, body in enumerate(objs, start=1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + body + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode()
+    out += b"".join(f"{o:010d} 00000 n \n".encode() for o in offsets)
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(bytes(out))
+
+
+def make_board_update(pack: Path, figures: list[tuple[str, str]], name: str = "Board_Update_Synthetic.pdf",
+                      period: str = "Jan to Mar 2099", sent: str = "9 Apr 2099") -> Path:
+    """A SYNTHETIC formal board update with a key-numbers table, in the documents folder of a pack."""
+    lines = ["Synthetic company: Board update", f"Quarterly update. Period: {period}. Sent {sent}.",
+             "Key numbers", "Metric Value"] + [f"{m} {v}" for m, v in figures] + ["Product", "All synthetic."]
+    path = pack / "data_room" / "documents" / name
+    _pdf(path, lines)
+    return path
+
+
 def make_d1(root: Path) -> Path:
     pack = root / D1
     _docx(pack / "brief" / "Synthetic_Brief.docx", ["Synthetic brief", "A fictional company for tests."])

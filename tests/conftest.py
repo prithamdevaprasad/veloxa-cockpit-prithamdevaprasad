@@ -114,3 +114,47 @@ def at(text: str) -> datetime:
 
 D1_DAY = at("2026-11-16T12:00:00+05:30")
 AFTER_ALL = at("2026-11-20T12:00:00+05:30")
+
+
+DEV_TOKEN = "synthetic-dev-fixture-token-0123456789abcdef"  # test-only secret (>= 32 characters)
+API_CLOCK = at("2026-11-16T15:00:00+05:30")
+
+
+def ensure_configured_d1(db, root) -> uuid.UUID:
+    """Admit the synthetic D1 pack into the configured tenant once per session and build its projections."""
+    from synthetic_pack import make_d1
+
+    from veloxa import config, projector
+    from veloxa.db import connect, tenant_tx
+    from veloxa.ingest.pipeline import admit_pack
+    from veloxa.releases import load_schedule
+
+    schedule = load_schedule()
+    tid = config.tenant_uuid(schedule.tenant_slug)
+    with connect(db.dsn("app")) as conn, tenant_tx(conn, tid):
+        admitted = conn.execute("SELECT count(*) AS n FROM ledger.admission_batch").fetchone()["n"]
+    if not admitted:
+        make_d1(root)
+        with connect(db.dsn("ingest")) as conn:
+            admit_pack(conn, tid, schedule, "D1", root, D1_DAY)
+    with connect(db.dsn("projection")) as conn:
+        projector.build(conn, tid)
+    return tid
+
+
+def api_client(db, monkeypatch, **env):
+    """A TestClient for the API as it runs in production (no privileged credentials). `env` sets extra variables,
+    e.g. the development fixture; by default no authentication is configured (fail closed)."""
+    from fastapi.testclient import TestClient
+
+    from veloxa.api import PRIVILEGED_ENV, create_app
+
+    for name in PRIVILEGED_ENV + ("VELOXA_DEV_AUTH", "VELOXA_DEV_TOKEN", "VELOXA_DEV_PRINCIPAL"):
+        monkeypatch.delenv(name, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    return TestClient(create_app(dsn=db.dsn("app"), clock=lambda: API_CLOCK))
+
+
+def dev_fixture(principal: str = "T001") -> dict:
+    return {"VELOXA_DEV_AUTH": "1", "VELOXA_DEV_TOKEN": DEV_TOKEN, "VELOXA_DEV_PRINCIPAL": principal}

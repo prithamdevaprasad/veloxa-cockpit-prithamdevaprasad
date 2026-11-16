@@ -107,6 +107,15 @@ def resolve_principal_by_title(conn: psycopg.Connection, basis: ReadBasis, title
     return Principal(matches[0]["entity_id"], "executive", (matches[0]["work_email"] or "").lower() or None)
 
 
+def resolve_principal_by_emp_id(conn: psycopg.Connection, basis: ReadBasis, emp_id: str) -> Principal | None:
+    """Resolve an AUTHENTICATED principal's employee ID to exactly one person in the HR export at the basis.
+    The ID comes from server-side authentication, never from the request."""
+    matches = [p for p in _person_snapshot(conn, basis) if p["emp_id"] == emp_id]
+    if len(matches) != 1:
+        return None
+    return Principal(matches[0]["entity_id"], "authenticated", (matches[0]["work_email"] or "").lower() or None)
+
+
 def person(conn: psycopg.Connection, basis: ReadBasis, principal: Principal, name: str) -> ToolResult:
     people = _person_snapshot(conn, basis)
     if not people:

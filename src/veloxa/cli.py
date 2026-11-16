@@ -1,4 +1,4 @@
-"""Command line: veloxa init | migrate | ingest | status | selfcheck | serve.
+"""Command line: veloxa init | migrate | ingest | project | status | selfcheck | serve | policy.
 
 `init` is the privileged one-shot step (migrations and admission). `serve` runs the API with the
 application role only and refuses privileged credentials.
@@ -131,6 +131,25 @@ def cmd_selfcheck(args: argparse.Namespace) -> int:
     return 0 if not failures else 1
 
 
+def cmd_policy_record_d15(args: argparse.Namespace) -> int:
+    """Privileged: record an OWNER-APPROVED D-15 decision (risk weights, anchors, guardrail tiers, gate thresholds)
+    as the next policy version. The API cannot do this. Recording a decision does not enable weighted ranking in
+    this engine version; that needs a separate, explicitly approved implementation."""
+    from pathlib import Path
+
+    from .risk import governance
+
+    schedule = load_schedule()
+    try:
+        with connect(_admin_dsn()) as conn:
+            version = governance.record_decision(conn, config.tenant_uuid(schedule.tenant_slug), Path(args.file))
+    except ValueError as e:
+        print(f"ERROR: D-15 decision not recorded: {e}", file=sys.stderr)
+        return 1
+    print(f"D-15 decision recorded as policy version {version}")
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
@@ -183,6 +202,11 @@ def main(argv: list[str] | None = None) -> int:
     p_sc.add_argument("--role", choices=("app", "ingest"), default="app")
     p_sc.set_defaults(func=cmd_selfcheck)
     sub.add_parser("init", help="privileged one-shot: migrate and admit released packs").set_defaults(func=cmd_init)
+    p_pol = sub.add_parser("policy", help="owner decisions (privileged)")
+    pol_sub = p_pol.add_subparsers(dest="policy_command", required=True)
+    p_d15 = pol_sub.add_parser("record-d15", help="record an owner-approved D-15 decision file as a new version")
+    p_d15.add_argument("--file", required=True)
+    p_d15.set_defaults(func=cmd_policy_record_d15)
     p_srv = sub.add_parser("serve", help="run the API (application role only)")
     p_srv.add_argument("--host", default="0.0.0.0")
     p_srv.add_argument("--port", type=int, default=8000)

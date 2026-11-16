@@ -1,0 +1,17 @@
+# Owner-approved pairings of a figure REPORTED in a formal document with a GOVERNED metric (config/metrics.toml).
+# Used only by the C4 information-integrity detector (src/veloxa/risk/detectors.py).
+#
+# Deciding that a reported figure and a system metric measure the same thing is an owner judgement, so every
+# entry must name who approved it, when, and where the decision is recorded. An entry without these fields is
+# rejected. No pairing is approved yet, so the detector checks nothing.
+#
+# A detected difference is a signal for owner review. It never says which source is correct.
+#
+# Entry format (do not uncomment without an owner decision):
+# [[mapping]]
+# reported_figure = ""        # the figure name exactly as written in a key-numbers table
+# metric = ""                 # governed metric name, e.g. one declared in config/metrics.toml
+# unit = ""                   # must equal the metric's declared unit
+# approved_by = ""
+# approved_on = 2026-01-01
+# decision_record = ""        # e.g. the DECISIONS.md or TRANSCRIPT_NOTES.md entry

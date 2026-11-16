@@ -141,7 +141,7 @@ def test_existing_database_with_d1_sealed_serves_d1_degraded_when_d2_fails(db, i
         monkeypatch.delenv(name, raising=False)
     with TestClient(create_app(dsn=app_dsn)) as client:
         assert client.get("/health").json() == {"status": "degraded", "selfcheck": "pass",
-                                                "pending_admission": ["D2"]}
+                                                "pending_admission": ["D2"], "auth": "none"}
         assert client.get("/v1/meta/clock").json()["sealed_watermark"] == 1
         packs = {p["pack"]: p for p in client.get("/v1/meta/releases").json()["packs"]}
         assert packs["D1"]["status"] == "sealed" and packs["D1"]["record_count"] == EXPECTED_RECORDS
