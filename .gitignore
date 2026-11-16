@@ -1,0 +1,58 @@
+# ------------------------------------------------------------------
+# PRIVATE MATERIAL: never commit (owner rule: no raw challenge data,
+# no private research, no unreleased content in the public repository)
+# ------------------------------------------------------------------
+/Veloxa_Hackathon_Release_Packs/
+*.zip
+/email.md
+/research/
+/private/
+/public_day1/
+
+# Safeguard against raw source formats (exports, emails, documents, transcripts).
+# If a source-format file ever needs to be committed, add a narrow, reviewed exception.
+*.xlsx
+*.xls
+*.csv
+*.eml
+*.docx
+*.pdf
+
+# Locally supplied data and runtime output
+/data/
+/var/
+*.log
+
+# ------------------------------------------------------------------
+# Secrets: provider keys and credentials live in a secret manager or a
+# local .env that is never committed (ARCHITECTURE.md §9.6, §18)
+# ------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ------------------------------------------------------------------
+# Tooling, build and OS artefacts
+# ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+node_modules/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+~$*
