@@ -24,7 +24,8 @@ The design is a production-first reference architecture, approved as baseline v1
 | **Temporal model** | **Working and tested.** Read basis and query modes (CURRENT, KNOWN_AT, RECORDED_BY, VALID_AT), a date meaning end of day in IST, a SQL predicate builder with bind parameters only, and leakage canaries at every batch boundary |
 | **Governed metrics and query tools** | **Working and tested.** Rebuildable projections over sealed batches; declared, versioned metric definitions compiled to parameterised SQL; eight declared query tools (person, headcount, finance totals, payroll total, board statements, timeline, conflicts, text search) |
 | **Ask Veloxa v0** (`POST /v1/ask`) | **Working and tested, facts-only mode.** Refusal pre-screen, temporal parse, bounded deterministic planner, authorised execution, evidence pack, deterministic verifier, grade and status, and recording of every answer with its citations and audit event |
-| **Risk engine v0 and interim briefing** (`GET /v1/briefing`) | **Partial, tested.** Weight-free dominance comparison over the approved criteria; the D-15 governance gate; immutable briefing snapshots. **Incomplete:** only one detector exists (C4, which needs owner-approved figure pairings, none recorded yet). With D-15 pending, the briefing is an unranked watchlist and `top_three` is null |
+| **Risk engine v0 and interim briefing** (`GET /v1/briefing`) | **Partial, tested.** Weight-free dominance comparison over the approved criteria; the D-15 governance gate; immutable briefing snapshots. With D-15 pending, the briefing is an unranked watchlist and `top_three` is null |
+| **Evidence detectors C1–C4** (`src/veloxa/signals/`) | **Implemented as far as approved policy and admitted evidence allow; tested.** A typed signal contract and registry; C1 commitment, delay and status observations (the C1 measure stays unquantified); the approved C2 calculation (D15-04) with C2 reported as missing evidence, because no admitted record states a forward financial consequence; C3 evidence validation, with C3 measures blocked pending Q3, Q9 and Q10; C4 discrepancy capture, where unapproved mappings stay inactive. Signals are recorded append-only (migration `0006`) and shown in the briefing by criterion with an explicit status. No scores, priorities, guardrails or probabilities |
 | **Requester authentication** | **Fails closed.** No identity provider is integrated, so `/v1/ask` and `/v1/briefing` return 401 unless the explicit local development fixture is enabled |
 | HTTP API | `/health`, `/v1/meta/clock`, `/v1/meta/releases`, `POST /v1/ask`, `GET /v1/briefing`, `GET /v1/briefing/{snapshot_id}` |
 | Ranked briefing (D-15), agents, gold tests, model planner and composer | **Not implemented yet** (Days 2–4; weighted ranking only after the owner approves D-15) |
@@ -103,7 +104,8 @@ A refusal is a normal answer with `status: "refused"` and a policy ID, reason an
   - its value on each criterion: an interval with its measure definition, or missing, uncertain or not applicable;
   - its unknowns;
   - its comparison result: which risks demonstrably dominate it, which it dominates, trade-offs, and which risks are indistinguishable from it or cannot be compared with it, with an explanation.
-- `comparisons`, `signals_needing_data` and the read basis.
+- `comparisons`, `signals_needing_data` and the read basis;
+- `evidence_signals`: the C1–C4 detector observations grouped by criterion, each with its status (`active`, `provisional`, `unquantified`, `unmapped_requires_owner_approval`, `blocked_owner_decision` or `missing_evidence`), evidence records, temporal fields, assumptions kept separate from observed facts, missing-data reasons, the owner decisions it waits for, and why other signals were withheld. These are **not risks, scores or priorities**, and every criterion states how far it can be measured today (C5 is time context only). The snapshot references the recorded detector run.
 
 A risk dominates another only if it is demonstrably at least as bad on every applicable criterion, with identical measure definitions, and worse on at least one. Missing evidence is never read as zero. "Not dominated" and "dominated" are not priority tiers.
 
@@ -152,7 +154,7 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
 
 | Path | Contents | Architecture |
 |---|---|---|
-| `src/veloxa/migrations/` | Bootstrap (role set, `btree_gist`, `pgvector`); `0001_foundation.sql` (schemas, tenant directory, admission batches, raw manifest, source records, audit chain, triggers, RLS, grants); `0002_hardening.sql` (record-to-manifest hash key, time-ordering checks, protected-pay policy); `0003_projections.sql` (read models, projection role, protected-pay policies); `0004_answers.sql` (append-only answers and citations); `0005_briefing.sql` (D-15 decision register and briefing snapshots). Applied migrations are never rewritten | §6, §8.2, §9.3, §9.4, §15, §21.3 |
+| `src/veloxa/migrations/` | Bootstrap (role set, `btree_gist`, `pgvector`); `0001_foundation.sql` (schemas, tenant directory, admission batches, raw manifest, source records, audit chain, triggers, RLS, grants); `0002_hardening.sql` (record-to-manifest hash key, time-ordering checks, protected-pay policy); `0003_projections.sql` (read models, projection role, protected-pay policies); `0004_answers.sql` (append-only answers and citations); `0005_briefing.sql` (D-15 decision register and briefing snapshots); `0006_signals.sql` (append-only detector runs and signals; the database rejects a signal citing a record not admitted and sealed at its K, lineage beyond K, or a number on a missing, unmapped, blocked or unquantified signal). Applied migrations are never rewritten | §6, §8.2, §9.3, §9.4, §15, §21.3 |
 | `src/veloxa/ingest/` | File-drop connector: manifest (SHA-256 per file), versioned parsers (xlsx rows, docx, pdf, eml, txt), single-transaction admission and sealing | §7, §8.2 |
 | `src/veloxa/releases.py`, `config/release_schedule.toml` | Release schedule and clock; admission decided before any file is opened | §8.2, §25.1 |
 | `config/source_catalogue.toml` | Classification of each pack file (kind, source system, data class). Unknown files are rejected | §6.3, §7.2 |
@@ -163,11 +165,12 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
 | `src/veloxa/projector.py`, `metrics.py`, `config/metrics.toml` | Projections over sealed batches; governed metric definitions and their compiler | §6.2, §11 |
 | `src/veloxa/tools.py` | The declared query operations a planner may call, each returning facts with lineage and evidence | §13.1–13.2 |
 | `src/veloxa/ask/` | Ask Veloxa v0: refusal catalogue (`policy.py`), temporal parse, planner, verifier and pipeline | §13, §19.4 |
-| `src/veloxa/risk/` | Risk engine v0: criteria vocabulary (`model.py`), weight-free comparison (`compare.py`), the C4 detector (`detectors.py`), the D-15 gate (`governance.py`), the briefing and its snapshots (`briefing.py`) | §16, §19.3 |
+| `src/veloxa/risk/` | Risk engine v0: criteria vocabulary (`model.py`), weight-free comparison (`compare.py`), the approved-mapping C4 rule (`detectors.py`), the D-15 gate (`governance.py`), the briefing and its snapshots (`briefing.py`) | §16, §19.3 |
+| `src/veloxa/signals/` | Evidence detectors: the output contract (`contract.py`), evidence verification at K (`evidence.py`), C1 (`c1_delivery.py`), C2 (`c2_financial.py`), C3 (`c3_continuity.py`), C4 (`c4_integrity.py`) and the registry with idempotent recording (`registry.py`) | §16.1, §16.2, §16.5, §16.6, §8.4 |
 | `config/figure_mappings.toml` | Owner-approved pairings of reported figures with governed metrics (none approved yet) | §16.2 C4 |
 | `src/veloxa/auth.py` | Requester authentication: fail closed by default; explicit local development fixture | §19.1 |
-| `src/veloxa/api.py`, `src/veloxa/cli.py` | API (health, time metadata, ask, briefing) and command line | §19 |
-| `tests/` | 226 tests: release rules and clock, parsers, contracts, database guarantees, concurrency, temporal modes and leakage canaries, metrics and tools, the ask pipeline, risk comparison, D-15 gate, briefing snapshots, authentication, the API, availability on failed admission, real-data checks | §21.2 |
+| `src/veloxa/api.py`, `src/veloxa/cli.py` | API (health, time metadata, ask, briefing) and command line (`signals` prints detector counts only) | §19 |
+| `tests/` | 280 tests: release rules and clock, parsers, contracts, database guarantees, concurrency, temporal modes and leakage canaries, metrics and tools, the ask pipeline, risk comparison, D-15 gate, briefing snapshots, authentication, the API, availability on failed admission, the detector contract and the C1–C4 pipelines, the signal store, real-data checks | §21.2 |
 | `Dockerfile`, `docker-compose.yml`, `.github/workflows/ci.yml` | One-command run; CI with lint, tests and a fresh-clone Compose job | §25.1, H-30 |
 
 ## Guarantees enforced today (and tested)
@@ -196,7 +199,8 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
   - ReBAC/ABAC authorization (§10);
   - token revocation and session handling.
 - **The risk engine is incomplete.**
-  - There is no detector for C1, C2, C3 or C5, and the C4 detector needs owner-approved figure pairings, so the real Day 1 briefing is an empty watchlist.
+  - The detectors produce evidence signals, not risks: on the real Day 1 pack, C1 has observations but an unquantified measure (no open-scope or throughput records; Q7 not approved), C2 is missing evidence, C3 is missing evidence and blocked, and C4 figures are not comparable or unmapped. The watchlist therefore stays empty until an approved mapping or measurable criterion exists.
+  - C1 extraction uses deterministic lexical rules (no model), links statements only by an identical subject name, and does not read e-mail. Figures spoken in meeting summaries are not extracted.
   - There is no weighted ranking, no guardrail tiers and no probabilities. These wait for D-15, then a separately approved implementation.
 - Projections carry no recorded-time or valid-time columns yet, so metrics and tools accept CURRENT and KNOWN_AT only; RECORDED_BY and VALID_AT are refused rather than silently unfiltered.
 - `/v1/ask` runs in facts-only mode (deterministic planner, no model composition, no model entailment pass). The disclosure auditor is not built, so payroll aggregates are refused.

@@ -633,3 +633,97 @@ This log records the main tasks given to AI tools, what they produced, where the
 - No weights, anchors, thresholds, tiers or tie-breaks chosen; no figure pairing approved; D-15 owner fields left blank; no weighted ranking started.
 - No source truth, classification, identity or historical evidence decision changed. `ARCHITECTURE.md` unchanged.
 - No Day 2–4 material admitted, queried or published. No force-push and no history rewrite.
+
+## Tue 17 Nov 2026 — Evidence detectors C1–C4 (implementation sprint)
+
+### Task given to AI
+
+Build a shared detector contract and registry, and the C1–C4 evidence pipelines, as far as the approved decisions and the admitted evidence allow. Persist the outputs safely and show them in the briefing without ranking. Keep every unapproved policy inactive: weighted ranking, guardrails, tie-breaks, probabilities, C3 scoring, C4 materiality, the C2 anchor, and Q7 throughput.
+
+### What AI produced
+
+- **Contract:** a typed signal contract (`src/veloxa/signals/contract.py`).
+  - Statuses, flags, signal types and source authorities are enums.
+  - A missing, unmapped, blocked or unquantified signal cannot carry a number.
+  - Active and provisional signals must cite evidence.
+  - Assumptions are kept apart from observed facts.
+  - Signal ids are content hashes.
+- **Evidence verification at K:** every citation must resolve through the sealed-batch visibility view, and protected pay is refused. The T5 lineage is recorded on each signal.
+- **C1:**
+  - deterministic lexical extraction of commitments, delays and current status from formal documents and meeting summaries;
+  - a year inferred from the source's own date is stated as an assumption;
+  - meeting summaries are non-binding and undated;
+  - the C1 measure is unquantified (Q7);
+  - no amounts are read.
+- **C2:** the D15-04 calculation:
+  - rolling 12-month horizon;
+  - one-time and recurring impact kept separate, and nothing extrapolated;
+  - confirmed, uncertain and unsupported offsets;
+  - the maximum of mutually exclusive outcomes;
+  - no double counting;
+  - a missing upper bound gives unquantified;
+  - only system records and binding documents are accepted.
+
+  No admitted record states a forward financial consequence, so the live detector reports missing evidence.
+- **C3:** typed rota, qualification, ownership and absence evidence:
+  - rota supersession;
+  - a combined qualification and currency status;
+  - contradictory absence claims are rejected as invalid input;
+  - insufficient absence evidence proves nothing;
+  - leave data is refused.
+
+  No C3 number is produced and no guardrail exists. C3 measures are blocked pending Q3, Q9 and Q10.
+- **C4:**
+  - same-label figures are compared, with conservative rounding intervals and unit, period and format checks;
+  - unmapped figures are preserved;
+  - `status = "proposed"` mappings stay inactive, and approved mappings are versioned;
+  - no materiality and no C4 score.
+- **Recording:** migration `0006_signals.sql` adds append-only, FORCE-RLS detector runs and signals. Database checks enforce:
+  - cited records must be admitted and sealed at the run's K;
+  - lineage cannot exceed K;
+  - numberless statuses carry no number.
+
+  An identical rerun returns the original run.
+- **Briefing and CLI:**
+  - the briefing has an `evidence_signals` section, grouped by criterion with statuses and measurability notes;
+  - `top_three` stays null, and the watchlist and comparison are unchanged;
+  - `veloxa signals` prints counts only.
+
+### Points for owner attention (not decided by AI)
+
+- **Real Day 1 result** (counts only):
+  - **C1:** 3 commitment observations, 1 delay and 1 status observation, plus 3 unquantified exposure measures;
+  - **C2:** 1 missing-evidence signal;
+  - **C3:** 4 missing-evidence signals and 1 blocked measure;
+  - **C4:** 5 not-comparable comparisons (different periods) and 5 unmapped figures.
+
+  No signal carries a number under the approved rules.
+- **The Day 2 pack is released but not admitted.** Its new file types have no approved catalogue rules or data classes, so every detector ran at K = 1.
+- **C1 lexical rules are an implementation reading.** The cue, milestone and delay vocabularies, and year inference from the document's own date, are not owner decisions. They are shown as assumptions and flags on each signal.
+- **C2 recurring items without a stated term end** are unbounded, so the result is unquantified. Counting them to the horizon would extrapolate. This is a reading of D15-04 for owner confirmation.
+
+### Where AI was wrong, and what changed
+
+| # | AI error or weakness | Who caught it | Correction |
+|---|---|---|---|
+| E47 | C1 carried a subject from one meeting-summary line to the next. Summary lines are independent points, so two unresolved commitments were wrongly labelled with unrelated words | AI, from a read-only run on the real pack | Summary lines are kept separate, and subject carry-over is limited to formal prose. Reporting verbs are never treated as subjects. A test covers it |
+| E48 | The first C2 draft counted occurrences of a recurring item with no stated end up to the horizon end, which is extrapolation | AI, while writing the tests | Such an item has no upper bound, so the result is unquantified. A test covers it |
+| E49 | A new briefing test counted D-15 rows as the administrator, which bypasses RLS. It failed only in the full suite, where another test records a D-15 row for its own tenant | AI, from the full test run | The count is filtered by tenant |
+
+### Verification actually run (17 Nov 2026)
+
+- `ruff check .`: passed.
+- `pytest` against PostgreSQL 18: **280 passed**, including the five real-data tests. `pytest -m "not realdata"` (what CI runs): 275 passed.
+- **Isolated `docker compose up --build --wait` with a synthetic pack** (separate project and ports):
+  - `0006` applied and the self-check passed;
+  - health was ok;
+  - `/v1/briefing` without credentials returned 401;
+  - `veloxa signals --record` recorded a run;
+  - `policy.ranking_decision` held 0 rows.
+
+### Confirmations
+
+- D-15 version 1 was not recorded, and `policy.ranking_decision` was not modified.
+- Weighted ranking stays disabled and `top_three` stays null.
+- No probability output, guardrail or tie-break was added. No mapping was approved and no anchor was used.
+- `ARCHITECTURE.md` is unchanged. No private decision material, evidence or source content is in the repository.
