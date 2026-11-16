@@ -14,15 +14,18 @@ It also:
 
 The design is a production-first reference architecture, approved as baseline v1.0.1 in [`ARCHITECTURE.md`](ARCHITECTURE.md). The hackathon build is a configuration of it (§25), and is implemented incrementally.
 
-## Status (Mon 16 Nov 2026, Day 1)
+## Status (Mon 16 Nov 2026, Day 1; Day 2 development under way)
 
 | Area | State |
 |---|---|
 | Architecture | Approved baseline v1.0.1 |
 | **Evidence ledger foundation** | **Working and tested.** PostgreSQL 18 schemas and roles, append-only ledger, FORCE RLS with tenant isolation, startup self-checks, hash-chained audit, least-privilege process separation |
 | **Day 1 ingestion** | **Working and tested.** The D1 release pack is admitted as sealed batch 1 (15 files, 112 source records) with content hashes, exact locators and release-time admission. D2–D4 are refused before their release time without being read |
-| HTTP API | Health and time metadata only (`/health`, `/v1/meta/clock`, `/v1/meta/releases`) |
-| Asking questions, risk briefing, agents, gold tests | **Not implemented yet** (Days 2–4) |
+| **Temporal model** | **Working and tested.** Read basis and query modes (CURRENT, KNOWN_AT, RECORDED_BY, VALID_AT), a date meaning end of day in IST, a SQL predicate builder with bind parameters only, and leakage canaries at every batch boundary |
+| **Governed metrics and query tools** | **Working and tested.** Rebuildable projections over sealed batches; declared, versioned metric definitions compiled to parameterised SQL; eight declared query tools (person, headcount, finance totals, payroll total, board statements, timeline, conflicts, text search) |
+| **Ask Veloxa v0** (`POST /v1/ask`) | **Working and tested, facts-only mode.** Refusal pre-screen, temporal parse, bounded deterministic planner, authorised execution, evidence pack, deterministic verifier, grade and status, and recording of every answer with its citations and audit event |
+| HTTP API | `/health`, `/v1/meta/clock`, `/v1/meta/releases`, `POST /v1/ask` |
+| Risk briefing, agents, gold tests, model planner and composer | **Not implemented yet** (Days 2–4) |
 | Frontend | **Deferred.** Technology not chosen; the backend stays frontend-independent (`ARCHITECTURE.md` §19, §26.2) |
 
 ## Quick start (one command)
@@ -56,7 +59,25 @@ If a released pack fails admission, the API keeps serving the latest sealed batc
 ```bash
 curl http://127.0.0.1:8000/health             # {"status":"ok","selfcheck":"pass",...}
 curl http://127.0.0.1:8000/v1/meta/releases   # D1 admitted; later packs not yet released
+curl -X POST http://127.0.0.1:8000/v1/ask -H "content-type: application/json" \
+     -d '{"question": "What is our headcount by department?"}'
+curl -X POST http://127.0.0.1:8000/v1/ask -H "content-type: application/json" \
+     -d '{"question": "What is the ledger spend?", "as_known_at": "2026-11-16T12:00+05:30"}'
 ```
+
+`/v1/ask` returns the `Answer` contract (`ARCHITECTURE.md` §19.4):
+- `status`, with precedence refused > abstained > conflict > qualified > answered;
+- `interpretation` ("I read this as …"), including the time basis;
+- `grade` A–D with reasons, and `qualifiers`;
+- `claims`, each citing fact IDs and record IDs, with its verification result;
+- `facts`, `evidence` (excerpt, source path, locator, data class, batch) and `unknowns`;
+- `read_basis` with a banner, and an `audit_id`.
+
+A refusal is a normal answer with `status: "refused"` and a policy ID, reason and alternative. Typed errors are `not_authorised` (403) and `invalid_time` (422).
+
+**Facts-only mode.** v0 runs the architecture's degraded path (C16): the planner is deterministic, and each claim is a verbatim rendering of a fact or excerpt that a declared operation returned. Answers are therefore at most `qualified`. The model planner and composer will run behind the same stages; the verifier and grading stay the same.
+
+**Principal.** There is no identity provider in the hackathon profile. The API answers as the single person whose title in the latest sealed HR export equals `VELOXA_PRINCIPAL_TITLE` (default `CEO`). Emails are usable as evidence only for the people who were party to them.
 
 The database and API listen on `127.0.0.1` only. The Compose file contains local-development passwords for that localhost-only database. Override them in `.env` for anything else.
 
@@ -70,16 +91,16 @@ pip install --constraint requirements.lock -e ".[dev]"
 VELOXA_DATA_PATH=/path/to/packs docker compose up -d --wait db
 export VELOXA_TEST_ADMIN_DSN="postgresql://veloxa_admin:local-dev-admin@127.0.0.1:55432/veloxa"
 ruff check .
-pytest                       # everything (67 tests), including the real-data test if VELOXA_DATA_PATH is set
+pytest                       # everything (188 tests), including the real-data tests if VELOXA_DATA_PATH is set
 pytest -m "not realdata"     # what CI runs: synthetic data only
 ```
 
 - Use `127.0.0.1`, not `localhost`. On Windows, `localhost` tries IPv6 first and stalls.
 - Each test session creates and drops its own throwaway database.
 - Test data is **synthetic** (`tests/synthetic_pack.py`).
-- The real-data test (`tests/test_d1_realdata.py`) runs only locally. It checks counts, data classes and content hashes against the real Day 1 pack, never values.
+- The real-data tests (`tests/test_d1_realdata.py`) run only locally. They check counts, data classes, content hashes and answer structure against the real Day 1 pack, never values.
 
-The automated test set of at least 25 gold questions (H-15, H-16) does not exist yet. It depends on the answering pipeline (Days 2–4).
+The automated set of at least 25 gold questions (H-15, H-16) does not exist yet. The first gold questions are added with the Day 2 pack, after its release.
 
 ## Command line
 
@@ -100,14 +121,19 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
 
 | Path | Contents | Architecture |
 |---|---|---|
-| `src/veloxa/migrations/` | Bootstrap (role set, `btree_gist`, `pgvector`); `0001_foundation.sql` (schemas, tenant directory, admission batches, raw manifest, source records, audit chain, triggers, RLS, grants); `0002_hardening.sql` (record-to-manifest hash key, time-ordering checks, protected-pay policy). Applied migrations are never rewritten | §6, §8.2, §9.3, §9.4, §15, §21.3 |
+| `src/veloxa/migrations/` | Bootstrap (role set, `btree_gist`, `pgvector`); `0001_foundation.sql` (schemas, tenant directory, admission batches, raw manifest, source records, audit chain, triggers, RLS, grants); `0002_hardening.sql` (record-to-manifest hash key, time-ordering checks, protected-pay policy); `0003_projections.sql` (read models, projection role, protected-pay policies); `0004_answers.sql` (append-only answers and citations). Applied migrations are never rewritten | §6, §8.2, §9.3, §9.4, §15, §21.3 |
 | `src/veloxa/ingest/` | File-drop connector: manifest (SHA-256 per file), versioned parsers (xlsx rows, docx, pdf, eml, txt), single-transaction admission and sealing | §7, §8.2 |
 | `src/veloxa/releases.py`, `config/release_schedule.toml` | Release schedule and clock; admission decided before any file is opened | §8.2, §25.1 |
 | `config/source_catalogue.toml` | Classification of each pack file (kind, source system, data class). Unknown files are rejected | §6.3, §7.2 |
 | `src/veloxa/ledger.py` | Visibility at an explicit knowledge point K, the sealed watermark, mapping dates to K | §8.3, §8.4 T1 |
 | `src/veloxa/selfcheck.py` | Startup self-checks: role attributes, ownership, RLS/FORCE/restrictive policy, `security_invoker` views, server version | §9.3 |
-| `src/veloxa/api.py`, `src/veloxa/cli.py` | API (health and time metadata) and command line | §19 |
-| `tests/` | 67 tests: release rules and clock, parsers and manifest, database guarantees, concurrency, API, availability on failed admission, real-data check | §21.2 |
+| `src/veloxa/ingest/contracts.py` | Validation contracts for row exports (required columns, uniqueness, dates, integers, arithmetic identities); a violation refuses the whole pack | §7.2 |
+| `src/veloxa/temporal.py`, `tests/canary.py` | Read basis, query modes and the predicate builder; the leakage canary harness that every new surface registers with | §8 |
+| `src/veloxa/projector.py`, `metrics.py`, `config/metrics.toml` | Projections over sealed batches; governed metric definitions and their compiler | §6.2, §11 |
+| `src/veloxa/tools.py` | The declared query operations a planner may call, each returning facts with lineage and evidence | §13.1–13.2 |
+| `src/veloxa/ask/` | Ask Veloxa v0: refusal catalogue (`policy.py`), temporal parse, planner, verifier and pipeline | §13, §19.4 |
+| `src/veloxa/api.py`, `src/veloxa/cli.py` | API (health, time metadata, ask) and command line | §19 |
+| `tests/` | 188 tests: release rules and clock, parsers, contracts, database guarantees, concurrency, temporal modes and leakage canaries, metrics and tools, the ask pipeline and API, availability on failed admission, real-data checks | §21.2 |
 | `Dockerfile`, `docker-compose.yml`, `.github/workflows/ci.yml` | One-command run; CI with lint, tests and a fresh-clone Compose job | §25.1, H-30 |
 
 ## Guarantees enforced today (and tested)
@@ -130,13 +156,14 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
 ## Current limitations
 
 - Ingestion runs in the app container's start-up sequence, before the API starts. It does not yet use the durable workflow runtime (DBOS) or an isolated document-parsing sandbox (§7.2, §17).
-- There is no authentication on the API yet; it binds to `127.0.0.1` only and returns metadata, never record values.
-- Not built yet: recorded-time, valid-time and query-mode logic (KNOWN_AT, RECORDED_BY, VALID_AT); knowledge projections; entity resolution; ReBAC/ABAC adapters; and the historical ACL evaluator.
+- There is no authentication on the API yet. It binds to `127.0.0.1` only, and `/v1/ask` answers as the single configured principal.
+- Projections carry no recorded-time or valid-time columns yet, so metrics and tools accept CURRENT and KNOWN_AT only; RECORDED_BY and VALID_AT are refused rather than silently unfiltered.
+- `/v1/ask` runs in facts-only mode (deterministic planner, no model composition, no model entailment pass). The disclosure auditor is not built, so payroll aggregates are refused.
+- Not built yet: entity resolution, ReBAC/ABAC adapters, the historical ACL evaluator, the risk engine and the agents.
 - Release packs must be supplied as an extracted folder, not as the zip file.
 - Each pack is held in memory while it is hashed and parsed. This suits the hackathon pack sizes; large packs need streaming.
 - From a later pack's release time, `init` tries to admit it. Until that pack's parsers and catalogue rules are added (Day 2 onward), its admission is refused, so the API serves the earlier sealed batches and reports the pack as pending.
 - A database created before migration `0002` keeps its earlier `extracted_at` values (history is append-only). Recreate a local development database with `docker compose down --volumes` to get the corrected values.
-- The CI workflow has been validated locally (actionlint, plus the same commands). It runs on GitHub after the next push.
 
 ## Documentation
 

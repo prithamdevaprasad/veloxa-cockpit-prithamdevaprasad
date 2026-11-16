@@ -492,3 +492,71 @@ This log records the main tasks given to AI tools, what they produced, where the
 
 - No source truth decided; no owner rationale written; no frontend decision; `ARCHITECTURE.md` unchanged.
 - No D2–D4 material opened. No force-push and no history rewrite.
+
+---
+
+## Mon 16 Nov 2026 — Day 2 development milestone (work that does not depend on the Day 2 pack)
+
+### Task given to AI
+
+| # | Task (owner instruction) | AI output |
+|---|---|---|
+| 15 | Start the Day 2 development milestone from the approved architecture and roadmap, in order: D2 source analysis; parsers, classification, provenance and validation; the visibility abstraction, temporal predicate builder and leakage canaries; governed metrics and the declared query tools; `/api/ask` v0 with an offline renderer, evidence citations and a deterministic validator; risk rules v0 and the Today briefing contract; the T6a response; the first 12 gold questions (three refusals) and regression tests. Keep the K/R/V semantics and the D2 release boundary; no model-authored SQL; numbers only from governed metrics; protect HR, payroll and personal data; no source-truth or identity decisions; no frontend; no change to `ARCHITECTURE.md`; small verified milestones, committed and pushed regularly | Four milestones so far, each tested and pushed by AI under the owner's standing authorization for verified milestones: export validation contracts; temporal model and leakage canaries; projections, governed metrics and query tools; Ask Veloxa v0 |
+
+**Held until the Day 2 release (17 Nov 2026, 10:00 IST).** Everything that depends on Day 2 material waits for the release: catalogue rules and contracts for the new exports, the hiring tool, Day 2 metrics, the T6a response, gold questions over Day 2 facts, and Day 2 entries in `ASSUMPTIONS.md` and `TRANSCRIPT_NOTES.md`. The Day 2 pack was inspected privately for planning (step 1); those notes stay in the private register, and nothing from the pack is admitted, queryable or published before its release.
+
+**What was built**
+
+- **Validation contracts** for row exports (required columns, uniqueness, ISO dates, integers, arithmetic identities). A violation refuses the whole pack (fail closed) and is audited.
+- **Temporal model** (§8): read basis and the four query modes; a date means the end of that day in IST; a predicate builder that uses identifiers and bind parameters only and refuses a table lacking the time column a mode needs. A leakage canary harness checks every surface at every batch boundary.
+- **Projections and governed metrics** (§6.2, §11): rebuildable read models per sealed batch, written by a separate projection role; versioned metric definitions compiled to parameterised SQL; protected pay excluded in SQL and by RLS; the payroll total fails closed until the disclosure auditor exists.
+- **Declared query tools** (§13.1–13.2): person, headcount, finance totals, payroll total (withheld), board statements, timeline, conflicts (reports that no owner-reviewed conflict exists) and text search. Emails are usable only by their parties. Identities are never guessed.
+- **Ask Veloxa v0** (`POST /v1/ask`, §13, §19.4), in facts-only mode:
+  - refusal catalogue (§13.6) checked before any data is read; each refusal has a policy ID, reason and alternative;
+  - temporal parse from explicit cue wording or parameters, always echoed;
+  - bounded deterministic planner over the declared tools, with argument validation;
+  - evidence pack, then claims rendered verbatim from facts or excerpts;
+  - deterministic verifier: citations exist and are visible at K, numbers and names are contained in each claim's own evidence, a policy scan, and kind downgrade only;
+  - grades A–D and status precedence;
+  - every answer, its citations and an audit event recorded in one transaction (migration `0004`).
+
+### Points for owner attention (not decided by AI)
+
+- **Facts-only planner and composer.** v0 implements the architecture's degraded path (C16: deterministic, status at most `qualified`) behind the same stage contracts. The model planner and composer come later; no approved decision is reopened.
+- **Headcount is a declared operation.** It was added beside the roadmap's tools so that headcount questions use the governed metric. Hiring is added with Day 2.
+- **The refusal patterns are a policy judgement.** They err towards refusing: for example, any prediction of attrition, even at team level, is refused. The owner may want to review the wording in `src/veloxa/ask/policy.py`.
+- **Principal.** With no identity provider, the API answers as the one person whose HR title equals `VELOXA_PRINCIPAL_TITLE` (default `CEO`). If that does not resolve to exactly one person, the request is refused as `not_authorised`.
+- **Recording.** `runtime.answer` stores the question text, under tenant RLS and append-only. Audit details hold structure and counts only. The application role can now read the audit chain's `seq` and `hash` columns (needed to extend the chain), but not event details.
+
+### Where AI was wrong, and what changed
+
+| # | AI error or weakness | Who caught it | Correction |
+|---|---|---|---|
+| E39 | The first temporal check treated today's date as "in the future" and refused it | AI, from the test run | A date is refused only if that day has not begun; instants and dates are compared separately |
+| E40 | The raw manifest table carries a data class but had no protected-pay policy, so the app role could see manifest entries for payroll files | AI, through a generalised self-check covering every table with a data class | Policy added in `0003` before that migration was committed or applied to a persistent database |
+| E41 | **Process error.** For the metrics milestone, the public-safety scan reported "review needed". AI read only the last lines of the output, and the chained commit-and-push command did not stop on the finding, so the commit was pushed before the finding was reviewed | AI, immediately after the push | The finding was an invented year-2099 amount in a synthetic test fixture, confirmed absent from all challenge material, so nothing sensitive was published. The scan now exits non-zero on any finding and the commit runs only if the scan passes; the synthetic fixture is allowlisted explicitly |
+| E42 | The first refusal patterns refused legitimate work questions (a vendor payment ranking; a factual question about past exits) | AI, from a pattern check before the tests | Pay refusals now exclude vendor and ledger contexts; attrition is refused only with predictive wording, while past facts remain answerable |
+| E43 | A shell edit turned regex escapes in the refusal patterns into control characters | AI, on reading the file back | Lines rewritten from a file; a check for control characters returns none |
+| E44 | The "who is <name>" fallback was case-sensitive, so "Who is …" with an unknown name ran a text search instead of reporting the name as unresolved | AI, from the test run | Case-insensitive cue; a test covers it |
+
+### Verification actually run (16 Nov 2026)
+
+- `ruff check .`: passed.
+- `pytest` against PostgreSQL 18.7: **188 passed**, including the three real-data tests. `pytest -m "not realdata"` (what CI runs): 185 passed.
+- **Real Day 1 pack (structure only):**
+  - the headcount answer equals the governed metric;
+  - payroll-total and attrition questions are refused;
+  - a basis before admission abstains;
+  - every cited record is from batch 1, with no protected class;
+  - the configured principal sees no email it was not party to.
+- `docker compose up -d --build` on the development database:
+  - `init` applied `0004` and found D1 already admitted;
+  - health `ok`;
+  - `/v1/ask` returned qualified answers with citations, and refusals with policy IDs.
+- GitHub Actions passed for the three earlier milestone commits.
+
+### Confirmations
+
+- No source truth decided; no identity resolved; no owner conclusion or rationale written.
+- No frontend decision. `ARCHITECTURE.md` unchanged. No Day 2–4 material admitted, queried or published.
+- No force-push and no history rewrite. Commits authored by the owner's account, without an AI co-author trailer.
