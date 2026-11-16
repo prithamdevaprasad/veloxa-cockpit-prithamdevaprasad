@@ -84,6 +84,20 @@ def make_board_update(pack: Path, figures: list[tuple[str, str]], name: str = "B
     return path
 
 
+def make_document(pack: Path, name: str, lines: list[str]) -> Path:
+    """A SYNTHETIC formal document (PDF) with arbitrary text lines, in the documents folder of a pack."""
+    path = pack / "data_room" / "documents" / name
+    _pdf(path, lines)
+    return path
+
+
+def make_transcript(pack: Path, name: str, paragraphs: list[str]) -> Path:
+    """A SYNTHETIC meeting summary (DOCX), in the transcripts folder of a pack."""
+    path = pack / "transcripts" / name
+    _docx(path, paragraphs)
+    return path
+
+
 def make_d1(root: Path) -> Path:
     pack = root / D1
     _docx(pack / "brief" / "Synthetic_Brief.docx", ["Synthetic brief", "A fictional company for tests."])

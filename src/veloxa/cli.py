@@ -122,6 +122,32 @@ def cmd_status(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_signals(args: argparse.Namespace) -> int:
+    """Run the C1-C4 detectors at the current basis (application role) and print COUNTS only: no subject, excerpt
+    or value is printed, so the output is safe for logs. With --record, the run is recorded (migration 0006)."""
+    from collections import Counter
+
+    from .signals import registry
+    from .temporal import Mode, resolve_basis
+
+    schedule = load_schedule()
+    tenant_id = config.tenant_uuid(schedule.tenant_slug)
+    now = current_time()
+    with connect(_dsn("app")) as conn:
+        basis = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), Mode.CURRENT, None,
+                              schedule.time_zone, now)
+        result = registry.run(conn, basis, registry.context_for(basis, schedule.time_zone))
+        ref = registry.record(conn, result, now) if args.record and basis.batch_seq else None
+    print(f"read basis K = {basis.batch_seq}; assessment date {result.assessment_date.isoformat()}")
+    counts = Counter((s.criterion.value, s.signal_type.value, s.status.value) for s in result.signals)
+    for (crit, stype, status), n in sorted(counts.items()):
+        print(f"  {crit} {stype:<20} {status:<34} {n}")
+    print(f"  withheld notes: {len(result.withheld)}; output sha256 {result.output_sha256[:16]}")
+    if ref:
+        print(f"  recorded run {ref['run_id']}")
+    return 0
+
+
 def cmd_selfcheck(args: argparse.Namespace) -> int:
     with connect(_dsn(args.role)) as conn:
         failures = selfcheck.run(conn)
@@ -195,6 +221,9 @@ def main(argv: list[str] | None = None) -> int:
     p_ing.add_argument("--pack", default="released", help="pack id (e.g. D1) or 'released' (default)")
     p_ing.set_defaults(func=cmd_ingest)
     sub.add_parser("status", help="show admission status").set_defaults(func=cmd_status)
+    p_sig = sub.add_parser("signals", help="run the C1-C4 evidence detectors and print counts (application role)")
+    p_sig.add_argument("--record", action="store_true", help="record the run (append-only)")
+    p_sig.set_defaults(func=cmd_signals)
     p_prj = sub.add_parser("project", help="build projections for sealed batches")
     p_prj.add_argument("--rebuild", action="store_true", help="drop and rebuild all projections from the ledger")
     p_prj.set_defaults(func=cmd_project)

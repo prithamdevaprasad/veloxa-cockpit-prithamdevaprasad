@@ -9,7 +9,8 @@ A signal says the two sources differ. It never says which source is correct (tha
 §7.6, TRANSCRIPT_NOTES.md). The system value comes from a governed metric; the reported value is the record value
 exactly as written, used only if it is a plain whole number.
 
-Criteria C1, C2, C3 and C5 have no detector yet; the briefing lists them as signals needing data.
+Detectors for C1-C4 evidence (including this rule's output as signals) live in src/veloxa/signals; C5 is time
+context only (D15-01).
 """
 
 from __future__ import annotations
@@ -42,20 +43,39 @@ class FigureMapping:
     approved_by: str
     approved_on: date
     decision_record: str
+    version: int = 1          # a changed pairing is a new version; earlier signals keep the version they used
+
+
+def _raw_mappings(path: Path | None) -> list[dict]:
+    path = path or (config.config_dir() / "figure_mappings.toml")
+    return tomllib.loads(path.read_text(encoding="utf-8")).get("mapping", [])
+
+
+def load_proposed(path: Path | None = None) -> list[dict]:
+    """Entries marked status = "proposed": recorded for owner review, never active."""
+    return [m for m in _raw_mappings(path) if m.get("status") == "proposed"]
 
 
 def load_mappings(path: Path | None = None) -> list[FigureMapping]:
-    path = path or (config.config_dir() / "figure_mappings.toml")
-    raw = tomllib.loads(path.read_text(encoding="utf-8")).get("mapping", [])
+    """Active (owner-approved) mappings only. A "proposed" entry is inactive; any other entry must carry complete
+    approval fields or the whole file is refused (fail closed)."""
     out = []
-    for m in raw:
+    for m in _raw_mappings(path):
+        status = m.get("status", "approved")
+        if status == "proposed":
+            continue
+        if status != "approved":
+            raise ValueError(f"figure mapping {m!r}: status must be 'approved' or 'proposed'")
         for k in ("reported_figure", "metric", "unit", "approved_by", "decision_record"):
             if not str(m.get(k, "")).strip():
                 raise ValueError(f"figure mapping {m!r}: {k} is required (owner approval is mandatory)")
         if not isinstance(m.get("approved_on"), date):
             raise ValueError(f"figure mapping {m!r}: approved_on must be a date")
+        version = m.get("version", 1)
+        if not isinstance(version, int) or version < 1:
+            raise ValueError(f"figure mapping {m!r}: version must be an integer >= 1")
         out.append(FigureMapping(m["reported_figure"], m["metric"], m["unit"], m["approved_by"], m["approved_on"],
-                                 m["decision_record"]))
+                                 m["decision_record"], version))
     return out
 
 
@@ -135,13 +155,3 @@ def reported_vs_system(conn: psycopg.Connection, basis: ReadBasis, mappings: lis
                 ["the reported figure and the system snapshot may refer to different dates"],
             ))
     return risks, notes
-
-
-GAPS_WITHOUT_DETECTOR = [
-    "C1 (external-commitment exposure): no detector in this engine version; it needs dated commitment records, "
-    "open-scope facts and a throughput window",
-    "C2 (financial exposure): no detector in this engine version; it needs a record-backed amount at stake",
-    "C3 (operational-continuity exposure): no detector in this engine version; it needs allocation records "
-    "(tickets, rotas, requisitions)",
-    "C5 (time proximity): no detector in this engine version; it needs a dated commitment",
-]

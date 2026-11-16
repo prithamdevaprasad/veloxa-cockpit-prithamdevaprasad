@@ -173,3 +173,31 @@ def test_real_d1_briefing(db, ingest_conn, app_conn, tenant, schedule, data_root
     assert b["top_three"] is None and b["ranking_mode"] == "unweighted_partial_order"
     assert b["watchlist"] == [] and b["comparisons"] == []
     assert any("no owner-approved pairing" in n for n in b["signals_needing_data"])
+
+
+def test_real_d1_detectors(db, ingest_conn, app_conn, tenant, schedule, data_root):
+    """C1-C4 detectors over the real D1 pack. Counts, statuses and provenance only; no record value is compared or
+    printed. With no owner-approved mapping, C3 records or forward financial records, the honest output is: C1
+    observations with an unquantified measure, C2 missing, C3 missing/blocked, C4 not comparable or unmapped."""
+    from collections import Counter
+    from datetime import UTC, datetime
+
+    from veloxa import projector
+    from veloxa.db import connect
+    from veloxa.signals import registry
+    from veloxa.temporal import Mode, resolve_basis
+
+    now = datetime.now(UTC)
+    pipeline.admit_pack(ingest_conn, tenant, schedule, "D1", data_root, now)
+    with connect(db.dsn("projection")) as prj:
+        projector.build(prj, tenant)
+    basis = resolve_basis(tenant, ledger.sealed_releases(app_conn, tenant), Mode.CURRENT, None, "Asia/Kolkata", now)
+    result = registry.run(app_conn, basis, registry.context_for(basis, "Asia/Kolkata", [], []))
+    counts = Counter((s.criterion.value, s.status.value) for s in result.signals)
+    assert counts[("C2", "missing_evidence")] == 1 and counts[("C3", "blocked_owner_decision")] == 1
+    assert counts[("C3", "missing_evidence")] == 4
+    assert counts[("C4", "unmapped_requires_owner_approval")] == 5 and counts[("C4", "unquantified")] == 5
+    assert counts[("C1", "unquantified")] >= 1 and counts[("C1", "active")] >= 1
+    assert not any(s.value.numeric for s in result.signals)          # nothing is measurable under approved rules
+    assert all(s.lineage_batch_seq == 1 for s in result.signals if s.evidence)
+    assert not any(s.status.value == "active" and s.criterion.value in ("C2", "C3", "C4") for s in result.signals)

@@ -7,6 +7,11 @@ The briefing is an UNRANKED watchlist:
 - `top_three` is null: a ranked shortlist needs the owner's D-15 weights and guardrail tiers;
 - display order is risk_id ascending, a stable TECHNICAL order that carries no priority.
 
+The briefing also carries `evidence_signals`: the C1-C4 detector observations (src/veloxa/signals), grouped by
+criterion with each signal's status (active, provisional, unquantified, unmapped, blocked or missing evidence). They
+are NOT risks, scores or priorities, they are never sorted by importance, and a criterion with nothing measurable
+says so explicitly. The detector run is recorded separately (migration 0006) and referenced from the snapshot.
+
 Every briefing is recorded as an append-only snapshot (migration 0005) with its read basis, engine version, the
 D-15 policy state/version/hash in force and an input hash (§16.1 step 5). An identical request at the same basis
 and policy returns the same snapshot; a later policy produces a new snapshot and never rewrites an earlier one.
@@ -23,6 +28,8 @@ import psycopg
 
 from .. import audit, tools
 from ..db import tenant_tx
+from ..signals import registry
+from ..signals.contract import Status
 from ..temporal import ReadBasis
 from . import detectors, governance
 from .compare import partial_order
@@ -58,9 +65,64 @@ def _measure_json(m) -> dict:
     return out
 
 
+SIGNALS_EXPLANATION = (
+    "Evidence observations from the C1-C4 detectors. They are not risks, scores or priorities, and their order "
+    "(criterion, then signal type, then subject) is technical only. Each says how far its criterion can be "
+    "established today; no number is shown where the approved rules do not support one.")
+STATUS_LEGEND = {
+    Status.ACTIVE.value: "evidence-backed observation under approved rules",
+    Status.PROVISIONAL.value: "evidence-backed, but its definition or source quality awaits an owner decision",
+    Status.UNQUANTIFIED.value: "valid evidence; no number is supported under the approved rules",
+    Status.UNMAPPED.value: "needs an owner-approved mapping before any comparison",
+    Status.BLOCKED.value: "needs an owner decision before it can be measured",
+    Status.MISSING.value: "the evidence the measure needs is not admitted (never read as zero)",
+}
+
+
+def tenant_time_zone(conn: psycopg.Connection, tenant_id) -> str:
+    with tenant_tx(conn, tenant_id):
+        row = conn.execute("SELECT time_zone FROM directory.tenant WHERE tenant_id = %s", (tenant_id,)).fetchone()
+    return row["time_zone"]
+
+
+def run_detectors(conn: psycopg.Connection, basis: ReadBasis, mappings: list[detectors.FigureMapping],
+                  ) -> registry.RunResult:
+    return registry.run(conn, basis, registry.context_for(basis, tenant_time_zone(conn, basis.tenant_id),
+                                                          mappings))
+
+
+def _signals_section(conn: psycopg.Connection, basis: ReadBasis, result: registry.RunResult) -> dict:
+    ids = sorted({rid for s in result.signals for rid in s.record_ids})
+    records = {e.record_id: {"record_id": e.record_id, "kind": e.kind, "system": e.system,
+                             "data_class": e.data_class, "batch_seq": e.batch_seq, "source_path": e.source_path}
+               for e in tools._evidence(conn, basis, ids)}
+    by: dict[str, dict] = {}
+    for c in ("C1", "C2", "C3", "C4", "C5"):
+        sigs = [s for s in result.signals if s.criterion.value == c]
+        counts: dict[str, int] = {}
+        for s in sigs:
+            counts[s.status.value] = counts.get(s.status.value, 0) + 1
+        by[c] = {
+            "measurability": registry.MEASURABILITY[c],
+            "counts": counts,
+            "signals": [s.body() | {"signal_id": s.signal_id,
+                                    "evidence_records": [records[r] for r in s.record_ids if r in records]}
+                        for s in sigs],
+            "withheld": [w.reason for w in result.withheld if w.criterion.value == c],
+        }
+    return {"explanation": SIGNALS_EXPLANATION, "status_legend": STATUS_LEGEND,
+            "assessment_date": result.assessment_date.isoformat(),
+            "detectors": [{"detector": d.detector_id, "criterion": d.criterion.value,
+                           "approved_basis": d.approved_basis, "owner_decisions_pending": list(d.pending)}
+                          for d in registry.REGISTRY],
+            "config_sha256": result.config_sha256, "output_sha256": result.output_sha256, "by_criterion": by}
+
+
 def build(conn: psycopg.Connection, principal: tools.Principal, basis: ReadBasis,
-          mappings: list[detectors.FigureMapping], policy: governance.PolicyState) -> dict:
+          mappings: list[detectors.FigureMapping], policy: governance.PolicyState,
+          run_result: registry.RunResult | None = None) -> dict:
     """The briefing body for one read basis (not yet recorded)."""
+    run_result = run_result if run_result is not None else run_detectors(conn, basis, mappings)
     risks: list[Risk] = []
     notes: list[str] = []
     if basis.batch_seq == 0:
@@ -104,7 +166,8 @@ def build(conn: psycopg.Connection, principal: tools.Principal, basis: ReadBasis
                                 "Not dominated by any other risk on current evidence. This is not a priority tier."),
             },
         })
-    needing = list(dict.fromkeys(notes + detectors.GAPS_WITHOUT_DETECTOR
+    needing = list(dict.fromkeys(notes + [f"{c}: {registry.MEASURABILITY[c]}" for c in ("C1", "C2", "C3", "C4",
+                                                                                        "C5")]
                                  + [f"{r.risk_id}: insufficient (no criterion measured)" for r in insufficient]))
     return {
         "briefing_kind": "interim_unranked_watchlist",
@@ -122,6 +185,7 @@ def build(conn: psycopg.Connection, principal: tools.Principal, basis: ReadBasis
         "comparisons": [{"a": p.a, "b": p.b, "relation": p.relation, "explanation": p.explanation,
                          "criteria": p.criteria} for p in order["pairs"]],
         "signals_needing_data": needing,
+        "evidence_signals": _signals_section(conn, basis, run_result),
         "read_basis": {"batch_seq": basis.batch_seq, "mode": str(basis.mode), "as_of": basis.as_of,
                        "banner": basis.banner(), "notes": list(basis.notes)},
     }
@@ -135,14 +199,18 @@ def serve(conn: psycopg.Connection, tenant_id: uuid.UUID, principal: tools.Princ
           now: datetime, mappings: list[detectors.FigureMapping] | None = None) -> dict:
     """Build the briefing and record it as a snapshot (or return the identical existing snapshot)."""
     policy = governance.current_policy(conn, tenant_id)
-    body = build(conn, principal, basis, detectors.load_mappings() if mappings is None else mappings, policy)
+    mappings = detectors.load_mappings() if mappings is None else mappings
+    result = run_detectors(conn, basis, mappings)
+    run_ref = registry.record(conn, result, now) if basis.batch_seq > 0 else None
+    body = build(conn, principal, basis, mappings, policy, run_result=result)
     if body["ranking_mode"] != "unweighted_partial_order":  # cannot happen in this engine version; fail closed
         governance.weighted_ranking(policy, [])
     input_hash = _hash(body)
     key = (tenant_id, principal.principal_id, basis.batch_seq, str(basis.mode), basis.as_of or "",
            governance.ENGINE_VERSION, policy.version or 0, input_hash)
     snapshot_id = str(uuid.uuid4())
-    payload = {**body, "snapshot_id": snapshot_id, "created_at": now.isoformat(), "input_hash": input_hash}
+    payload = {**body, "snapshot_id": snapshot_id, "created_at": now.isoformat(), "input_hash": input_hash,
+               "detector_run": run_ref}
     with tenant_tx(conn, tenant_id, principal.principal_id, basis.batch_seq):
         inserted = conn.execute(
             "INSERT INTO runtime.briefing_snapshot (tenant_id, snapshot_id, created_at, principal_id, batch_seq, mode,"
