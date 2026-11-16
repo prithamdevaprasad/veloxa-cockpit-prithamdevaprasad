@@ -709,6 +709,7 @@ Build a shared detector contract and registry, and the C1–C4 evidence pipeline
 | E47 | C1 carried a subject from one meeting-summary line to the next. Summary lines are independent points, so two unresolved commitments were wrongly labelled with unrelated words | AI, from a read-only run on the real pack | Summary lines are kept separate, and subject carry-over is limited to formal prose. Reporting verbs are never treated as subjects. A test covers it |
 | E48 | The first C2 draft counted occurrences of a recurring item with no stated end up to the horizon end, which is extrapolation | AI, while writing the tests | Such an item has no upper bound, so the result is unquantified. A test covers it |
 | E49 | A new briefing test counted D-15 rows as the administrator, which bypasses RLS. It failed only in the full suite, where another test records a D-15 row for its own tenant | AI, from the full test run | The count is filtered by tenant |
+| E50 | The first sprint commit chained the safety scan through `tail`, so the `&&` gate tested `tail`'s exit code rather than the scan's. The scan was CLEAN, so nothing unsafe was committed, but the gate could not have blocked a failure | AI, reviewing its own command after the commit | Later commits and the push run the scan unpiped and read every CHECK line |
 
 ### Verification actually run (17 Nov 2026)
 
