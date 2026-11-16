@@ -33,6 +33,9 @@ These are the only owner statements this file relies on. They are quoted from th
 | 16 Nov 2026 | "I will personally decide the frontend direction in a later phase." | Frontend deferred (Part C) |
 | 16 Nov 2026 | Historical ACL instruction: "Current interviewer authorization is always mandatory. Historical permissions cannot bypass current revocation." "Historical eligibility does not prove the employee actually read something." "Missing history returns `unknown` and fails closed." Preserve `KB ∩ AZ ∩ POL` | DEC-06, DEC-13 (`ARCHITECTURE.md` v1.0.1) |
 
+| 16 Nov 2026 | "Backend stack: Approve Python 3.12, FastAPI, psycopg 3 and plain-SQL migrations as the production implementation technology direction." | DEC-23 |
+| 16 Nov 2026 | "API availability: If a later release pack fails ingestion, keep the API running using the latest successfully sealed batch. Never expose unsealed data." | DEC-24 |
+| 16 Nov 2026 | "A-024: Approve the D1 data classification mapping, with strict fail-closed handling." "A-025: Approve the corrected version using actual extraction timestamps." "A-026: Approve that D1 templates are not evidence." | `ASSUMPTIONS.md` |
 ---
 
 ## Part B. Approved decisions
@@ -420,6 +423,39 @@ These are the only owner statements this file relies on. They are quoted from th
 - **Documented rationale:** `email.md` line 55 requires ≥ 25 test questions run with one command. The owner reserved the frontend decision.
 - **Owner rationale:** Owner to write.
 
+
+### Implementation and operations
+
+#### DEC-23 · Backend implementation stack
+- **Selected:** Python 3.12, FastAPI, psycopg 3 and plain-SQL migrations (applied once, in order, by a small in-house runner; an applied migration is never rewritten).
+- **Alternatives:**
+  - another language runtime (e.g. TypeScript or Go);
+  - an ORM with generated migrations;
+  - a migration framework.
+- **Trade-offs:**
+  - Plain SQL keeps PostgreSQL 18 features (RLS policies, triggers, exclusion constraints, `security_invoker` views) explicit and reviewable, at the cost of writing more SQL by hand.
+  - Python matches the contract sketches in `ARCHITECTURE.md` §5.3 and the Python SDKs of the integration candidates.
+- **Status:** **Approved by the owner, 16 Nov 2026**, as the production implementation technology direction (Part A). Previously recorded in Part C as pending confirmation.
+- **Documented rationale:** consistent with the approved architecture's Python contract sketches; the Day 1 foundation is built and tested on this stack.
+- **Owner rationale:** Owner to write.
+
+#### DEC-24 · Availability when a later release pack fails admission
+- **Selected:**
+  - If a later release pack fails admission, the API keeps running on the latest successfully sealed batch.
+  - The failed pack is reported as `pending_admission` and health as `degraded`.
+  - The failure is audited (pack and reason code only).
+  - A failed admission commits nothing, and **unsealed data is never exposed**.
+  - The one-shot `init` step still fails, so the API does not start, if the data folder is missing, a migration fails, the security self-check fails, or **no sealed baseline batch exists** (e.g. a fresh database whose first pack failed admission). An existing database with D1 sealed keeps serving D1 when a later pack fails.
+- **Alternatives:**
+  - stop the API until every released pack is admitted (the earlier fail-closed behaviour);
+  - admit the parts of a pack that parse.
+- **Trade-offs:**
+  - The cockpit stays available, but its answers lag a released pack until the pack is admitted; the pending state is reported rather than hidden.
+  - Partial admission was not taken: it would break the rule that a batch is admitted and sealed whole.
+- **Status:** **Approved by the owner, 16 Nov 2026** (Part A).
+- **Documented rationale:** consistent with `ARCHITECTURE.md` §8.2 (only sealed batches are visible) and §22.1 (a failed batch does not seal, and answers carry "data as of" qualifiers).
+- **Owner rationale:** Owner to write.
+
 ---
 
 ## Part C. Deferred decisions (not approved)
@@ -441,7 +477,8 @@ These are **not** decided. Where `ARCHITECTURE.md` §26 states a default, the de
 | D-10b | Maximum lookback for `ELIGIBILITY_DURING_WINDOW` | Value not set. Default window: from the represented person's earliest identity link to min(t_h, knowledge cutoff) | Owner confirmation; privacy review | |
 | D-08a | Per-knowledge-point lexical index vs accepting corpus-wide ranking statistics | Default: accept and document | Owner confirmation | |
 | D-06a | Erasure design (crypto-shredding + tombstones) | Direction approved; design open | Design and legal review | |
-| — | Frontend technology, visual system, layout; streaming transport | Undecided ("I will personally decide the frontend direction in a later phase") | Owner | |
+| — | Frontend technology, visual system, layout; streaming transport | Undecided ("I will personally decide the frontend direction in a later phase"). Not needed for the Day 1 deliverables; a recommendation is to be prepared before the answering and briefing work on Day 2 | Owner | |
+| — | Backend implementation stack | **Closed: approved by the owner on 16 Nov 2026, see DEC-23.** Previously: Python 3.12, FastAPI, psycopg 3, plain-SQL migrations applied by a small in-house runner. Chosen to match the Python contract sketches in `ARCHITECTURE.md` §5.3 and the Python SDKs of the integration candidates. Not recorded as an approved decision | Owner confirmation | |
 | — | Unselected implementation options: trace store, gateway proxy, outbox transport, document parser, connector libraries, graph projection, audit anchoring, model tiering, cache timing | See §26.2 | Owner / benchmarks | |
 
 **Pending owner actions arising from the documentation** (process items, not architecture):
@@ -479,3 +516,6 @@ These are **not** decided. Where `ARCHITECTURE.md` §26 states a default, the de
 | 16 Nov 2026 | Created from `ARCHITECTURE.md` v1.0.1 (§26, §27) and the documented owner statements in Part A. Every owner-rationale field is left for the owner | AI (Claude Code), for owner review |
 | 16 Nov 2026 | **Correction pass:** <br>• DEC-06 notes the `historical_at`/`evaluated_at` split and the resource-availability bound; <br>• DEC-18's rationale no longer states a result derived from D3 material; <br>• the D-14a note no longer quotes a D2 figure. <br>No decision added, approved or changed in substance; D-22 still unselected | AI (Claude Code), for owner review |
 | 16 Nov 2026 | **Day 1 public edition:** references to later-pack entries removed (DEC-16, DEC-18, D-14a), and the DEC-16 evidence citation made opaque. No decision changed | AI (Claude Code), for owner review |
+| 16 Nov 2026 | Part C: the backend implementation stack recorded as in use, pending owner confirmation; the frontend row notes it is not needed for Day 1. No decision approved or changed | AI (Claude Code), for owner review |
+| 16 Nov 2026 | Owner approvals recorded: DEC-23 (backend stack) and DEC-24 (availability) added to Part B, verbatim statements added to Part A, and the Part C backend row closed. Owner rationale left for the owner. No frontend decision made | Owner decision, recorded by AI (Claude Code) |
+| 16 Nov 2026 | DEC-24 refined on the owner's instruction: `init` requires at least one sealed baseline batch before the API may start | Owner decision, recorded by AI (Claude Code) |

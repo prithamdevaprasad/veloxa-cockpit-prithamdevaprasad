@@ -28,8 +28,8 @@ Section 0 separately records **ground rules and observed facts**: instructions, 
 
 | Pack | Entries currently in this file |
 |---|---|
-| — | GR-01, A-021 |
-| D1 | GR-02, GR-03, GR-04, GR-05; A-002 to A-006, A-008 to A-012, A-016, A-017 |
+| — | GR-01, A-021, A-025 |
+| D1 | GR-02, GR-03, GR-04, GR-05; A-002 to A-006, A-008 to A-012, A-016, A-017, A-024, A-026 |
 
 ---
 
@@ -264,6 +264,53 @@ Reclassified as **GR-03** on 16 Nov 2026: it is a ground rule stated in the emai
 
 A-023 is held for later release.
 
+## 4a. Ingestion (Day 1 foundation)
+
+### A-024 · Data class assigned to each D1 source
+| | |
+|---|---|
+| Date | 16 Nov 2026 |
+| Assumption | On admission, each source is given the most restrictive §6.3 data class that fits its content (`config/source_catalogue.toml`): <br>• payroll-register rows → `sensitive_personal`; <br>• HR-export rows → `personal`; <br>• ledger rows → `confidential`, except the ledger's payroll line → `payroll_aggregate` (§15.3); <br>• emails → `private_comms`; <br>• board updates and call summaries → `confidential`; <br>• the brief and README → `internal`. <br>The class drives access control: individual payroll rows are unreadable by the application role (§9.4) |
+| Source | §6.3, §9.4, §15.3; A-017 ([EV-048 · T2 · D1]); [EV-007 · README · D1] (systems supplied) |
+| Pack | D1 |
+| Confidence (proposed) | Medium. This is a classification policy, not a fact about the data. Erring restrictive is deliberate |
+| Would change my mind | A tenant data-classification policy, or the owner reclassifying a source |
+| Status | **Approved by the owner (16 Nov 2026), with strict fail-closed handling:** any file without an explicit catalogue rule is rejected and never read, and a new source needs a reviewed rule before it can be admitted |
+
+### A-025 · File-drop extraction time is the pack's release time
+| | |
+|---|---|
+| Date | 16 Nov 2026 |
+| Assumption | For the file-drop connector, each record's extraction time (E, §8.1) is its pack's release time. That keeps E ≤ admission, as §8.1 requires. Dates the files themselves state (export dates, document dates) are source-recorded time (R), handled with the temporal model, and are not used as E |
+| Source | §8.1, §8.2; GR-01 |
+| Pack | — |
+| Confidence (proposed) | Medium–High |
+| Would change my mind | A connector design that records the actual receipt time of each file |
+| Status | Superseded by A-025 r2 (the r1 text above is kept as history) |
+
+**A-025 r2 (16 Nov 2026, after owner review).** *Extraction time is the actual time the connector read the file.*
+
+| | |
+|---|---|
+| Assumption | Each record's extraction time E (§8.1) is the wall-clock time at which the connector read that file's bytes: the bytes it hashed and parsed. Four times are kept distinct: <br>• `release_at`: the pack's scheduled release, used as the batch's knowledge time; <br>• `extracted_at`: when each file was actually read; <br>• `admitted_at`: when the admission transaction started; <br>• `sealed_at`: when the batch was sealed. <br>The database enforces `release_at ≤ extracted_at ≤ admitted_at ≤ sealed_at`. Dates the files themselves state (export or document dates) remain source-recorded time R, not E |
+| Reason for revision | r1 set E to the release time. That conflated knowledge time with extraction and could not record when the bytes were actually read (owner review, 16 Nov 2026) |
+| Source | §8.1, §8.2; GR-01 |
+| Pack | — |
+| Confidence (proposed) | High |
+| Would change my mind | A connector that receives files before their release time (not possible here: admission and reading are refused before release) |
+| Status | **Approved by the owner (16 Nov 2026)** (the corrected version using actual extraction timestamps) |
+
+### A-026 · Data-room templates are not evidence
+| | |
+|---|---|
+| Date | 16 Nov 2026 |
+| Assumption | The data room's template files are worksheets provided for the candidate's own use. They are hashed and registered in the raw manifest, but no source records are extracted from them, so they can never be cited as evidence |
+| Source | [EV-007 · README · D1] (the folder listing describes templates as worksheets for the candidate's own use) |
+| Pack | D1 |
+| Confidence (proposed) | High |
+| Would change my mind | A template that turns out to contain company data |
+| Status | **Approved by the owner (16 Nov 2026)** |
+
 ## 5. Assumptions considered and deliberately not made
 
 These are open conflict questions for the owner and are **not** assumed:
@@ -288,3 +335,6 @@ None have been recorded yet. Fictional personal details for the 14 agents are wr
 | Date | Entry | Change | By |
 |---|---|---|---|
 | 16 Nov 2026 | All | Day 1 public edition prepared from the owner's private working file: <br>• D1, email and architecture entries only; <br>• opaque evidence references; <br>• no quotations, names, identifiers or figures. <br>No assumption approved | AI (Claude Code), for owner review |
+| 16 Nov 2026 | A-024 to A-026 | Added with the Day 1 ingestion foundation: data class per source, file-drop extraction time, templates not evidence. Drafts; none approved | AI (Claude Code), for owner review |
+| 16 Nov 2026 | A-025 r2 | Revised after owner review: extraction time is the actual read time of each file, distinct from release, admission and sealing times. Still a draft | AI (Claude Code), for owner review |
+| 16 Nov 2026 | A-024, A-025 r2, A-026 | Approved by the owner: A-024 with strict fail-closed handling; A-025 in its corrected r2 form (actual extraction timestamps); A-026 as written | Owner decision, recorded by AI (Claude Code) |
