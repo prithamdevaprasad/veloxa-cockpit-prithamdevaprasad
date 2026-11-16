@@ -43,6 +43,16 @@ def visible_record_ids(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int) -
     return [r["record_id"] for r in rows]
 
 
+def sealed_releases(conn: psycopg.Connection, tenant_id: uuid.UUID) -> list[tuple[int, datetime]]:
+    """[(batch_seq, release_at)] for sealed batches: the input to temporal.resolve_basis."""
+    with tenant_tx(conn, tenant_id):
+        rows = conn.execute(
+            "SELECT batch_seq, release_at FROM ledger.admission_batch WHERE tenant_id = %s AND sealed ORDER BY 1",
+            (tenant_id,),
+        ).fetchall()
+    return [(r["batch_seq"], r["release_at"]) for r in rows]
+
+
 def batches(conn: psycopg.Connection, tenant_id: uuid.UUID) -> list[dict]:
     with tenant_tx(conn, tenant_id):
         return conn.execute(
