@@ -1,0 +1,80 @@
+# One-command local run (ARCHITECTURE.md §25.1):
+#   VELOXA_DATA_PATH=/path/to/Veloxa_Hackathon_Release_Packs docker compose up --build
+#
+# Least privilege:
+#   init : one-shot. Holds the administrator, migrator and ingest credentials and the read-only data mount.
+#          Runs migrations and admits released packs, then exits.
+#   api  : long-running. Holds ONLY the application-role password; no data mount. Starts after init succeeds.
+#
+# Passwords below are local-development defaults for a database bound to 127.0.0.1 only.
+# Override them in a local .env file (never committed) for anything beyond local use.
+
+name: veloxa-cockpit
+
+x-db: &db-location
+  VELOXA_DB_HOST: db
+  VELOXA_DB_PORT: "5432"
+  VELOXA_DB_NAME: veloxa
+
+services:
+  db:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: veloxa_admin
+      POSTGRES_PASSWORD: ${VELOXA_DB_ADMIN_PASSWORD:-local-dev-admin}
+      POSTGRES_DB: veloxa
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - "127.0.0.1:${VELOXA_DB_PUBLISH_PORT:-55432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U veloxa_admin -d veloxa"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  init:
+    build: .
+    image: veloxa-cockpit:local
+    command: ["veloxa", "init"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *db-location
+      VELOXA_DB_ADMIN_USER: veloxa_admin
+      VELOXA_DB_ADMIN_PASSWORD: ${VELOXA_DB_ADMIN_PASSWORD:-local-dev-admin}
+      VELOXA_MIGRATOR_PASSWORD: ${VELOXA_MIGRATOR_PASSWORD:-local-dev-migrator}
+      VELOXA_INGEST_PASSWORD: ${VELOXA_INGEST_PASSWORD:-local-dev-ingest}
+      VELOXA_APP_PASSWORD: ${VELOXA_APP_PASSWORD:-local-dev-app}  # needed only to set the role's password
+      VELOXA_DATA_PATH: /data
+    volumes:
+      - type: bind
+        source: ${VELOXA_DATA_PATH:?Set VELOXA_DATA_PATH to the extracted release-pack folder (it contains Day1_Mon_16Nov)}
+        target: /data
+        read_only: true
+
+  api:
+    image: veloxa-cockpit:local
+    command: ["veloxa", "serve"]
+    depends_on:
+      db:
+        condition: service_healthy
+      init:
+        condition: service_completed_successfully
+    environment:
+      <<: *db-location
+      VELOXA_APP_PASSWORD: ${VELOXA_APP_PASSWORD:-local-dev-app}
+    ports:
+      - "127.0.0.1:${VELOXA_API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  pgdata:

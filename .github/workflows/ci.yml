@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: veloxa_admin
+          POSTGRES_PASSWORD: ci-admin
+          POSTGRES_DB: veloxa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U veloxa_admin -d veloxa"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      VELOXA_TEST_ADMIN_DSN: postgresql://veloxa_admin:ci-admin@localhost:5432/veloxa
+      VELOXA_MIGRATOR_PASSWORD: ci-migrator
+      VELOXA_APP_PASSWORD: ci-app
+      VELOXA_INGEST_PASSWORD: ci-ingest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install --constraint requirements.lock -e ".[dev]"
+      - name: Lint
+        run: ruff check .
+      - name: Tests (synthetic data only; real challenge data never exists in CI)
+        run: pytest -m "not realdata"
+
+  fresh-clone-compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Generate a synthetic release pack (no challenge data)
+        run: |
+          pip install --constraint requirements.lock openpyxl python-docx
+          python tests/synthetic_pack.py "$RUNNER_TEMP/packs"
+      - name: One-command start (as documented in README)
+        env:
+          VELOXA_DATA_PATH: ${{ runner.temp }}/packs
+        run: docker compose up --build --detach --wait --wait-timeout 300
+      - name: Check health and Day 1 admission
+        run: |
+          curl -fsS http://127.0.0.1:8000/health
+          curl -fsS http://127.0.0.1:8000/v1/meta/releases | python -c "import json,sys; p={x['pack']:x for x in json.load(sys.stdin)['packs']}; assert p['D1']['admitted'], p; print('D1 admitted:', p['D1']['record_count'], 'records')"
+      - name: Logs on failure
+        if: failure()
+        env:
+          VELOXA_DATA_PATH: ${{ runner.temp }}/packs
+        run: docker compose logs --no-color
+      - name: Stop
+        if: always()
+        env:
+          VELOXA_DATA_PATH: ${{ runner.temp }}/packs
+        run: docker compose down --volumes
