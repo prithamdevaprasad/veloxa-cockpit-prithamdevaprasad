@@ -11,7 +11,7 @@ Every tool:
   requesting principal is one of its parties (§10, §13.6). Messages between other people are excluded
   (the policy for executives reading them, D-13b, is deferred and therefore not granted).
 
-Hiring (the eighth tool) depends on the D2 release pack and is added with D2 admission.
+Hiring depends on the D2 release pack and is added with D2 admission.
 """
 
 from __future__ import annotations
@@ -113,7 +113,8 @@ def person(conn: psycopg.Connection, basis: ReadBasis, principal: Principal, nam
         return ToolResult("person", "no_data", gaps=["no HR export admitted at this knowledge point"])
     key = name.strip().lower()
     exact = [p for p in people if p["full_name"].lower() == key or p["emp_id"].lower() == key]
-    if not exact:
+    by_first_name = not exact
+    if by_first_name:
         exact = [p for p in people if p["full_name"].split()[0].lower() == key]
     if not exact:
         return ToolResult("person", "unresolved", reason=f"no person in the HR export matches {name!r} exactly; "
@@ -125,21 +126,27 @@ def person(conn: psycopg.Connection, basis: ReadBasis, principal: Principal, nam
     by_id = {x["emp_id"]: x for x in people}
     rid = [p["source_record_id"]]
     q = ["as at extraction of the HR export"]
+    if by_first_name:  # a unique first-name match is medium-confidence identity resolution (§13.5 grade B)
+        q.append(f"identity assumed: {name.strip()!r} matched only {p['full_name']}'s first name")
     facts = [
         Fact("person.title", f"{p['full_name']}: {p['title']}, {p['department']}", p["title"], None, "record", rid,
              qualifiers=q),
-        Fact("person.join_date", f"Joined on {p['join_date'].isoformat()}", p["join_date"], None, "record", rid),
-        Fact("person.status", f"Status: {p['status']}", p["status"], None, "record", rid, qualifiers=q),
+        Fact("person.join_date", f"{p['full_name']} joined on {p['join_date'].isoformat()}", p["join_date"], None,
+             "record", rid, qualifiers=q[1:]),
+        Fact("person.status", f"{p['full_name']}'s recorded status: {p['status']}", p["status"], None, "record", rid,
+             qualifiers=q),
     ]
     manager = by_id.get(p["manager_emp_id"]) if p["manager_emp_id"] else None
     if manager:
-        facts.append(Fact("person.manager", f"Reports to {manager['full_name']} ({manager['title']})",
+        facts.append(Fact("person.manager", f"{p['full_name']} reports to {manager['full_name']} ({manager['title']})",
                           manager["full_name"], None, "record", rid + [manager["source_record_id"]], qualifiers=q))
     if p["exit_date"]:
-        facts.append(Fact("person.exit_date", f"Recorded exit date: {p['exit_date'].isoformat()}", p["exit_date"],
+        facts.append(Fact("person.exit_date", f"{p['full_name']}'s recorded exit date: {p['exit_date'].isoformat()}",
+                          p["exit_date"],
                           None, "record", rid, qualifiers=q))
     if p["location"]:
-        facts.append(Fact("person.location", f"Location: {p['location']}", p["location"], None, "record", rid,
+        facts.append(Fact("person.location", f"{p['full_name']}'s location: {p['location']}", p["location"], None,
+                          "record", rid,
                           qualifiers=q))
     ids = sorted({i for f in facts for i in f.inputs})
     return ToolResult("person", "ok", facts, _evidence(conn, basis, ids))
@@ -168,6 +175,26 @@ def finance_totals(conn: psycopg.Connection, basis: ReadBasis, principal: Princi
     ids = sorted({i for f in facts for i in f.inputs})
     return ToolResult("finance_totals", "ok", facts, _evidence(conn, basis, ids),
                       gaps=["the ledger extract covers selected cost centres only"])
+
+
+def headcount(conn: psycopg.Connection, basis: ReadBasis, principal: Principal, by: str | None = None) -> ToolResult:
+    """People in the HR export (governed metric headcount@1), in total and by recorded status, optionally also by
+    department. Status is shown as recorded; nothing is inferred about who is active."""
+    defs = metrics.load_definitions()
+    dims = ["status"] + ([by] if by == "department" else [])
+    try:
+        total = metrics.run(conn, defs["headcount"], basis)
+        split = metrics.run(conn, defs["headcount"], basis, dims)
+    except metrics.MetricError as e:
+        return ToolResult("headcount", "unsupported", reason=str(e))
+    if not total.rows:
+        return ToolResult("headcount", "no_data", gaps=["no HR export admitted at this knowledge point"])
+    facts = _metric_facts(total, lambda r: f"People in the HR export: {r.value}")
+    for i, f in enumerate(_metric_facts(split, lambda r: "People in the HR export with " + ", ".join(
+            f"{k} {v}" for k, v in r.dims.items()) + f": {r.value}")):
+        f.fact_id = f"headcount.split:{i}"
+        facts.append(f)
+    return ToolResult("headcount", "ok", facts, _evidence(conn, basis, sorted({i for f in facts for i in f.inputs})))
 
 
 def payroll_total(conn: psycopg.Connection, basis: ReadBasis, principal: Principal, **_) -> ToolResult:
@@ -262,6 +289,7 @@ def conflicts(conn: psycopg.Connection, basis: ReadBasis, principal: Principal, 
 
 TOOLS = {
     "person": person,
+    "headcount": headcount,
     "finance_totals": finance_totals,
     "payroll_total": payroll_total,
     "board_statements": board_statements,

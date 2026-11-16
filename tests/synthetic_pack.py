@@ -19,7 +19,8 @@ EXPECTED_BY_CLASS = {
 }
 
 
-HR_COLUMNS = ["Emp ID", "Full Name", "Department", "Title", "Manager ID", "Join Date", "Status", "Exit Date"]
+HR_COLUMNS = ["Emp ID", "Full Name", "Department", "Title", "Manager ID", "Join Date", "Status", "Exit Date",
+              "Work Email"]
 PAYROLL_COLUMNS = ["Emp ID", "Month", "Days in Month", "Days Payable", "Gross (Rs.)", "Deductions (Rs.)", "Net (Rs.)",
                    "Processed By"]
 GL_COLUMNS = ["Txn Date", "Voucher", "Vendor / Payee", "Cost Centre", "Amount (Rs.)", "Narration"]
@@ -57,8 +58,8 @@ def make_d1(root: Path) -> Path:
     (pack / "data_room" / "README.txt").write_text("Synthetic data room.\n\nhr/ test folder\n", encoding="utf-8")
     _xlsx(pack / "data_room" / "templates" / "Blank_Template.xlsx", "Template", ["A", "B", "C"], [])
     _xlsx(pack / "data_room" / "hr" / "Employee_Master.xlsx", "Synthetic HR export", HR_COLUMNS,
-          [["T001", "Person Alpha", "Testing", "Tester", None, "2099-01-01", "Active", None],
-           ["T002", "Person Beta", "Testing", "Tester", "T001", "2099-01-02", "Active", None]])
+          [["T001", "Person Alpha", "Testing", "Lead Tester", None, "2099-01-01", "Active", None, "alpha@example.test"],
+           ["T002", "Person Beta", "Testing", "Tester", "T001", "2099-01-02", "Active", None, "beta@example.test"]])
     _xlsx(pack / "data_room" / "finance" / "Payroll_Register_Synthetic.xlsx", "Synthetic payroll", PAYROLL_COLUMNS,
           [["T001", "Jan-2099", 31, 31, 1000, 100, 900, "XX"], ["T002", "Jan-2099", 31, 31, 2000, 200, 1800, "XX"]])
     _xlsx(pack / "data_room" / "finance" / "GL_Export_Synthetic.xlsx", "Synthetic ledger", GL_COLUMNS,

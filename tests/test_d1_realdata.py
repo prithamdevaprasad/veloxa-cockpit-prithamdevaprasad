@@ -113,3 +113,40 @@ def test_real_d1_projections_metrics_and_tools(db, ingest_conn, app_conn, tenant
     found = tools.text_search(app_conn, basis, ceo, "payroll OR payslip", limit=50)
     assert not any(e.kind == "email" for e in found.evidence)  # the CEO is not a party to the D1 emails
     assert tools.payroll_total(app_conn, basis, ceo).status == "withheld"
+
+
+def test_real_d1_ask_v0(db, ingest_conn, app_conn, tenant, schedule, data_root):
+    """/v1/ask pipeline over the real D1 pack. Structure only: statuses, grades, policies and consistency with the
+    governed metric; no record value is printed or compared with a literal."""
+    from datetime import UTC, datetime
+
+    from veloxa import metrics, projector, tools
+    from veloxa.ask import pipeline as ask
+    from veloxa.db import connect
+    from veloxa.temporal import Mode, resolve_basis
+
+    now = datetime.now(UTC)
+    pipeline.admit_pack(ingest_conn, tenant, schedule, "D1", data_root, now)
+    with connect(db.dsn("projection")) as prj:
+        projector.build(prj, tenant)
+    basis = resolve_basis(tenant, ledger.sealed_releases(app_conn, tenant), Mode.CURRENT, None, "Asia/Kolkata", now)
+    ceo = tools.resolve_principal_by_title(app_conn, basis, "CEO")
+
+    def q(text, **kw):
+        return ask.answer(app_conn, tenant, "Asia/Kolkata", ceo, text, now, **kw)
+
+    head = q("What is our headcount?")
+    metric = metrics.run(app_conn, metrics.load_definitions()["headcount"], basis).rows[0].value
+    fact = next(f for f in head["facts"] if f["fact_id"] == head["claims"][0]["evidence"][0])
+    assert head["status"] == "qualified" and head["grade"]["value"] == "A" and fact["value"] == metric
+    assert q("What is the total payroll?")["refusal"]["policy"] == "POL-PAY-02"
+    assert q("Rank the team by attrition risk")["refusal"]["policy"] == "POL-PEOPLE-01"
+    assert q("What did we know on 15 Nov 2026?", as_known_at="2026-11-15")["status"] == "abstained"
+    for text in ("What is the ledger spend by cost centre?", "What did the board updates report?",
+                 "What happened recently?", "Who does the CEO report to?"):
+        a = q(text)
+        assert a["status"] in ("qualified", "abstained")
+        assert all(c["verification"] in ("supported", "downgraded") for c in a["claims"])
+        assert all(e["batch_seq"] == 1 and e["data_class"] not in ("sensitive_personal", "payroll_aggregate")
+                   for e in a["evidence"])
+        assert not any(e["kind"] == "email" for e in a["evidence"])  # the CEO is not a party to the D1 emails

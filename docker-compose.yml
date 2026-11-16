@@ -69,6 +69,8 @@ services:
     environment:
       <<: *db-location
       VELOXA_APP_PASSWORD: ${VELOXA_APP_PASSWORD:-local-dev-app}
+      # Hackathon profile (no identity provider): /v1/ask answers as the one person holding this title.
+      VELOXA_PRINCIPAL_TITLE: ${VELOXA_PRINCIPAL_TITLE:-CEO}
     ports:
       - "127.0.0.1:${VELOXA_API_PORT:-8000}:8000"
     healthcheck:

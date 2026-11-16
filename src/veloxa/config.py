@@ -69,3 +69,10 @@ def admin_credentials() -> tuple[str, str]:
 def data_path() -> Path | None:
     value = os.environ.get("VELOXA_DATA_PATH")
     return Path(value) if value else None
+
+
+def principal_title() -> str:
+    """Hackathon profile (§25.1, no identity provider): the API answers as the single configured principal, the
+    one person whose title in the latest sealed HR export equals this value. If not exactly one person matches,
+    requests are refused as not_authorised; no identity is guessed."""
+    return os.environ.get("VELOXA_PRINCIPAL_TITLE", "CEO")

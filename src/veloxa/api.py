@@ -1,11 +1,13 @@
-"""HTTP API foundation (ARCHITECTURE.md §19). Day 1 exposes health and time metadata only.
+"""HTTP API (ARCHITECTURE.md §19): health, time metadata and Ask Veloxa v0 (POST /v1/ask, facts-only mode).
 
 Least privilege: the API connects ONLY as veloxa_app and refuses to start if privileged database credentials
 (administrator, migrator or ingest passwords) are present in its environment. Migrations and admission run in a
 separate one-shot process (`veloxa init`).
 
 The client never passes a tenant ID: the hackathon profile resolves the single configured tenant (§19.1).
-Responses contain metadata (release times, counts), never record values.
+Metadata endpoints return release times and counts, never record values. /v1/ask returns an `Answer` (§19.4)
+whose claims are verified against evidence the configured principal may see at the read basis; a refusal is a
+successful response (status "refused"), and typed errors are `not_authorised` (403) and `invalid_time` (422).
 """
 
 from __future__ import annotations
@@ -16,10 +18,14 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 
-from . import config, ledger, selfcheck
+from . import config, ledger, selfcheck, tools
+from .ask import pipeline
 from .db import connect
 from .releases import current_time, load_schedule
+from .temporal import Mode, resolve_basis
 
 PRIVILEGED_ENV = ("VELOXA_DB_ADMIN_PASSWORD", "VELOXA_DB_ADMIN_USER", "VELOXA_MIGRATOR_PASSWORD",
                   "VELOXA_INGEST_PASSWORD", "VELOXA_PROJECTION_PASSWORD")
@@ -32,6 +38,15 @@ def assert_unprivileged(env: Mapping[str, str] | None = None) -> None:
         raise RuntimeError(
             "the API process must not receive privileged database credentials; remove: " + ", ".join(present)
         )
+
+
+class AskRequest(BaseModel):
+    """The client never passes a tenant or a principal (§19.1); unknown fields are rejected."""
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=1000)
+    mode: str | None = Field(default=None, description="CURRENT | KNOWN_AT | RECORDED_BY | VALID_AT")
+    as_of: str | None = Field(default=None, description="the R or V date for RECORDED_BY or VALID_AT")
+    as_known_at: str | None = Field(default=None, description="date or instant; implies KNOWN_AT")
 
 
 def _app_dsn() -> str:
@@ -102,5 +117,24 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
         with connect(state["dsn"]) as conn:
             now, _, rows = _pack_states(conn)
         return {"now": now.isoformat(), "packs": rows}
+
+    @app.post("/v1/ask")
+    def ask(body: AskRequest):
+        now = now_fn()
+        with connect(state["dsn"]) as conn:
+            current = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), Mode.CURRENT, None,
+                                    schedule.time_zone, now)
+            principal = (tools.resolve_principal_by_title(conn, current, config.principal_title())
+                         if current.batch_seq else None)
+            if principal is None:
+                return JSONResponse(status_code=403, content={
+                    "error": "not_authorised",
+                    "detail": "the configured principal does not resolve to exactly one person in the latest "
+                              "sealed HR export"})
+            try:
+                return pipeline.answer(conn, tenant_id, schedule.time_zone, principal, body.question, now,
+                                       mode=body.mode, as_of=body.as_of, as_known_at=body.as_known_at)
+            except pipeline.InvalidTime as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
 
     return app
