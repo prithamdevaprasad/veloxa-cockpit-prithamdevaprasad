@@ -1,0 +1,31 @@
+# Release schedule for the hackathon tenant (ARCHITECTURE.md §25.1; ASSUMPTIONS.md GR-01).
+# Each pack is one admission batch. Its content is unknown to the cockpit before its release time,
+# whatever dates the material itself carries. Times are IST (+05:30).
+
+[tenant]
+slug = "veloxa"
+time_zone = "Asia/Kolkata"
+
+[[pack]]
+id = "D1"
+batch_seq = 1
+folder = "Day1_Mon_16Nov"
+release_at = "2026-11-16T10:00:00+05:30"
+
+[[pack]]
+id = "D2"
+batch_seq = 2
+folder = "Day2_Tue_17Nov"
+release_at = "2026-11-17T10:00:00+05:30"
+
+[[pack]]
+id = "D3"
+batch_seq = 3
+folder = "Day3_Wed_18Nov"
+release_at = "2026-11-18T10:00:00+05:30"
+
+[[pack]]
+id = "D4"
+batch_seq = 4
+folder = "Day4_Thu_19Nov"
+release_at = "2026-11-19T10:00:00+05:30"

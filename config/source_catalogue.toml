@@ -1,0 +1,75 @@
+# Source catalogue: how each file in a release pack is classified on admission.
+# Rules are matched in order against the path relative to the pack folder (glob syntax).
+# Fields:
+#   kind        : what the file is (export, document, email, transcript, brief, readme, template)
+#   system      : source system the file comes from (as named in the data room README)
+#   data_class  : ARCHITECTURE.md §6.3 data class. Draft classification for owner review (ASSUMPTIONS.md A-024).
+#   records     : how records are extracted: "rows" (one per spreadsheet data row), "document" (one per file),
+#                 or "none" (registered in the raw manifest only; never admitted as evidence)
+#   row_class   : optional per-row override, {column = value} -> data_class, for mixed exports
+# The most restrictive class is used where a source mixes content. Unmatched files are rejected (fail closed).
+
+[[rule]]
+pattern = "brief/*.docx"
+kind = "brief"
+system = "challenge_brief"
+data_class = "internal"
+records = "document"
+
+[[rule]]
+pattern = "data_room/README.txt"
+kind = "readme"
+system = "data_room"
+data_class = "internal"
+records = "document"
+
+[[rule]]
+pattern = "data_room/templates/*"
+kind = "template"
+system = "data_room"
+data_class = "internal"
+records = "none"
+
+[[rule]]
+pattern = "data_room/hr/Employee_Master.xlsx"
+kind = "export"
+system = "keka_hrms"
+data_class = "personal"
+records = "rows"
+
+[[rule]]
+pattern = "data_room/finance/Payroll_Register_*.xlsx"
+kind = "export"
+system = "payroll_register"
+data_class = "sensitive_personal"
+records = "rows"
+
+[[rule]]
+pattern = "data_room/finance/GL_Export_*.xlsx"
+kind = "export"
+system = "zoho_books"
+data_class = "confidential"
+records = "rows"
+# Ledger payroll lines are payroll aggregates (ARCHITECTURE.md §15.3).
+row_class = { "Vendor / Payee" = "Salaries (payroll)", class = "payroll_aggregate" }
+
+[[rule]]
+pattern = "data_room/documents/*.pdf"
+kind = "document"
+system = "documents"
+data_class = "confidential"
+records = "document"
+
+[[rule]]
+pattern = "data_room/email/*.eml"
+kind = "email"
+system = "email"
+data_class = "private_comms"
+records = "document"
+
+[[rule]]
+pattern = "transcripts/*.docx"
+kind = "transcript"
+system = "meeting_summaries"
+data_class = "confidential"
+records = "document"

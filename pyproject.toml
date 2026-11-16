@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "veloxa-cockpit"
+version = "0.1.0"
+description = "Veloxa CXO Cockpit: evidence ledger foundation (Day 1)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "psycopg[binary]>=3.2,<3.4",
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+  "openpyxl>=3.1,<4",
+  "python-docx>=1.1,<2",
+  "pdfplumber>=0.11,<0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+  "httpx>=0.27,<1",
+  "ruff>=0.6,<1",
+]
+
+[project.scripts]
+veloxa = "veloxa.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+veloxa = ["migrations/*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+  "db: needs a PostgreSQL 18 server (VELOXA_TEST_ADMIN_DSN)",
+  "realdata: needs the locally supplied release packs (VELOXA_DATA_PATH); never runs in CI",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
