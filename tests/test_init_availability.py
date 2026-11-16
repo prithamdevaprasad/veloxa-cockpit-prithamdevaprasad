@@ -76,7 +76,7 @@ def test_init_succeeds_when_a_later_pack_fails_and_the_sealed_batch_is_unchanged
             events = conn.execute("SELECT kind, detail FROM audit.event ORDER BY seq").fetchall()
             assert conn.execute("SELECT count(*) AS n FROM ledger.source_record WHERE batch_seq = 2"
                                 ).fetchone()["n"] == 0
-    assert [e["kind"] for e in events] == ["admission.sealed", "admission.failed"]
+    assert [e["kind"] for e in events] == ["admission.sealed", "admission.failed", "projection.built"]
     assert events[1]["detail"] == {"pack": "D2", "reason": "UnclassifiedSource"}  # code only, no content
 
 

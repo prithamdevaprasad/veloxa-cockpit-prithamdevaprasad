@@ -1,0 +1,69 @@
+# Governed metric definitions (ARCHITECTURE.md §11). Every number in an answer comes from one of these.
+# Definitions are versioned judgement artefacts: change a definition by adding a new version, never by editing
+# a published one in place. Sources, columns and measures are restricted to the registry in src/veloxa/metrics.py.
+#
+# Fields:
+#   name, version, description, unit
+#   source        : registered source (see SOURCES in metrics.py)
+#   measure       : "count" or "sum:<registered numeric column>" or "reported:<registered text column>"
+#   dimensions    : allowed group-by dimensions (registered)
+#   filters       : allowed filters (registered)
+#   qualifiers    : always attached to results (e.g. coverage or snapshot caveats)
+#   protected_inputs : non-empty => the result is an aggregate over protected measures and must pass the
+#                      disclosure auditor (§15); while the auditor does not exist, the engine refuses (fail closed)
+
+[[metric]]
+name = "headcount"
+version = 1
+description = "Number of employees in the HR export, as at the export (snapshot)"
+unit = "people"
+source = "person"
+measure = "count"
+dimensions = ["department", "status"]
+filters = ["department", "status"]
+qualifiers = ["as at extraction of the HR export; contractors are not included"]
+
+[[metric]]
+name = "ledger_spend"
+version = 1
+description = "Sum of extracted general-ledger lines (selected cost centres only), excluding payroll aggregates"
+unit = "INR"
+source = "ledger_line"
+measure = "sum:amount_inr"
+dimensions = ["cost_centre", "month", "vendor"]
+filters = ["cost_centre", "vendor", "from_date", "to_date"]
+qualifiers = ["partial extract: selected cost centres only", "payroll lines excluded (disclosure-controlled)"]
+
+[[metric]]
+name = "ledger_line_count"
+version = 1
+description = "Number of extracted general-ledger lines (selected cost centres only), excluding payroll aggregates"
+unit = "lines"
+source = "ledger_line"
+measure = "count"
+dimensions = ["cost_centre", "month", "vendor"]
+filters = ["cost_centre", "vendor", "from_date", "to_date"]
+qualifiers = ["partial extract: selected cost centres only", "payroll lines excluded (disclosure-controlled)"]
+
+[[metric]]
+name = "reported_figure"
+version = 1
+description = "A figure exactly as reported in a formal document's key-numbers table (no arithmetic)"
+unit = "as written"
+source = "reported_figure"
+measure = "reported:value_text"
+dimensions = ["metric", "period"]
+filters = ["metric", "period"]
+qualifiers = ["as reported by the document's author; not independently verified"]
+
+[[metric]]
+name = "payroll_total"
+version = 1
+description = "Total gross payroll for a cohort and period"
+unit = "INR"
+source = "ledger_line"
+measure = "sum:amount_inr"
+dimensions = ["month"]
+filters = ["from_date", "to_date"]
+qualifiers = []
+protected_inputs = ["payroll.gross"]

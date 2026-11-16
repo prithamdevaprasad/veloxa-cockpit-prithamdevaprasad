@@ -16,7 +16,7 @@ from psycopg import sql
 from . import config
 from .db import connect
 
-LOGIN_ROLES = ("migrator", "app", "ingest")
+LOGIN_ROLES = ("migrator", "app", "ingest", "projection")
 TENANTS = (
     # slug, synthetic, time zone
     ("veloxa", True, "Asia/Kolkata"),

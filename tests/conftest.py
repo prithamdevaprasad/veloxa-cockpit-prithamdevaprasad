@@ -18,7 +18,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 
 # Local-development defaults, identical to docker-compose.yml; CI sets its own values.
-for _role, _default in (("MIGRATOR", "local-dev-migrator"), ("APP", "local-dev-app"), ("INGEST", "local-dev-ingest")):
+for _role, _default in (("MIGRATOR", "local-dev-migrator"), ("APP", "local-dev-app"), ("INGEST", "local-dev-ingest"),
+                        ("PROJECTION", "local-dev-projection")):
     os.environ.setdefault(f"VELOXA_{_role}_PASSWORD", _default)
 
 ADMIN_DSN = os.environ.get("VELOXA_TEST_ADMIN_DSN")

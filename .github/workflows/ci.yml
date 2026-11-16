@@ -28,6 +28,7 @@ jobs:
       VELOXA_MIGRATOR_PASSWORD: ci-migrator
       VELOXA_APP_PASSWORD: ci-app
       VELOXA_INGEST_PASSWORD: ci-ingest
+      VELOXA_PROJECTION_PASSWORD: ci-projection
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

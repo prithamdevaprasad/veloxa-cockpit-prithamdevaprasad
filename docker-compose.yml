@@ -49,6 +49,7 @@ services:
       VELOXA_DB_ADMIN_PASSWORD: ${VELOXA_DB_ADMIN_PASSWORD:-local-dev-admin}
       VELOXA_MIGRATOR_PASSWORD: ${VELOXA_MIGRATOR_PASSWORD:-local-dev-migrator}
       VELOXA_INGEST_PASSWORD: ${VELOXA_INGEST_PASSWORD:-local-dev-ingest}
+      VELOXA_PROJECTION_PASSWORD: ${VELOXA_PROJECTION_PASSWORD:-local-dev-projection}
       VELOXA_APP_PASSWORD: ${VELOXA_APP_PASSWORD:-local-dev-app}  # needed only to set the role's password
       VELOXA_DATA_PATH: /data
     volumes:

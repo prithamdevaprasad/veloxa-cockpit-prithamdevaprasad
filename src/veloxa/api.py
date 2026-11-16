@@ -22,7 +22,7 @@ from .db import connect
 from .releases import current_time, load_schedule
 
 PRIVILEGED_ENV = ("VELOXA_DB_ADMIN_PASSWORD", "VELOXA_DB_ADMIN_USER", "VELOXA_MIGRATOR_PASSWORD",
-                  "VELOXA_INGEST_PASSWORD")
+                  "VELOXA_INGEST_PASSWORD", "VELOXA_PROJECTION_PASSWORD")
 
 
 def assert_unprivileged(env: Mapping[str, str] | None = None) -> None:

@@ -12,7 +12,7 @@ import argparse
 import sys
 import time
 
-from . import config, ledger, selfcheck
+from . import config, ledger, projector, selfcheck
 from .db import connect
 from .ingest.pipeline import AdmissionFailure, admit_pack, admit_released, record_failure
 from .migrate import migrate
@@ -92,6 +92,19 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     return EXIT_ADMISSION_FAILED
 
 
+def cmd_project(args: argparse.Namespace) -> int:
+    """Build projections for every sealed batch not yet projected (or rebuild them all with --rebuild)."""
+    schedule = load_schedule()
+    tenant_id = config.tenant_uuid(schedule.tenant_slug)
+    with connect(_dsn("projection")) as conn:
+        built = (projector.rebuild if getattr(args, "rebuild", False) else projector.build)(conn, tenant_id)
+    for k, rows in built:
+        print(f"projections built for batch {k}: {rows} rows")
+    if not built:
+        print("projections: up to date")
+    return 0
+
+
 def cmd_status(_: argparse.Namespace) -> int:
     schedule = load_schedule()
     tenant_id = config.tenant_uuid(schedule.tenant_slug)
@@ -151,6 +164,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     if ingest_rc == EXIT_ADMISSION_FAILED:
         print(f"init: continuing; the API will serve the latest sealed batch (K = {k}) and report the pending pack",
               file=sys.stderr)
+    cmd_project(argparse.Namespace(rebuild=False))
     return cmd_selfcheck(argparse.Namespace(role="ingest"))
 
 
@@ -162,6 +176,9 @@ def main(argv: list[str] | None = None) -> int:
     p_ing.add_argument("--pack", default="released", help="pack id (e.g. D1) or 'released' (default)")
     p_ing.set_defaults(func=cmd_ingest)
     sub.add_parser("status", help="show admission status").set_defaults(func=cmd_status)
+    p_prj = sub.add_parser("project", help="build projections for sealed batches")
+    p_prj.add_argument("--rebuild", action="store_true", help="drop and rebuild all projections from the ledger")
+    p_prj.set_defaults(func=cmd_project)
     p_sc = sub.add_parser("selfcheck", help="run startup self-checks for a role")
     p_sc.add_argument("--role", choices=("app", "ingest"), default="app")
     p_sc.set_defaults(func=cmd_selfcheck)

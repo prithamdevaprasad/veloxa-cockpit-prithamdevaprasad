@@ -77,3 +77,39 @@ def test_real_d1_admission(ingest_conn, app_conn, tenant, schedule, data_root, m
             pipeline.admit_pack(ingest_conn, tenant, schedule, "D2", data_root, now)
         assert exc.value.reason == "not_yet_released"
     assert opened == ["Day1_Mon_16Nov"]
+
+
+def test_real_d1_projections_metrics_and_tools(db, ingest_conn, app_conn, tenant, schedule, data_root):
+    """Counts and structure only; no value is printed or compared."""
+    from datetime import UTC, datetime
+
+    from veloxa import metrics, projector, tools
+    from veloxa.db import connect
+    from veloxa.temporal import Mode, resolve_basis
+
+    pipeline.admit_pack(ingest_conn, tenant, schedule, "D1", data_root, datetime.now(UTC))
+    with connect(db.dsn("projection")) as prj:
+        assert [k for k, _ in projector.build(prj, tenant)] == [1]
+        with tenant_tx(prj, tenant):
+            n = {t: prj.execute(f"SELECT count(*) AS n FROM projection.{t}").fetchone()["n"]
+                 for t in ("person", "ledger_line", "document_text", "reported_figure")}
+            boards = prj.execute(
+                "SELECT count(DISTINCT source_record_id) AS n, count(*) FILTER"
+                " (WHERE issued_on IS NULL OR period IS NULL) AS undated FROM projection.reported_figure").fetchone()
+    assert n == {"person": 19, "ledger_line": 28, "document_text": 9, "reported_figure": 10}
+    assert boards["n"] == 2 and boards["undated"] == 0  # both board updates parsed, each with period and date
+
+    with tenant_tx(app_conn, tenant):
+        visible = app_conn.execute("SELECT count(*) AS n FROM projection.ledger_line").fetchone()["n"]
+    assert visible == 22  # the 6 payroll lines are hidden from the app role
+    basis = resolve_basis(tenant, ledger.sealed_releases(app_conn, tenant), Mode.CURRENT, None,
+                          "Asia/Kolkata", datetime.now(UTC))
+    defs = metrics.load_definitions()
+    assert [r.value for r in metrics.run(app_conn, defs["headcount"], basis).rows] == [19]
+    assert len(metrics.run(app_conn, defs["ledger_spend"], basis).rows[0].inputs) == 22
+
+    ceo = tools.resolve_principal_by_title(app_conn, basis, "CEO")
+    assert ceo is not None and ceo.email
+    found = tools.text_search(app_conn, basis, ceo, "payroll OR payslip", limit=50)
+    assert not any(e.kind == "email" for e in found.evidence)  # the CEO is not a party to the D1 emails
+    assert tools.payroll_total(app_conn, basis, ceo).status == "withheld"

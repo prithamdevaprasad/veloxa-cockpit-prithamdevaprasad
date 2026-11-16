@@ -53,15 +53,24 @@ def run(conn: psycopg.Connection) -> list[str]:
 
     # Protected pay (§9.4, §15): the application role must not read payroll lines or payroll aggregates
     # except through the disclosure auditor. The restrictive policy must exist and name both classes.
-    pay = conn.execute(
-        "SELECT pg_get_expr(p.polqual, p.polrelid) AS qual, p.polpermissive,"
-        "       (SELECT array_agg(r.rolname) FROM pg_roles r WHERE r.oid = ANY(p.polroles)) AS roles"
-        " FROM pg_policy p WHERE p.polrelid = 'ledger.source_record'::regclass"
-        "   AND p.polname = 'protected_pay_for_app'"
-    ).fetchone()
-    if (pay is None or pay["polpermissive"] or "veloxa_app" not in (pay["roles"] or [])
-            or "sensitive_personal" not in pay["qual"] or "payroll_aggregate" not in pay["qual"]):
-        failures.append("restrictive protected-pay policy for veloxa_app is missing or incomplete")
+    # Every table carrying a data_class column must have it.
+    classed = conn.execute(
+        "SELECT c.oid, n.nspname || '.' || c.relname AS rel FROM pg_class c"
+        " JOIN pg_namespace n ON n.oid = c.relnamespace"
+        " JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'data_class' AND NOT a.attisdropped"
+        " WHERE n.nspname = ANY(%s) AND c.relkind IN ('r', 'p')",
+        (list(TENANT_SCHEMAS),),
+    ).fetchall()
+    for t in classed:
+        pay = conn.execute(
+            "SELECT pg_get_expr(p.polqual, p.polrelid) AS qual, p.polpermissive,"
+            "       (SELECT array_agg(r.rolname) FROM pg_roles r WHERE r.oid = ANY(p.polroles)) AS roles"
+            " FROM pg_policy p WHERE p.polrelid = %s AND p.polname = 'protected_pay_for_app'",
+            (t["oid"],),
+        ).fetchone()
+        if (pay is None or pay["polpermissive"] or "veloxa_app" not in (pay["roles"] or [])
+                or "sensitive_personal" not in pay["qual"] or "payroll_aggregate" not in pay["qual"]):
+            failures.append(f"{t['rel']}: restrictive protected-pay policy for veloxa_app is missing or incomplete")
 
     version = int(conn.execute("SHOW server_version_num").fetchone()["server_version_num"])
     if version < MIN_SERVER_VERSION:
