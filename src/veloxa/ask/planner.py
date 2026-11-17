@@ -86,15 +86,20 @@ your about any all give list please much many there's what's who's know known cu
 
 _INTENTS: list[tuple[str, str]] = [
     ("payroll_total", r"\b(payroll|salar(y|ies)|wage bill|people cost|staff cost)\b"),
-    ("headcount", r"\b(headcount|head count|how many (people|employees|staff|persons)|number of (people|employees|"
-                  r"staff)|team sizes?|staff count)\b"),
-    ("finance_totals", r"\b(spend|spent|spending|expenses?|expenditure|costs?|ledger|vendors?|suppliers?|"
-                       r"cost cent(re|er)s?|general ledger|gl)\b"),
+    ("headcount", r"\b(headcount|head count|how many (people|employees|staff|persons|heads|members)|number of "
+                  r"(people|employees|staff|heads)|team sizes?|staff (count|numbers?|size)|size of the (team|company|"
+                  r"organi[sz]ation|workforce)|how (big|large) is the (team|company|organi[sz]ation|workforce)|"
+                  r"workforce size|employee count|people do we (have|employ)|employ(ees)? do we have)\b"),
+    ("finance_totals", r"\b(spend|spent|spending|expenses?|expenditure|outgoings|outflows?|costs?|ledger|vendors?|"
+                       r"suppliers?|payees?|paying (our )?(vendors|suppliers)|paid to|cost cent(re|er)s?|"
+                       r"general ledger|gl)\b"),
     ("board_statements", r"\b(board|investors?|reported|key numbers|revenue|arr|mrr|runway|customers?|"
                          r"burn rate|cash)\b"),
     ("conflicts", r"\b(conflicts?|disagree\w*|contradict\w*|inconsisten\w*|discrepanc\w*|sources? differ)\b"),
-    ("timeline", r"\b(timeline|what happened|events?|when did|history|chronolog\w*|joined|joins|exits?)\b"),
-    ("person", r"\b(who is|who's|reports? to|manager of|title of|role of|position of|works? (as|in))\b"),
+    ("timeline", r"\b(timeline|what happened|events?|when did|history|chronolog\w*|joined|joins|exits?|"
+                 r"key dates|sequence of events|what (has )?changed)\b"),
+    ("person", r"\b(who is|who's|reports? to|manager of|title of|role of|position of|works? (as|in)|"
+               r"line manager|boss of|job title)\b"),
 ]
 
 

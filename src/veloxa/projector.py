@@ -128,6 +128,9 @@ def _build_batch(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int) -> int:
                     (tenant_id, k, r["record_id"], r["version"], period, issued, metric, value, r["data_class"]),
                 )
                 rows += 1
+    from . import chunking
+
+    rows += chunking.project_batch(conn, tenant_id, k, PROSE_KINDS, _prose)    # 0019 retrieval units
     return rows
 
 
@@ -159,7 +162,8 @@ def rebuild(conn: psycopg.Connection, tenant_id: uuid.UUID) -> list[tuple[int, i
     """Drop this tenant's projections and rebuild them from the ledger (§6.2: projections are disposable)."""
     with tenant_tx(conn, tenant_id, principal_id="projection-worker"):
         conn.execute("SELECT pg_advisory_xact_lock(hashtext('projection.build:' || %s))", (str(tenant_id),))
-        for table in ("person", "ledger_line", "reported_figure", "document_text", "acl_history", "build"):
+        for table in ("person", "ledger_line", "reported_figure", "document_text", "text_chunk", "acl_history",
+                      "build"):
             conn.execute(f"DELETE FROM projection.{table} WHERE tenant_id = %s",  # noqa: S608  (fixed names)
                          (tenant_id,))
     return build(conn, tenant_id)

@@ -241,21 +241,34 @@ def board_statements(conn: psycopg.Connection, basis: ReadBasis, principal: Prin
 
 def text_search(conn: psycopg.Connection, basis: ReadBasis, principal: Principal, query: str,
                 limit: int = 5) -> ToolResult:
+    # 0019: rank paragraph/page/message/row CHUNKS (not whole documents); the best chunk per record is cited with
+    # its exact locator. Short chunks rank on their own terms, so a long document no longer dilutes a match.
     p = predicate(basis, "d")
     sql = psql.SQL(
-        'SELECT "d"."source_record_id", "d"."title",'
-        " ts_headline('english', \"d\".\"body\", q, 'StartSel=[,StopSel=],MaxWords=25,MinWords=8') AS excerpt,"
-        ' ts_rank("d"."tsv", q) AS rank'
-        ' FROM projection.document_text "d", websearch_to_tsquery(\'english\', %(q)s) q'
+        'SELECT "d"."source_record_id", "d"."title", "d"."chunk_locator", "d"."unit",'
+        " ts_headline('english', \"d\".\"body\", q, 'StartSel=[,StopSel=],MaxWords=35,MinWords=12') AS excerpt,"
+        ' ts_rank_cd("d"."tsv", q, 32) AS rank'
+        ' FROM projection.text_chunk "d", websearch_to_tsquery(\'english\', %(q)s) q'
         ' WHERE {} AND "d"."tsv" @@ q'
         ' AND ("d"."data_class" <> \'private_comms\' OR %(email)s = ANY("d"."parties"))'
-        ' ORDER BY rank DESC, "d"."source_record_id" LIMIT %(limit)s').format(p.clause)
+        ' ORDER BY rank DESC, "d"."source_record_id", "d"."chunk_no" LIMIT %(scan)s').format(p.clause)
     with tenant_tx(conn, basis.tenant_id, batch_seq=basis.batch_seq):
-        rows = conn.execute(sql, {**p.params, "q": query, "email": principal.email or "", "limit": limit}).fetchall()
-    if not rows:
+        rows = conn.execute(sql, {**p.params, "q": query, "email": principal.email or "",
+                                  "scan": limit * 8}).fetchall()
+    best: dict[str, dict] = {}
+    for r in rows:                                     # rows are rank-ordered: the first per record is its best
+        best.setdefault(r["source_record_id"], r)
+        if len(best) == limit:
+            break
+    if not best:
         return ToolResult("text_search", "no_data", gaps=[f"no admitted text the requester may see matches {query!r}"])
-    excerpts = {r["source_record_id"]: f"{r['title']}: {r['excerpt']}" for r in rows}
-    return ToolResult("text_search", "ok", [], _evidence(conn, basis, list(excerpts), excerpts))
+    excerpts = {rid: f"{r['title']}: {r['excerpt']}" for rid, r in best.items()}
+    ev = _evidence(conn, basis, list(excerpts), excerpts)
+    for e in ev:
+        c = best.get(e.record_id)
+        if c is not None:
+            e.locator = {**(e.locator or {}), "chunk": c["chunk_locator"], "unit": c["unit"]}
+    return ToolResult("text_search", "ok", [], ev)
 
 
 def timeline(conn: psycopg.Connection, basis: ReadBasis, principal: Principal, start: date | None = None,
