@@ -128,6 +128,9 @@ class GovernedLLMClient:
                  sorted(req.data_classes), redacted, reserved, 0 if replayed else used, status, replayed, attempts))
 
     def _refuse(self, req, status, reason, **kw):
+        from .. import telemetry
+
+        telemetry.METRICS.inc("veloxa_model_refusals_total", status=status)
         self._record(req, status, **kw)
         raise ModelUnavailable(f"{status}: {reason}")
 
@@ -164,6 +167,11 @@ class GovernedLLMClient:
         if not ok:
             self._refuse(req, "refused_budget", "no budget, or not enough headroom, for this call", redacted=redacted)
         attempts, used, status, output = 0, 0, "provider_error", None
+        import time as _time
+
+        from .. import telemetry
+
+        started = _time.perf_counter()
         try:
             # 4-5. bounded provider retries; one retry on invalid structured output
             validate = self.validators.get(req.prompt_version, lambda o: isinstance(o, dict))
@@ -194,6 +202,8 @@ class GovernedLLMClient:
                                    0 if isinstance(self.provider, ReplayProvider) else used))
             self._record(req, status, redacted=redacted, reserved=req.budget_estimate_tokens, used=used,
                          attempts=attempts)
+            telemetry.METRICS.observe("veloxa_model_call_seconds", _time.perf_counter() - started, stage=req.stage,
+                                      status=status)
         if status == "invalid_output":
             raise ModelOutputInvalid("the model's structured output failed validation twice")
         if status != "ok":

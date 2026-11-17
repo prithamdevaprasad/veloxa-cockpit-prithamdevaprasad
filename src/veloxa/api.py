@@ -23,8 +23,8 @@ from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from fastapi import FastAPI, Header
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Header, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import auth, config, ledger, selfcheck, tools
@@ -151,6 +151,44 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
         yield
 
     app = FastAPI(title="Veloxa CXO Cockpit", version="0.1.0", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def observe(request: Request, call_next):
+        """C29: correlation ID, request metrics, one structured log line and error tracking per request. Only the
+        route TEMPLATE is recorded (never paths with IDs, query strings, headers or bodies)."""
+        import time as _time
+
+        from . import telemetry
+
+        rid = telemetry.request_id_from(request.headers.get("x-request-id"))
+        token = telemetry.REQUEST_ID.set(rid)
+        started = _time.perf_counter()
+        route = "unmatched"
+        try:
+            response = await call_next(request)
+        except Exception:
+            route = getattr(request.scope.get("route"), "path", route)
+            telemetry.METRICS.inc("veloxa_errors_total", route=route)
+            telemetry.log.error("unhandled error", exc_info=True, extra={"fields": {"route": route}})
+            response = JSONResponse(status_code=500, content={"error": "internal_error", "request_id": rid})
+        route = getattr(request.scope.get("route"), "path", route)
+        elapsed = _time.perf_counter() - started
+        telemetry.METRICS.inc("veloxa_http_requests_total", route=route, method=request.method,
+                              http_status=response.status_code)
+        telemetry.METRICS.observe("veloxa_http_request_seconds", elapsed, route=route, method=request.method)
+        telemetry.log.info("request", extra={"fields": {"route": route, "method": request.method,
+                                                         "http_status": response.status_code}})
+        response.headers["X-Request-ID"] = rid
+        telemetry.REQUEST_ID.reset(token)
+        return response
+
+    if os.environ.get("VELOXA_METRICS") == "1":
+        @app.get("/metrics", include_in_schema=False)
+        def metrics_endpoint():
+            """Internal Prometheus scrape endpoint (enabled only with VELOXA_METRICS=1): counts and latencies."""
+            from . import telemetry
+
+            return PlainTextResponse(telemetry.METRICS.render())
 
     @app.get("/health")
     def health() -> dict:

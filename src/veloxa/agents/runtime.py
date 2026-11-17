@@ -283,6 +283,19 @@ class AgentRuntime:
         return calls
 
     def _run_tool(self, req, s, cfg, basis, call: ToolCall) -> dict:
+        from .. import telemetry
+
+        started = time.monotonic()
+        with telemetry.span("agent.tool", tool=call.tool_id, agent_id=cfg.agent_id, session_id=str(req.session_id)):
+            result = self._run_tool_inner(req, s, cfg, basis, call)
+        if result["decision"] == "denied":
+            telemetry.METRICS.inc("veloxa_agent_tool_denied_total", reason=result["reason"])
+        else:
+            telemetry.METRICS.observe("veloxa_agent_tool_seconds", time.monotonic() - started, tool=call.tool_id,
+                                      status=result["status"])
+        return result
+
+    def _run_tool_inner(self, req, s, cfg, basis, call: ToolCall) -> dict:
         decision = self.pdp.decide(ToolRequest(req.tenant_id, cfg, req.tenant_id, req.interviewer.principal_id,
                                                call.tool_id, req.purpose))
         result = {"tool": call.tool_id, "decision": "allowed" if decision.allowed else "denied",
@@ -326,6 +339,11 @@ class AgentRuntime:
         labels = self.kb.labels(cfg, sorted(az), basis) if az else {}
         permitted = {r: e for r, e in az.items() if labels.get(r)}
         excluded["knowledge"] = len(az) - len(permitted)
+        from .. import telemetry
+
+        for reason, n in excluded.items():
+            if n:
+                telemetry.METRICS.inc("veloxa_agent_evidence_excluded_total", n, reason=reason)
         return permitted, {r: labels[r] for r in permitted}, excluded
 
     def _record(self, req, s, cfg, basis, digest, turn: dict) -> dict:

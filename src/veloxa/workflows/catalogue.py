@@ -99,6 +99,9 @@ def _audit(tenant_id: str, workflow_id: str, name: str, detail: dict) -> None:
     tid = uuid.UUID(tenant_id)
     with connect(_dsn("projection")) as conn, tenant_tx(conn, tid):
         audit.append(conn, tid, "workflow.completed", {"workflow_id": workflow_id, "workflow": name, **detail})
+    from .. import telemetry
+
+    telemetry.METRICS.inc("veloxa_workflow_completed_total", workflow=name)
 
 
 @DBOS.workflow(name="veloxa.pack_pipeline.v1", max_recovery_attempts=5)
