@@ -183,7 +183,7 @@ class AgentRuntime:
         return self._record(req, s, cfg, basis, digest, turn)
 
     def _turn(self, req, s, cfg, current, basis) -> dict:
-        base = {"label": LABEL, "agent_id": cfg.agent_id, "config_version": cfg.config_version,
+        base = {"label": LABEL, "message": req.message, "agent_id": cfg.agent_id, "config_version": cfg.config_version,
                 "runtime_version": registry.RUNTIME_VERSION, "session_id": str(req.session_id),
                 "read_basis": {"batch_seq": basis.batch_seq, "mode": str(basis.mode), "as_of": basis.as_of},
                 "claims": [], "evidence": [], "tools": [], "unknowns": [], "excluded": {}, "refusal": None,

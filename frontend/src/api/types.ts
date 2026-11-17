@@ -224,3 +224,14 @@ export interface Scenario {
   ranked: false;
 }
 export interface ScenarioSubjects { read_basis: { batch_seq: number; banner: string }; commitments: string[] }
+
+export interface TimelineResult {
+  read_basis: { batch_seq: number; banner: string };
+  status: string;
+  events: { display: string; kind: string; evidence: string[] }[];
+  evidence: Evidence[];
+  gaps: string[];
+}
+export interface SessionSummary { session_id: string; config_version: number; batch_seq: number; opened_at: string; turns: number }
+export interface SessionList { agent_id: string; offset: number; limit: number; has_more: boolean; sessions: SessionSummary[] }
+export interface SessionDetail { session_id: string; agent_id: string; config_version: number; batch_seq: number; opened_at: string; turns: (AgentTurn & { message?: string })[] }

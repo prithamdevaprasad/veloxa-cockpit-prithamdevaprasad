@@ -1,5 +1,5 @@
 // Reusable interface components. Status colours are semantic only; nothing here invents data.
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ApiError } from "../api/client";
 import type { Evidence } from "../api/types";
 
@@ -155,5 +155,24 @@ export function BarList({ rows, unit }: { rows: { label: string; value: number }
         </li>
       ))}
     </ul>
+  );
+}
+
+/** Client-side pagination for lists already fully returned by the API (never invents rows). */
+export function usePage<T>(items: T[], size: number) {
+  const [index, setIndex] = useState(0);
+  const pages = Math.max(1, Math.ceil(items.length / size));
+  const current = Math.min(index, pages - 1);
+  return { items: items.slice(current * size, current * size + size), index: current, pages, setIndex, total: items.length };
+}
+
+export function Pager({ page }: { page: { index: number; pages: number; setIndex: (i: number) => void; total: number } }) {
+  if (page.pages <= 1) return null;
+  return (
+    <nav className="row" aria-label="Pagination" style={{ justifyContent: "flex-end", marginTop: 10 }}>
+      <span className="small muted">Page {page.index + 1} of {page.pages} ({page.total} items)</span>
+      <Button disabled={page.index === 0} onClick={() => page.setIndex(page.index - 1)}>Previous</Button>
+      <Button disabled={page.index >= page.pages - 1} onClick={() => page.setIndex(page.index + 1)}>Next</Button>
+    </nav>
   );
 }

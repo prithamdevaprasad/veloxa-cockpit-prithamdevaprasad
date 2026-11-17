@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api, ApiError, newIdempotencyKey } from "../api/client";
 import { useApi } from "../api/useApi";
-import type { AgentSession, AgentSummary, AgentTurn } from "../api/types";
+import type { AgentSession, AgentSummary, AgentTurn, SessionDetail } from "../api/types";
 import { Badge, Button, EmptyState, ErrorState, EvidenceList, Loading, PageHead, Section, Segmented } from "../ui";
 
 type Cat = "all" | AgentSummary["category"];
@@ -21,20 +21,22 @@ export function AgentsPage() {
   const [cat, setCat] = useState<Cat>("all");
   const [reg, reload] = useApi((s) => api.agents(s), []);
   const [selected, setSelected] = useState<AgentSummary | null>(null);
+  const [dirPage, setDirPage] = useState(0);
 
   return (
     <>
       <PageHead title="Employee agents" intro="One shared runtime. Each agent answers only from evidence that is in its
         knowledge boundary, that you are authorised to see, and that interview policy allows. Agents take no action." />
       <div className="row" style={{ marginBottom: 12 }}>
-        <Segmented label="Category" value={cat} options={CATS} onChange={setCat} />
+        <Segmented label="Category" value={cat} options={CATS} onChange={(c) => { setCat(c); setDirPage(0); }} />
       </div>
       <div className="grid-2" style={{ alignItems: "start" }}>
         <Section title="Directory" subtitle={reg.state === "ready" ? `Runtime ${reg.data.runtime_version}` : undefined}>
           {reg.state === "loading" && <Loading />}
           {reg.state === "error" && <ErrorState error={reg.error} onRetry={reload} />}
           {reg.state === "ready" && (() => {
-            const rows = reg.data.agents.filter((a) => cat === "all" || a.category === cat);
+            const all = reg.data.agents.filter((a) => cat === "all" || a.category === cat);
+            const rows = all.slice(dirPage * 10, dirPage * 10 + 10);
             return rows.length === 0 ? <EmptyState title="No agents in this category" /> : (
               <div className="table-wrap"><table>
                 <thead><tr><th>Agent</th><th>Category</th><th>State</th></tr></thead>
@@ -47,7 +49,14 @@ export function AgentsPage() {
                       {!a.assigned && !a.agent_id.startsWith("syn-") && <> <Badge value="unassigned" /></>}</td>
                   </tr>
                 ))}</tbody>
-              </table></div>
+              </table>
+              {all.length > 10 && (
+                <nav className="row" aria-label="Directory pages" style={{ justifyContent: "flex-end", marginTop: 8 }}>
+                  <span className="small muted">Page {dirPage + 1} of {Math.ceil(all.length / 10)}</span>
+                  <Button disabled={dirPage === 0} onClick={() => setDirPage(dirPage - 1)}>Previous</Button>
+                  <Button disabled={(dirPage + 1) * 10 >= all.length} onClick={() => setDirPage(dirPage + 1)}>Next</Button>
+                </nav>
+              )}</div>
             );
           })()}
         </Section>
@@ -62,7 +71,8 @@ export function AgentsPage() {
 function AgentDetail({ agent }: { agent: AgentSummary }) {
   const [session, setSession] = useState<AgentSession | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
-  const [tab, setTab] = useState<"interview" | "memory">("interview");
+  const [tab, setTab] = useState<"interview" | "history" | "memory">("interview");
+  const [resume, setResume] = useState<SessionDetail | null>(null);
 
   async function start() {
     setError(null);
@@ -80,13 +90,22 @@ function AgentDetail({ agent }: { agent: AgentSummary }) {
       </dl>
       <div style={{ marginTop: 12 }}>
         <Segmented label="View" value={tab} onChange={setTab}
-                   options={[{ value: "interview", label: "Interview" }, { value: "memory", label: "My memories" }]} />
+                   options={[{ value: "interview", label: "Interview" }, { value: "history", label: "History" },
+                             { value: "memory", label: "My memories" }]} />
       </div>
       <div style={{ marginTop: 12 }}>
-        {tab === "memory" ? <MemoryView agentId={agent.agent_id} /> : !canInterview(agent) ? (
+        {tab === "memory" ? <MemoryView agentId={agent.agent_id} /> : tab === "history" ? (
+          <HistoryView agentId={agent.agent_id} onOpen={(d) => {
+            setResume(d);
+            setSession({ session_id: d.session_id, agent_id: d.agent_id, config_version: d.config_version,
+                         batch_seq: d.batch_seq, label: d.turns[0]?.label ?? "AI representation of an employee role." });
+            setTab("interview");
+          }} />
+        ) : !canInterview(agent) ? (
           <div className="callout info small">Interviews are closed: this agent is <strong>{agent.activation}</strong>.
             Activation needs an owner-approved employee mapping and configuration.</div>
-        ) : session ? <Conversation session={session} onClosed={() => setSession(null)} /> : (
+        ) : session ? <Conversation key={session.session_id} session={session} history={resume}
+                                    onClosed={() => { setSession(null); setResume(null); }} /> : (
           <>
             {error && <ErrorState error={error} />}
             <Button variant="primary" onClick={start}>Start interview</Button>
@@ -97,25 +116,37 @@ function AgentDetail({ agent }: { agent: AgentSummary }) {
   );
 }
 
-function Conversation({ session, onClosed }: { session: AgentSession; onClosed: () => void }) {
+type Entry = { q: string; key: string; turn?: AgentTurn; error?: ApiError; cancelled?: boolean };
+
+function Conversation({ session, history, onClosed }: { session: AgentSession; history: SessionDetail | null;
+                                                          onClosed: () => void }) {
   const [msg, setMsg] = useState("");
-  const [log, setLog] = useState<{ q: string; turn?: AgentTurn; error?: ApiError }[]>([]);
+  const [log, setLog] = useState<Entry[]>(() => (history?.turns ?? []).map((t) => ({
+    q: t.message ?? "(question not recorded)", key: "", turn: t })));
   const [busy, setBusy] = useState(false);
   const [closed, setClosed] = useState<number | null>(null);
+  const ctrl = useRef<AbortController | null>(null);
+
+  async function run(q: string, key: string) {
+    setBusy(true);
+    ctrl.current = new AbortController();
+    const entry: Entry = { q, key };
+    setLog((l) => [...l.filter((x) => !(x.key === key && x.cancelled)), entry]);
+    try { entry.turn = await api.sendMessage(session.session_id, q, key, ctrl.current.signal); }
+    catch (err) {
+      if ((err as Error).name === "AbortError") entry.cancelled = true;
+      else entry.error = err instanceof ApiError ? err : new ApiError(0, "unknown", String(err));
+    }
+    setLog((l) => l.map((x) => (x === entry ? { ...entry } : x)));
+    setBusy(false);
+  }
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
     const q = msg.trim();
     if (!q || busy) return;
-    setBusy(true);
-    const key = newIdempotencyKey();                // one key per message: a network retry cannot duplicate it
-    const entry: { q: string; turn?: AgentTurn; error?: ApiError } = { q };
-    setLog((l) => [...l, entry]);
-    try { entry.turn = await api.sendMessage(session.session_id, q, key); }
-    catch (err) { entry.error = err instanceof ApiError ? err : new ApiError(0, "unknown", String(err)); }
-    setLog((l) => l.map((x) => (x === entry ? { ...entry } : x)));
-    setBusy(false);
     setMsg("");
+    await run(q, newIdempotencyKey());               // one key per message: a retry can never duplicate the turn
   }
 
   async function close() {
@@ -130,7 +161,11 @@ function Conversation({ session, onClosed }: { session: AgentSession; onClosed: 
         {log.map((l, i) => (
           <div key={i} className="stack">
             <div className="bubble me">{l.q}</div>
-            {l.error ? <ErrorState error={l.error} /> : l.turn ? <TurnView turn={l.turn} /> : <Loading lines={2} />}
+            {l.cancelled ? (
+              <div className="callout warn small">Cancelled. The server may still finish this turn; Retry sends the
+                same request, which returns that turn instead of creating a new one.
+                <Button variant="ghost" onClick={() => run(l.q, l.key)} disabled={busy}>Retry</Button></div>
+            ) : l.error ? <ErrorState error={l.error} /> : l.turn ? <TurnView turn={l.turn} /> : <Loading lines={2} />}
           </div>
         ))}
       </div>
@@ -138,7 +173,8 @@ function Conversation({ session, onClosed }: { session: AgentSession; onClosed: 
         <form onSubmit={send} className="row">
           <input className="input" style={{ flex: 1 }} value={msg} maxLength={2000} onChange={(e) => setMsg(e.target.value)}
                  placeholder="Ask the agent about the work" aria-label="Message to the agent" />
-          <Button variant="primary" type="submit" disabled={busy || !msg.trim()}>Send</Button>
+          {busy ? <Button type="button" onClick={() => ctrl.current?.abort()}>Cancel</Button>
+            : <Button variant="primary" type="submit" disabled={!msg.trim()}>Send</Button>}
           <Button onClick={close} disabled={busy}>Close session</Button>
         </form>
       ) : (
@@ -197,6 +233,37 @@ function MemoryView({ agentId }: { agentId: string }) {
           ))}</tbody>
         </table></div>
       )}
+    </div>
+  );
+}
+
+function HistoryView({ agentId, onOpen }: { agentId: string; onOpen: (d: SessionDetail) => void }) {
+  const [offset, setOffset] = useState(0);
+  const [list, reload] = useApi((s) => api.sessions(agentId, offset, 10, s), [agentId, offset]);
+  const [error, setError] = useState<ApiError | null>(null);
+  if (list.state === "loading") return <Loading />;
+  if (list.state === "error") return <ErrorState error={list.error} onRetry={reload} />;
+  if (list.data.sessions.length === 0) {
+    return <EmptyState title="No sessions yet">Your interviews with this agent appear here.</EmptyState>;
+  }
+  return (
+    <div className="stack">
+      {error && <ErrorState error={error} />}
+      <ul className="plain stack" aria-label="Your sessions">
+        {list.data.sessions.map((s) => (
+          <li key={s.session_id} className="row" style={{ justifyContent: "space-between" }}>
+            <span className="small">{new Date(s.opened_at).toLocaleString()} · {s.turns} turn(s) · K={s.batch_seq}</span>
+            <Button onClick={async () => {
+              try { onOpen(await api.session(s.session_id)); }
+              catch (e) { setError(e instanceof ApiError ? e : new ApiError(0, "unknown", String(e))); }
+            }}>Open</Button>
+          </li>
+        ))}
+      </ul>
+      <nav className="row" aria-label="Session pages" style={{ justifyContent: "flex-end" }}>
+        <Button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 10))}>Newer</Button>
+        <Button disabled={!list.data.has_more} onClick={() => setOffset(offset + 10)}>Older</Button>
+      </nav>
     </div>
   );
 }

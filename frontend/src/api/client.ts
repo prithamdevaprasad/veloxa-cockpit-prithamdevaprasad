@@ -1,7 +1,7 @@
 // Typed client for the Veloxa API. One place for authentication, cancellation and error handling.
 // The bearer token is the caller's: it is kept for this browser tab only (sessionStorage) and never logged.
 import type {
-  AgentRegistry, AgentSession, AgentTurn, Answer, ConflictRegister, Memories, Releases, RiskHistory, Scenario, ScenarioSubjects, Today,
+  AgentRegistry, AgentSession, AgentTurn, Answer, ConflictRegister, Memories, Releases, RiskHistory, Scenario, ScenarioSubjects, SessionDetail, SessionList, TimelineResult, Today,
 } from "./types";
 
 const TOKEN_KEY = "veloxa.token";
@@ -91,8 +91,13 @@ export const api = {
   openSession: (agentId: string, asKnownAt?: string) =>
     request<AgentSession>("POST", `/v1/agents/${encodeURIComponent(agentId)}/sessions`,
       asKnownAt ? { as_known_at: asKnownAt } : {}),
-  sendMessage: (sessionId: string, message: string, idempotencyKey: string) =>
-    request<AgentTurn>("POST", `/v1/sessions/${sessionId}/messages`, { message, idempotency_key: idempotencyKey }),
+  sendMessage: (sessionId: string, message: string, idempotencyKey: string, s?: AbortSignal) =>
+    request<AgentTurn>("POST", `/v1/sessions/${sessionId}/messages`, { message, idempotency_key: idempotencyKey }, s),
+  timeline: (start?: string, end?: string, s?: AbortSignal) =>
+    get<TimelineResult>("/v1/timeline" + qs({ start, end }), s),
+  sessions: (agentId: string, offset = 0, limit = 10, s?: AbortSignal) =>
+    get<SessionList>(`/v1/agents/${encodeURIComponent(agentId)}/sessions` + qs({ offset: String(offset), limit: String(limit) }), s),
+  session: (sessionId: string, s?: AbortSignal) => get<SessionDetail>(`/v1/sessions/${sessionId}`, s),
   closeSession: (sessionId: string) =>
     request<{ session_id: string; working_memory_closed: number }>("POST", `/v1/sessions/${sessionId}/close`),
   memories: (agentId: string, s?: AbortSignal) => get<Memories>(`/v1/agents/${encodeURIComponent(agentId)}/memories`, s),

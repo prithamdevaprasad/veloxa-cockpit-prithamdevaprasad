@@ -514,6 +514,76 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
                 return _agent_error(e)
         return {"session_id": str(session_id), "working_memory_closed": closed}
 
+    @app.get("/v1/timeline")
+    def get_timeline(start: str | None = None, end: str | None = None, as_known_at: str | None = None,
+                     authorization: str | None = Header(default=None)):
+        """Dated events from admitted records (joins, recorded exits, documents issued, e-mails the requester was
+        party to), through the declared timeline tool at the read basis. Never inferred events."""
+        from datetime import date as _date
+
+        now = now_fn()
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now)
+            if isinstance(principal, JSONResponse):
+                return principal
+            try:
+                s = _date.fromisoformat(start) if start else None
+                e = _date.fromisoformat(end) if end else None
+                spec = timeparse.parse("", now, schedule.time_zone, None, None, as_known_at)
+                basis = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), spec.mode, spec.as_of,
+                                      schedule.time_zone, now)
+            except ValueError as ex:
+                return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(ex)})
+            r = tools.timeline(conn, basis, principal, s, e) if basis.batch_seq else tools.ToolResult(
+                "timeline", "no_data", gaps=["nothing had been admitted at this knowledge point"])
+        return {"read_basis": {"batch_seq": basis.batch_seq, "banner": basis.banner()}, "status": r.status,
+                "events": [{"display": f.display, "kind": f.kind, "evidence": list(f.inputs)} for f in r.facts],
+                "evidence": [{"record_id": ev.record_id, "kind": ev.kind, "system": ev.system,
+                              "data_class": ev.data_class, "batch_seq": ev.batch_seq, "excerpt": ev.excerpt}
+                             for ev in r.evidence], "gaps": list(r.gaps)}
+
+    @app.get("/v1/agents/{agent_id}/sessions")
+    def agent_sessions(agent_id: str, limit: int = 20, offset: int = 0,
+                       authorization: str | None = Header(default=None)):
+        """The caller's OWN sessions with this agent (RLS), newest first, paginated."""
+        from .db import tenant_tx
+
+        limit, offset = max(1, min(limit, 100)), max(0, offset)
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            with tenant_tx(conn, tenant_id, principal.principal_id):
+                rows = conn.execute(
+                    "SELECT s.session_id, s.config_version, s.batch_seq, s.opened_at,"
+                    " (SELECT count(*) FROM runtime.agent_execution e WHERE e.session_id = s.session_id) AS turns"
+                    " FROM runtime.agent_session s WHERE s.agent_id = %s ORDER BY s.opened_at DESC, s.session_id"
+                    " LIMIT %s OFFSET %s", (agent_id, limit + 1, offset)).fetchall()
+        return {"agent_id": agent_id, "offset": offset, "limit": limit, "has_more": len(rows) > limit,
+                "sessions": [{"session_id": str(r["session_id"]), "config_version": r["config_version"],
+                              "batch_seq": r["batch_seq"], "opened_at": r["opened_at"].isoformat(),
+                              "turns": r["turns"]} for r in rows[:limit]]}
+
+    @app.get("/v1/sessions/{session_id}")
+    def agent_session_detail(session_id: uuid.UUID, authorization: str | None = Header(default=None)):
+        """One of the caller's own sessions with its stored turns, in order (for history across reloads)."""
+        from .db import tenant_tx
+
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            with tenant_tx(conn, tenant_id, principal.principal_id):
+                s = conn.execute("SELECT session_id, agent_id, config_version, batch_seq, opened_at FROM"
+                                 " runtime.agent_session WHERE session_id = %s", (session_id,)).fetchone()
+                turns = conn.execute("SELECT response FROM runtime.agent_execution WHERE session_id = %s"
+                                     " ORDER BY executed_at, execution_id", (session_id,)).fetchall() if s else []
+        if s is None:
+            return JSONResponse(status_code=404, content={"error": "not_found"})
+        return {"session_id": str(s["session_id"]), "agent_id": s["agent_id"], "config_version": s["config_version"],
+                "batch_seq": s["batch_seq"], "opened_at": s["opened_at"].isoformat(),
+                "turns": [t["response"] for t in turns]}
+
     @app.get("/v1/agents/{agent_id}/memories")
     def agent_memories(agent_id: str, authorization: str | None = Header(default=None)):
         """Memory items in the caller's own scope (this agent, this interviewer), at current knowledge. Items whose

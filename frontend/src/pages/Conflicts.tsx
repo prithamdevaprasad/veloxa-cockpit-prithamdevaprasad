@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
 import type { Conflict } from "../api/types";
-import { Badge, Drawer, EmptyState, ErrorState, Loading, PageHead, Section } from "../ui";
+import { Badge, Drawer, EmptyState, ErrorState, Loading, PageHead, Pager, Section, usePage } from "../ui";
 
 /** The conflict register: every disagreement visible at a knowledge point, each side with its provenance and time.
  * No side is chosen; resolution is a human decision. */
@@ -10,6 +10,7 @@ export function ConflictsPage() {
   const [asKnownAt, setAsKnownAt] = useState("");
   const [reg, reload] = useApi((s) => api.conflicts(asKnownAt || undefined, s), [asKnownAt]);
   const [open, setOpen] = useState<Conflict | null>(null);
+  const page = usePage(reg.state === "ready" ? reg.data.conflicts : [], 10);
   return (
     <>
       <PageHead title="Conflict register" intro="Where admitted sources disagree. Values are shown side by side with
@@ -30,7 +31,7 @@ export function ConflictsPage() {
             <table>
               <thead><tr><th>Subject</th><th>Values</th><th>Match</th><th>Status</th></tr></thead>
               <tbody>
-                {reg.data.conflicts.map((c) => (
+                {page.items.map((c) => (
                   <tr key={c.conflict_id} className="clickable" tabIndex={0} onClick={() => setOpen(c)}
                       onKeyDown={(e) => e.key === "Enter" && setOpen(c)}>
                     <td>{c.subject}</td>
@@ -41,6 +42,7 @@ export function ConflictsPage() {
                 ))}
               </tbody>
             </table>
+            <Pager page={page} />
           </div>
         ))}
       </Section>

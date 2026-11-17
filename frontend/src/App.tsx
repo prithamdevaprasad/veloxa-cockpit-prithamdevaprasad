@@ -5,11 +5,12 @@ import { AskPage } from "./pages/Ask";
 import { ConflictsPage } from "./pages/Conflicts";
 import { DepartmentsPage } from "./pages/Departments";
 import { ScenariosPage } from "./pages/Scenarios";
+import { TimelinePage } from "./pages/Timeline";
 import { TodayPage } from "./pages/Today";
 import { Button, PageHead, Section } from "./ui";
 
 const ROUTES = { today: "Today", ask: "Ask", conflicts: "Conflicts", agents: "Agents", departments: "Departments",
-                 scenarios: "Scenarios", access: "Access" } as const;
+                 scenarios: "Scenarios", timeline: "Timeline", access: "Access" } as const;
 type Route = keyof typeof ROUTES;
 
 function current(): Route {
@@ -67,6 +68,7 @@ export function App() {
         {route === "agents" && <AgentsPage />}
         {route === "departments" && <DepartmentsPage />}
         {route === "scenarios" && <ScenariosPage />}
+        {route === "timeline" && <TimelinePage />}
         {route === "access" && <AccessPage onChange={() => setAuthTick((t) => t + 1)} />}
       </main>
     </div>

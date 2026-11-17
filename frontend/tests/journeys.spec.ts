@@ -57,8 +57,10 @@ test("Journey C: a synthetic agent interview, memory and close; slots stay close
   await signIn(page);
   await page.goto("/#/agents");
   await expect(page.getByRole("cell", { name: "agent-eng-01" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Directory pages" })).toContainText("Page 1 of 2");
   await page.getByRole("cell", { name: "agent-eng-01" }).click();
   await expect(page.getByText("Interviews are closed")).toBeVisible();
+  await page.getByRole("button", { name: "People Ops" }).click();               // 15 agents: page through by category
   await page.getByRole("cell", { name: "syn-demo-ppl" }).click();
   await expect(page.getByText("Synthetic test agent. It represents no employee.")).toBeVisible();
   await page.getByRole("button", { name: "Start interview" }).click();
@@ -89,7 +91,7 @@ test("Department views show governed figures only", async ({ page }) => {
 
 test("the layout has no horizontal page scroll", async ({ page }) => {
   await signIn(page);
-  for (const r of ["today", "ask", "conflicts", "agents", "departments", "scenarios"]) {
+  for (const r of ["today", "ask", "conflicts", "agents", "departments", "scenarios", "timeline"]) {
     await page.goto(`/#/${r}`);
     await page.waitForLoadState("networkidle");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -108,4 +110,31 @@ test("Scenarios never predict and say when the evidence names nothing", async ({
   await expect(page.getByRole("heading", { name: "Scenarios" })).toBeVisible();
   await expect(page.getByText("No named commitments")).toBeVisible();          // the synthetic D1 states none
   await expect(page.locator("body")).not.toContainText("%");                     // no probability anywhere
+});
+
+test("Timeline shows record events with their sources", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/timeline");
+  const events = page.getByRole("list", { name: "Timeline events" });
+  await expect(events).toContainText("joined");
+  await events.getByRole("button", { name: "Show sources" }).first().click();
+  await expect(page.getByRole("dialog", { name: "Sources" })).toContainText("keka_hrms:");
+});
+
+test("Agent session history survives a page reload", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/agents");
+  await page.getByRole("button", { name: "People Ops" }).click();               // 15 agents: page through by category
+  await page.getByRole("cell", { name: "syn-demo-ppl" }).click();
+  await page.getByRole("button", { name: "Start interview" }).click();
+  await page.getByLabel("Message to the agent").fill("What is our headcount?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("People in the HR export: 2").first()).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "People Ops" }).click();               // 15 agents: page through by category
+  await page.getByRole("cell", { name: "syn-demo-ppl" }).click();
+  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("list", { name: "Your sessions" }).getByRole("button", { name: "Open" }).first().click();
+  await expect(page.locator(".bubble.me").first()).toHaveText("What is our headcount?");
+  await expect(page.getByText("People in the HR export: 2").first()).toBeVisible();
 });
