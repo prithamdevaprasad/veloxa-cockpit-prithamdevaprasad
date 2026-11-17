@@ -42,13 +42,27 @@ DBOS stores workflow inputs, step outputs and errors outside Veloxa's RLS. There
 - **Outputs:** IDs, counts and statuses only.
 - **Never stored:** messages, evidence excerpts, payroll values, tokens or connection strings. A test scans the DBOS tables for these.
 
-**Retention.** Owner policy is not set. Until it is, keep the system database under the same access controls and backups as the application database. Prune old runs with `DBOSClient.delete_workflows` once a retention period is approved. **No retention period is invented here.**
+**Retention: proposed, NOT approved (owner decision OD-A).**
+
+**Verified against DBOS 3.5.0:** there is no automatic garbage collection. Records stay until `delete_workflows` is called. Until the owner approves a period, keep the system database under the same access controls and backups as the application database.
+
+`veloxa workflow-retention` (`workflows/retention.py`):
+- **Default (dry run):** reports what the proposed periods would remove (successful runs after 90 days; failed runs after 180 days). It prints IDs and counts only.
+- **`--apply`:** deletes, but only if all three of these are set; otherwise it is refused with exit 2:
+  - `VELOXA_WORKFLOW_RETENTION_DECISION` (the owner decision record);
+  - `VELOXA_WORKFLOW_RETENTION_SUCCESS_DAYS`;
+  - `VELOXA_WORKFLOW_RETENTION_ERROR_DAYS`.
+- **Never removed:**
+  - pending, enqueued or other unfinished runs (recovery needs them);
+  - any ID in `VELOXA_WORKFLOW_LEGAL_HOLD` (comma-separated).
+- **Audit:** Veloxa's audit chain keeps a `workflow.completed` event per run. Removing an old run loses checkpoint replay for that run, not the evidence that it ran.
 
 ## Commands
 
 ```
 veloxa workflow-pack --pack D1 [--key K]   # needs ingest and projection credentials and VELOXA_WORKFLOW_DATABASE_URL
 veloxa workflow-status <workflow_id>       # status only
+veloxa workflow-retention [--apply]         # dry run by default; --apply needs an approved owner decision
 ```
 
 ## Tests

@@ -1,0 +1,16 @@
+# Defence in depth: the Dockerfile copies named paths only; never send these to the build context.
+.git
+.github
+.venv
+**/__pycache__
+**/*.pyc
+.env
+.env.*
+!.env.example
+*.dump
+*.manifest.json
+frontend/node_modules
+frontend/dist
+frontend/test-results
+frontend/playwright-report
+voice_notes
