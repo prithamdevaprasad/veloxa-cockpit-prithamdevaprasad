@@ -30,7 +30,7 @@ The design is a production-first reference architecture, approved as baseline v1
 | **Disclosure auditor (C19)** (`src/veloxa/disclosure/`) | **Implemented and tested on synthetic payroll; release OFF.** One gate for every protected aggregate: the exact core decision on M2 person-segments, with the principal's own values as background; an append-only ledger per tenant, principal and measure (migration `0009`), with idempotent retries and serialized decisions. A payroll value can come only from a database function that requires an allowed decision of the same principal and an owner-recorded release. No release is recorded, so payroll stays refused on every channel, including the real Day 1 data. Still missing: the sdcTable oracle (no R runtime), and the production identity, ReBAC and ABAC prerequisites |
 | **Current authorization (C02, C20, C21)** (`src/veloxa/authz/`) | **Contracts implemented and tested; not yet wired into the API.** A provider-neutral token validator (signature, algorithm, issuer, audience, expiry, tenant, typed subject, token revocation, audited); ReBAC as PostgreSQL relationship tuples in a SpiceDB-compatible shape (migration `0010`); ABAC policy `abac/1` (deny overrides, missing attributes deny). No identity provider is selected, and SpiceDB and OPA are not run (§25.1). C19 now takes individually authorised values and readable payroll documents into account, decided by current authorization only |
 | **Requester authentication** | **Fails closed.** No identity provider is integrated, so `/v1/ask` and `/v1/briefing` return 401 unless the explicit local development fixture is enabled |
-| HTTP API | `/health`, `/v1/meta/clock`, `/v1/meta/releases`, `POST /v1/ask`, `GET /v1/briefing`, `GET /v1/briefing/{snapshot_id}` |
+| HTTP API | `/health`, `/v1/meta/clock`, `/v1/meta/releases`, `POST /v1/ask`, `GET /v1/briefing`, `GET /v1/briefing/{snapshot_id}`, `GET /v1/today` (the opening view: at most three evidence-backed items, unranked; voice note T6a, see `voice_notes/T6a.md`) |
 | Ranked briefing (D-15), agents, gold tests, model planner and composer | **Not implemented yet** (Days 2–4; weighted ranking only after the owner approves D-15) |
 | Frontend | **Deferred.** Technology not chosen; the backend stays frontend-independent (`ARCHITECTURE.md` §19, §26.2) |
 
@@ -127,7 +127,7 @@ VELOXA_DATA_PATH=/path/to/packs docker compose up -d --wait db
 export VELOXA_TEST_ADMIN_DSN="postgresql://veloxa_admin:local-dev-admin@127.0.0.1:55432/veloxa"
 ruff check .
 python scripts/public_scan.py   # public safety scan: exits 1 on any finding (CI runs it as a gate)
-pytest                       # everything (395 tests), including the real-data tests if VELOXA_DATA_PATH is set
+pytest                       # everything (407 tests), including the real-data tests if VELOXA_DATA_PATH is set
 pytest -m "not realdata"     # what CI runs: synthetic data only
 ```
 
@@ -177,7 +177,7 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
 | `config/figure_mappings.toml` | Owner-approved pairings of reported figures with governed metrics (none approved yet) | §16.2 C4 |
 | `src/veloxa/auth.py` | Requester authentication: fail closed by default; explicit local development fixture | §19.1 |
 | `src/veloxa/api.py`, `src/veloxa/cli.py` | API (health, time metadata, ask, briefing) and command line (`signals` prints detector counts only) | §19 |
-| `tests/` | 395 tests: release rules and clock, parsers, contracts, database guarantees, concurrency, temporal modes and leakage canaries, metrics and tools, the ask pipeline, risk comparison, D-15 gate, briefing snapshots, authentication, the API, availability on failed admission, the detector contract and the C1–C4 pipelines, the signal store, real-data checks | §21.2 |
+| `tests/` | 407 tests: release rules and clock, parsers, contracts, database guarantees, concurrency, temporal modes and leakage canaries, metrics and tools, the ask pipeline, risk comparison, D-15 gate, briefing snapshots, authentication, the API, availability on failed admission, the detector contract and the C1–C4 pipelines, the signal store, real-data checks | §21.2 |
 | `Dockerfile`, `docker-compose.yml`, `.github/workflows/ci.yml` | One-command run; CI with lint, tests and a fresh-clone Compose job | §25.1, H-30 |
 
 ## Guarantees enforced today (and tested)

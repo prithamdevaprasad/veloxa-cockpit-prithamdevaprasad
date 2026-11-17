@@ -236,3 +236,13 @@ def test_the_briefing_shows_every_criterion_unranked_with_its_status(db, app_con
     with connect(db.admin_dsn) as admin, tenant_tx(admin, packs):
         assert admin.execute("SELECT count(*) AS n FROM policy.ranking_decision WHERE tenant_id = %s",
                              (packs,)).fetchone()["n"] == 0  # the administrator bypasses RLS: filter explicitly
+
+
+def test_today_shows_the_delayed_commitment_without_a_question(app_conn, packs):
+    """Voice note T6a, end to end on synthetic packs: the recorded delay is the only evidence-backed worry."""
+    from veloxa.releases import current_time
+
+    b = briefing.serve(app_conn, packs, ALPHA, _basis(app_conn, packs), current_time(), [])
+    (item,) = b["today"]["items"]
+    assert item["business_object"] == "Orion" and set(item["evidence"]) == {Q1_DOC, Q2_DOC}
+    assert b["top_three"] is None and b["today"]["ranked"] is False

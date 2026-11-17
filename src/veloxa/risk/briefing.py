@@ -79,6 +79,69 @@ STATUS_LEGEND = {
 }
 
 
+TODAY_LIMIT = 3
+TODAY_RULE = (
+    "Shown without a question (voice note T6a). An item appears only if the evidence itself supports attention: a "
+    "risk that no other risk demonstrably dominates (unweighted comparison), or an active, formally evidenced adverse "
+    "signal (a recorded delivery delay or delayed status, a confirmed figure discrepancy, a confirmed absence of "
+    "continuity coverage), grouped by business object. At most three. Items are NOT ranked: choosing three out of "
+    "more needs the owner's D-15 decision, so in that case none is picked and every candidate is named instead.")
+
+
+def _adverse(sig: dict) -> bool:
+    if sig["status"] != "active":
+        return False
+    t, cat = sig["signal_type"], (sig["value"] or {}).get("category") or ""
+    if t == "delivery_delay" or (t == "commitment_status" and cat.startswith(("delayed", "conflicting"))):
+        return True
+    if t == "figure_discrepancy":
+        return True
+    return t == "continuity_evidence" and "confirmed_absence" in sig["flags"]
+
+
+def today_section(body: dict) -> dict:
+    """At most three evidence-backed attention items, derived only from the briefing body (pure, deterministic)."""
+    candidates: dict[str, dict] = {}
+    for r in body["watchlist"]:
+        if r["comparison"]["group"] == "not_dominated":
+            candidates[f"risk:{r['risk_id']}"] = {
+                "business_object": r["business_object"], "source": "risk_watchlist", "title": r["description"],
+                "why_shown": "no other risk demonstrably dominates it on the approved criteria",
+                "evidence": [e["record_id"] for e in r["evidence"]], "unknowns": r["unknowns"],
+                "time_context": r["time_context"]}
+    for crit, sec in body["evidence_signals"]["by_criterion"].items():
+        for s in sec["signals"]:
+            if not _adverse(s):
+                continue
+            key = f"{crit}:{s['subject']}"
+            item = candidates.setdefault(key, {
+                "business_object": s["subject"], "source": f"{crit} evidence signals", "title": None,
+                "why_shown": None, "evidence": [], "unknowns": [], "time_context": {}})
+            facts = "; ".join(s["observed"]) if s["observed"] else s["signal_type"]
+            if s["signal_type"] == "commitment_status" or item["title"] is None:
+                item["title"] = f"{s['subject']}: {(s['value'] or {}).get('category', s['signal_type'])}"
+                item["why_shown"] = f"{crit} {s['signal_type'].replace('_', ' ')} ({s['status']}): {facts}"
+            item["evidence"] = sorted(set(item["evidence"]) | {e["record_id"] for e in s["evidence_records"]})
+            item["unknowns"] = list(dict.fromkeys(item["unknowns"] + list(s["missing"])))
+            item["time_context"] = {k: v for k, v in (("recorded_on", s["recorded_on"]),
+                                                      ("event_date", s["event_date"])) if v} or item["time_context"]
+    items = [v for _, v in sorted(candidates.items())]
+    unmeasurable = [f"{c}: {sec['measurability']}" for c, sec in body["evidence_signals"]["by_criterion"].items()
+                    if not any(_adverse(s) for s in sec["signals"])]
+    if len(items) > TODAY_LIMIT:
+        return {"items": [], "ranked": False, "rule": TODAY_RULE, "candidate_count": len(items),
+                "candidates": [i["business_object"] for i in items],
+                "explanation": f"{len(items)} items qualify. Choosing the top three needs the owner's D-15 ranking "
+                               "decision, which is not recorded, so none is picked; all candidates are named.",
+                "not_shown_because_unmeasurable": unmeasurable}
+    return {"items": items, "ranked": False, "rule": TODAY_RULE, "candidate_count": len(items),
+            "explanation": ("Every qualifying item is shown." if items else "No item qualifies on current evidence.")
+            + (" Fewer than three: the evidence supports no more, and nothing is added to fill the list."
+               if len(items) < TODAY_LIMIT else ""),
+            "not_shown_because_unmeasurable": unmeasurable}
+
+
+
 def tenant_time_zone(conn: psycopg.Connection, tenant_id) -> str:
     with tenant_tx(conn, tenant_id):
         row = conn.execute("SELECT time_zone FROM directory.tenant WHERE tenant_id = %s", (tenant_id,)).fetchone()
@@ -169,7 +232,7 @@ def build(conn: psycopg.Connection, principal: tools.Principal, basis: ReadBasis
     needing = list(dict.fromkeys(notes + [f"{c}: {registry.MEASURABILITY[c]}" for c in ("C1", "C2", "C3", "C4",
                                                                                         "C5")]
                                  + [f"{r.risk_id}: insufficient (no criterion measured)" for r in insufficient]))
-    return {
+    body = {
         "briefing_kind": "interim_unranked_watchlist",
         "ranking_mode": governance.ranking_mode(policy),
         "owner_decision_status": governance.owner_decision_status(policy),
@@ -189,6 +252,8 @@ def build(conn: psycopg.Connection, principal: tools.Principal, basis: ReadBasis
         "read_basis": {"batch_seq": basis.batch_seq, "mode": str(basis.mode), "as_of": basis.as_of,
                        "banner": basis.banner(), "notes": list(basis.notes)},
     }
+    body["today"] = today_section(body)
+    return body
 
 
 def _hash(body: dict) -> str:

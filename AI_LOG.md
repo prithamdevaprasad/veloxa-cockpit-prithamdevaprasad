@@ -943,3 +943,27 @@ Master execution prompt, Sprint 4: production identity, current ReBAC and ABAC, 
 
 - Payroll release stays off. No D-15 decision, mapping, anchor, guardrail or probability was activated.
 - D-14a and D-22 are unchanged. `ARCHITECTURE.md` is unchanged. No D2 material had been opened when this entry was written.
+
+## Tue 17 Nov 2026 — Voice note T6a: the Today view
+
+### Task given to AI
+
+T6a asks that the cockpit say what to worry about when it opens, without a question: the top three. The owner authorised full local inspection of the supplied material, and the response is due by 23:59 IST on D2.
+
+### What AI produced
+
+- **`GET /v1/today`.** It returns up to three items, recorded in the immutable briefing snapshot. Selection is weight-free:
+  - undominated risks;
+  - active, formally evidenced adverse signals (delays, discrepancies, confirmed coverage gaps), grouped by business object.
+- **Never ranked, never padded.** If more than three qualify, none is picked and all are named, because choosing three needs D-15.
+- **Response:** `voice_notes/T6a.md` records the change and the pushback.
+
+### Where AI was wrong, and what changed
+
+| # | AI error or weakness | Who caught it | Correction |
+|---|---|---|---|
+| E65 | AI waited on a release-clock watcher for local inspection, although the owner had supplied the full material | Owner | Local inspection is authorised. The product's K visibility and release metadata are unchanged, and the D2-derived public response was committed only after D2's 10:00 IST release time |
+
+### Verification actually run
+
+- `pytest`: 407 passed. `ruff check .`: passed. Public and private scans: CLEAN, with D2 allowed only after its release.

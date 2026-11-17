@@ -181,6 +181,22 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
             return briefing.serve(conn, tenant_id, principal, basis, now)
 
+    @app.get("/v1/today")
+    def get_today(authorization: str | None = Header(default=None)):
+        """What the cockpit shows when it opens (voice note T6a): at most three evidence-backed attention items,
+        without a question. Not ranked while D-15 is pending. Recorded in the same immutable briefing snapshot."""
+        now = now_fn()
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now)
+            if isinstance(principal, JSONResponse):
+                return principal
+            basis = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), Mode.CURRENT, None,
+                                  schedule.time_zone, now)
+            b = briefing.serve(conn, tenant_id, principal, basis, now)
+        return {"today": b["today"], "top_three": b["top_three"], "ranking_mode": b["ranking_mode"],
+                "owner_decision_status": b["owner_decision_status"], "read_basis": b["read_basis"],
+                "snapshot_id": b["snapshot_id"], "full_briefing": f"/v1/briefing/{b['snapshot_id']}"}
+
     @app.get("/v1/briefing/{snapshot_id}")
     def get_briefing_snapshot(snapshot_id: uuid.UUID, authorization: str | None = Header(default=None)):
         """A recorded briefing exactly as served, with the D-15 policy version in force at the time."""
