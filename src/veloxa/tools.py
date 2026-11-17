@@ -32,6 +32,9 @@ class Principal:
     principal_id: str
     role: str            # e.g. "executive"
     email: str | None    # used for party-based authorization of communications
+    # Per-document evidence access (authz/evidence.py). None = the pre-0017 tenant-wide behaviour.
+    access: object | None = None
+    tenant_id: object | None = None
 
 
 @dataclass

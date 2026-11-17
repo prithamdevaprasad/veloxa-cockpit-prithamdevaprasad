@@ -23,6 +23,7 @@ from decimal import Decimal
 import psycopg
 
 from .. import audit, ledger, tools
+from ..authz import evidence as evidence_authz
 from ..db import tenant_tx
 from ..temporal import Mode, ReadBasis, resolve_basis
 from . import conflicts, planner, policy, timeparse
@@ -153,11 +154,25 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
 
     # (6) execute declared operations (each runs under RLS at K with the principal's party filter)
     results: list[tools.ToolResult] = []
+    withheld_by_permission = 0
     for step in the_plan.steps:
         try:
-            results.append(tools.TOOLS[step.tool](conn, basis, principal, **step.args))
+            r = tools.TOOLS[step.tool](conn, basis, principal, **step.args)
         except Exception as e:  # an operation failure makes its claims unavailable, never the whole service
-            results.append(tools.ToolResult(step.tool, "unsupported", reason=f"operation failed ({type(e).__name__})"))
+            r = tools.ToolResult(step.tool, "unsupported", reason=f"operation failed ({type(e).__name__})")
+        if principal.access is not None:          # per-document ReBAC + ABAC on every tool result
+            r, n = evidence_authz.gate(r, principal.access)
+            withheld_by_permission += n
+        results.append(r)
+    base["diagnostics"] = {
+        "stage": "executed",
+        "plan": [{"tool": st.tool, "why": st.why} for st in the_plan.steps],
+        "tools": [{"tool": x.tool, "status": x.status, "facts": len(x.facts), "evidence": len(x.evidence)}
+                  for x in results],
+        "evidence_considered": sum(len(x.evidence) for x in results),
+        "withheld_by_permission": withheld_by_permission,
+        "access_mode": principal.access.mode if principal.access is not None else "tenant_wide",
+    }
 
     withheld = [r for r in results if r.status == "withheld"]
     if withheld and len(withheld) == len(results):
@@ -217,6 +232,15 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
     qualifiers = list(dict.fromkeys([q for c in kept for e in c.evidence if e in facts
                                      for q in facts[e]["qualifiers"]] + [FACTS_ONLY]))
     found = conflicts.for_question(conn, basis, tz, question)        # H-11: never one figure when sources disagree
+    if found and principal.access is not None and principal.access.mode == "rebac":
+        # A disagreement is shown only if EVERY side is readable: one side alone would mislead.
+        ids = sorted({c["record_id"] for d in found for c in d["claims"]})
+        ok = {e.record_id for e in tools._evidence(conn, basis, ids) if principal.access.allows(e.system, e.data_class)}
+        hidden = [d for d in found if not {c["record_id"] for c in d["claims"]} <= ok]
+        found = [d for d in found if d not in hidden]
+        if hidden:
+            unknowns.append(f"{len(hidden)} source disagreement(s) involve records outside your authorised sources; "
+                            "they are not shown")
     status = _status(False, headline, qualifiers, conflict=bool(found))
     shown = [c.text for c in kept[:3]]
     text = ". ".join(s.rstrip(".") for s in shown) + "."
@@ -312,7 +336,12 @@ def _record(conn: psycopg.Connection, tenant_id: uuid.UUID, principal: tools.Pri
     """(11) Record the answer, its citations and audit events in ONE transaction. Audit details hold structure
     and counts only, never question text or values."""
     answer_id = base["answer_id"]
-    result = {**result, "audit_id": answer_id, "pipeline_version": base["pipeline_version"]}
+    diag = dict(base.get("diagnostics") or {"stage": "prescreen" if result.get("refusal") else "basis"})
+    if result["status"] == "abstained":
+        diag["abstention_reason"] = (result.get("unknowns") or ["no admitted evidence answers this question"])[0]
+    if result.get("verification"):
+        diag["citation_verification"] = result["verification"].get("deterministic")
+    result = {**result, "audit_id": answer_id, "pipeline_version": base["pipeline_version"], "diagnostics": diag}
     cited = sorted({e["record_id"] for e in result["evidence"]})
     policy_id = result["refusal"]["policy"] if result["refusal"] else None
     with tenant_tx(conn, tenant_id, principal.principal_id, basis.batch_seq):

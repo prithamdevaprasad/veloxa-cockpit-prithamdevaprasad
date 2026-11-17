@@ -187,6 +187,13 @@ SELECT p.tenant_id, p.principal_id, p.display_name, p.email, p.person_anchor,
   FROM directory.principal p;
 GRANT SELECT ON directory.tenant_setting_current, directory.principal_status TO veloxa_app;
 
+-- Unrevoked relationship tuples (the current C20 projection minus appended revocations).
+CREATE VIEW policy.live_tuple WITH (security_invoker = true) AS
+SELECT t.* FROM policy.relationship_tuple t
+ WHERE NOT EXISTS (SELECT 1 FROM policy.relationship_revocation r
+                    WHERE r.tenant_id = t.tenant_id AND r.tuple_id = t.tuple_id);
+GRANT SELECT ON policy.live_tuple TO veloxa_app;
+
 -- ---------------------------------------------------------------------------------------------------------------
 -- Guarded administration (SECURITY DEFINER; owner veloxa_owner). Every function:
 --   * acts only in the tenant of app.tenant_id, as the caller in app.principal_id;

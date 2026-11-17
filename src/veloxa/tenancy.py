@@ -194,6 +194,22 @@ def bootstrap_synthetic_admin(conn: psycopg.Connection, tenant_id: uuid.UUID, pr
         audit.append(conn, tenant_id, "workspace.bootstrap_admin", {"principal": principal_id, "synthetic": True})
 
 
+def add_synthetic_member(conn: psycopg.Connection, tenant_id: uuid.UUID, principal_id: str, display_name: str,
+                         email: str | None = None) -> None:
+    """Operator, SYNTHETIC tenants only: an active member without an identity provider (Demo Lab, tests).
+    Grants nothing: roles are granted separately through the guarded functions."""
+    t = conn.execute("SELECT synthetic FROM directory.tenant WHERE tenant_id = %s", (tenant_id,)).fetchone()
+    if t is None or not t["synthetic"]:
+        raise TenancyError("synthetic members are refused for a non-synthetic tenant")
+    with tenant_tx(conn, tenant_id, "operator"):
+        conn.execute("INSERT INTO directory.principal (tenant_id, principal_id, display_name, email)"
+                     " VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                     (tenant_id, principal_id, display_name, email.lower() if email else None))
+        conn.execute("INSERT INTO directory.principal_event (tenant_id, principal_id, event, actor, reason)"
+                     " VALUES (%s, %s, 'activated', 'operator', 'synthetic member')", (tenant_id, principal_id))
+        audit.append(conn, tenant_id, "workspace.synthetic_member", {"principal": principal_id})
+
+
 def grant_as_operator(conn: psycopg.Connection, tenant_id: uuid.UUID, rtype: str, rid: str, relation: str,
                       principal_id: str, reason: str, subject_relation: str | None = None) -> uuid.UUID:
     """Operator-only tuple write (privileged connection). The API uses the guarded functions instead."""
