@@ -137,14 +137,18 @@ def plan(question: str, people: list[dict], default_year: int, tz: str) -> Plan:
         if not re.search(rx, q, re.IGNORECASE):
             continue
         if tool == "headcount":
-            by = "department" if re.search(r"\b(by|per|each|across) (department|team|function)s?\b", q, re.I) else None
+            named_dept = any(p.get("department") and re.search(rf"\b{re.escape(p['department'])}\b", q, re.I)
+                             for p in people)
+            by = "department" if named_dept or re.search(r"\b(by|per|each|across) (department|team|function)s?\b",
+                                                         q, re.I) else None
             steps.append(Step("headcount", {"by": by} if by else {}, "headcount question"))
         elif tool == "finance_totals":
             dims = [d for d, rx2 in (("vendor", r"\b(by|per|each) (vendor|supplier|payee)s?\b"),
                                      ("cost_centre", r"\b(by|per|each) cost cent(re|er)s?\b"),
                                      ("month", r"\b(by|per|each) month\b|\bmonthly\b")) if re.search(rx2, q, re.I)]
             filters = {}
-            cc = re.search(r"\b(CC-[A-Z0-9]+)\b", q)
+            cc = (re.search(r"\b(CC-[A-Z0-9]+)\b", q)
+                  or re.search(r"\bcost cent(?:re|er)\s+([A-Z][A-Z0-9&]*(?:-[A-Z0-9&]+)*)(?![\w&-])", q))
             if cc:
                 filters["cost_centre"] = cc.group(1)
             args = ({"dims": dims} if dims else {}) | ({"filters": filters} if filters else {})

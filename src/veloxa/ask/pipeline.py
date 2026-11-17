@@ -61,14 +61,18 @@ def _related(a: set[str], b: set[str]) -> int:
                                    for y in b))
 
 
-def _select(facts: list[tuple[str, tools.Fact]], terms: list[str]) -> list[tuple[str, tools.Fact]]:
-    """Keep the facts most related to the question's content words (all of them if none relate)."""
+def _select(facts: list[tuple[str, tools.Fact]], terms: list[str]) -> tuple[list[tuple[str, tools.Fact]], int]:
+    """Keep the facts most related to the question's content words (all of them if none relate), at most
+    MAX_CLAIMS. Returns (chosen, omitted): `omitted` relevant facts did not fit and must be DISCLOSED, never dropped
+    silently (an incomplete breakdown must not read as complete)."""
     if not terms or len(facts) <= 1:
-        return facts[:MAX_CLAIMS]
-    q = set(terms)
-    scored = [(_related(q, _tokens(f.display)), fid, f) for fid, f in facts]
-    best = max(s for s, _, _ in scored)
-    return [(fid, f) for s, fid, f in scored if s == best][:MAX_CLAIMS] if best > 0 else facts[:MAX_CLAIMS]
+        relevant = facts
+    else:
+        q = set(terms)
+        scored = [(_related(q, _tokens(f.display)), fid, f) for fid, f in facts]
+        best = max(s for s, _, _ in scored)
+        relevant = [(fid, f) for s, fid, f in scored if s == best] if best > 0 else facts
+    return relevant[:MAX_CLAIMS], max(0, len(relevant) - MAX_CLAIMS)
 
 
 def _claim_grade(c: Claim, facts: dict, records: dict) -> str:
@@ -137,7 +141,11 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
              "extrapolated"]))
 
     # (4)-(5) entity linking and bounded plan
-    people = _people(conn, basis)
+    try:
+        people = _people(conn, basis)
+    except ValueError as e:      # e.g. VALID_AT over sources that record no valid time: unanswerable, not an error
+        return _record(conn, tenant_id, principal, now, basis, base, _abstained(
+            basis, f"I read this as a question at {basis.banner()}.", [str(e)]))
     the_plan = planner.plan(spec.remainder, people, now.year, tz)
     interpretation = the_plan.interpretation + (f" Time: {spec.phrase!r} -> {basis.banner()}." if spec.phrase
                                                 else f" Time: {basis.banner()}.")
@@ -183,7 +191,10 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
              for fid, f in pack_facts}
 
     # (8) facts-only rendering: each claim is one fact's display text (or one excerpt), citing it
-    chosen = _select(pack_facts, the_plan.focus_terms)
+    chosen, omitted = _select(pack_facts, the_plan.focus_terms)
+    if omitted:
+        unknowns.append(f"{omitted} further matching fact(s) are not shown (at most {MAX_CLAIMS} claims per answer); "
+                        "the answer is incomplete: ask a narrower question")
     claims = [Claim(f.display, f.kind, [fid] + list(f.inputs)) for fid, f in chosen]
     claims += [Claim(text, "statement", [rid]) for rid, text in excerpt_claims[:MAX_CLAIMS - len(claims)]]
 

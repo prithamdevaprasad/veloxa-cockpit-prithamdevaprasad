@@ -62,6 +62,8 @@ _PAY = r"\b(salar(y|ies)|pay(slip|check|cheque)?|paid|ctc|compensation|wages?|gr
        r"bonus(es)?|increments?|hikes?|appraisal amount)\b"
 _INDIVIDUAL = r"\b(his|her|their|each|every|individual|per (person|employee|head)|who|whose|which (employee|person)|" \
               r"highest|lowest|top earners?|best paid|worst paid)\b"
+# A role title names ONE person as surely as a name does ("how much does the CTO earn").
+_ROLE = r"\b(ceo|cto|cfo|coo|cpo|chro|cmo|founder|co-?founder|vp|vice president|head of \w+|director)\b"
 _BUSINESS_PAYEE = r"\b(vendors?|suppliers?|payees?|invoices?|ledger|cost cent(re|er)s?|contracts?)\b"
 _ATTRITION = r"\b(attrition|flight risk|churn|quit\w*|resign\w*|leav(e|ing) (the company|veloxa|us))\b"
 _JUDGEMENT = (r"\b(under-?perform\w*|(low|high|top|poor|weak|best|worst) performers?|"
@@ -78,6 +80,7 @@ _WHY = r"\b(why|reason|reasons|cause|what made|what led)\b"
 _SENSITIVE = r"\b(leave|sick|medical|health|illness|pregnan\w*|maternity|paternity|absen(ce|t)|resign(ed|ation)?|" \
              r"quit|exit(ed)?|left|fired|terminat\w+|disciplinary|pip|warning|personal reasons?)\b"
 _PRODUCTIVITY = r"\b(commit(s)? (count|counts|per|by)|number of commits|how many commits|" \
+                r"commit(s|ted)? (the )?(most|least|fewest)|(most|least|more|less|fewest) (code|commits)|" \
                 r"(most|least|fewest) commits|lines of code|keystrokes?|" \
                 r"log-?in (times?|hours?)|online (hours?|times?)|active hours|hours (online|logged)|" \
                 r"(most|least) (productive|active)|productivity (score|ranking|of)|works? (the )?(most|least|late))\b"
@@ -108,7 +111,7 @@ def prescreen(question: str, people: list[str]) -> Refusal | None:
         return Refusal(POLICIES["POL-ACT-01"], "imperative action verb")
     if _has(_PRODUCTIVITY, q):
         return Refusal(POLICIES["POL-PROD-01"], "activity productivity")
-    if _has(_PAY, q) and (names or (_has(_INDIVIDUAL, q) and not _has(_BUSINESS_PAYEE, q))):
+    if _has(_PAY, q) and (names or _has(_ROLE, q) or (_has(_INDIVIDUAL, q) and not _has(_BUSINESS_PAYEE, q))):
         return Refusal(POLICIES["POL-PAY-01"], "individual compensation")
     if (_has(_ATTRITION, q) and _has(_PREDICT, q)) or (_has(_JUDGEMENT, q) and (names or _has(_WHO, q)
                                                                                   or _has(_PREDICT, q))):
