@@ -128,7 +128,7 @@ def test_runs_are_reproducible_idempotent_and_keep_detector_versions_and_provena
     stored = registry.fetch_signals(app_conn, packs, ref["run_id"])
     assert len(stored) == len(first.signals)
     detectors = {s["detector"] for s in stored}
-    assert detectors == {"c1_delivery@2", "c2_financial@2", "c3_continuity@2", "c4_integrity@2"}
+    assert detectors == {d.detector_id for d in registry.REGISTRY}     # every stored signal names its version
     c2 = next(s for s in stored if s["criterion"] == "C2")
     assert c2["status"] == "missing_evidence" and c2["value"]["low"] is None   # missing, never zero
     assert all(s["evidence"] for s in stored if s["status"] in ("active", "provisional"))

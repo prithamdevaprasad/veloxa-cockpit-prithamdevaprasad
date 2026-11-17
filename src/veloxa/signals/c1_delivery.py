@@ -42,7 +42,7 @@ from .contract import (
     timed_ref,
 )
 
-DETECTOR = "c1_delivery@2"   # @2: per-fact recorded/valid time and source versions
+DETECTOR = "c1_delivery@3"   # @3: revised deadlines, date history, business-object references
 MEASURE = "C1.required_rate_ratio@1"
 SOURCE_KINDS = {"document": Authority.FORMAL_REPORTED, "transcript": Authority.TRANSCRIPT_SUMMARY}
 
@@ -51,11 +51,18 @@ _MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july", 
 _MONTH_RE = (r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sept?(?:ember)?|"
              r"Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)")
 _PREP = r"(?:on|by|before|until)"
-_PRECISE = [
-    re.compile(rf"\b{_PREP}\s+(?P<d>\d{{1,2}})(?:st|nd|rd|th)?\s+(?P<m>{_MONTH_RE})\b\.?(?:,?\s+(?P<y>\d{{4}}))?"),
-    re.compile(rf"\b{_PREP}\s+(?P<m>{_MONTH_RE})\s+(?P<d>\d{{1,2}})(?:st|nd|rd|th)?\b(?:,?\s+(?P<y>\d{{4}}))?"),
-    re.compile(rf"\b{_PREP}\s+(?P<iso>\d{{4}}-\d{{2}}-\d{{2}})\b"),
-]
+def _precise(prep: str) -> list[re.Pattern]:
+    return [
+        re.compile(rf"\b{prep}\s+(?P<d>\d{{1,2}})(?:st|nd|rd|th)?\s+(?P<m>{_MONTH_RE})\b\.?(?:,?\s+(?P<y>\d{{4}}))?"),
+        re.compile(rf"\b{prep}\s+(?P<m>{_MONTH_RE})\s+(?P<d>\d{{1,2}})(?:st|nd|rd|th)?\b(?:,?\s+(?P<y>\d{{4}}))?"),
+        re.compile(rf"\b{prep}\s+(?P<iso>\d{{4}}-\d{{2}}-\d{{2}})\b"),
+    ]
+
+
+_PRECISE = _precise(_PREP)
+# In a delay statement, a NEW date is introduced by "to", "for" or "now" too ("moved GA to 30 June", "GA is now
+# on 1 July"). Only stated dates count: a delay without one stays "new date not stated".
+_PRECISE_REVISED = _precise(r"(?:on|by|before|until|to|for|now)")
 _VAGUE = re.compile(
     rf"\b{_PREP}\s+[\"“]?(?:the\s+)?(?P<v>(?:end of (?:the )?)?(?:{_MONTH_RE}(?:\s+\d{{4}})?|Q[1-4](?:\s+\d{{4}})?|"
     r"(?:festive|holiday) season|(?:this|next) (?:quarter|year|month)|year[- ]end|quarter[- ]end))\b")
@@ -124,14 +131,15 @@ def sentences(body: str, join_lines: bool = True) -> list[list[str]]:
 
 def _subject(sentence: str) -> str | None:
     m = _SUBJECT.match(sentence)
-    if not m or m["s"].split()[0].lower() in _NOT_SUBJECT:
-        return None
+    if not m or m["s"].split()[0].lower() in _NOT_SUBJECT or _MILESTONE.fullmatch(m["s"]):
+        return None              # a milestone term ("GA", "Launch") is what is committed to, never the subject
     return m["s"]
 
 
-def _date(sentence: str, reference: date | None) -> tuple[date | None, set[Flag], str | None, str | None]:
-    """(date, flags, matched text, assumption)."""
-    for rx in _PRECISE:
+def _date(sentence: str, reference: date | None, revised: bool = False,
+          ) -> tuple[date | None, set[Flag], str | None, str | None]:
+    """(date, flags, matched text, assumption). revised: the sentence records a delay, so 'to <date>' counts."""
+    for rx in _PRECISE_REVISED if revised else _PRECISE:
         m = rx.search(sentence)
         if not m:
             continue
@@ -195,7 +203,7 @@ def extract(sources: list[SourceText]) -> list[_Statement]:
                 if subj:
                     context_subject = subj
                 milestone, cue, delay = bool(_MILESTONE.search(s)), bool(_CUE.search(s)), bool(_DELAY.search(s))
-                stated, flags, dtext, assumption = _date(s, rec)
+                stated, flags, dtext, assumption = _date(s, rec, revised=milestone and delay)
                 kind = None
                 if milestone and delay:
                     kind = "delay"
@@ -223,6 +231,8 @@ def extract(sources: list[SourceText]) -> list[_Statement]:
                     flags.add(Flag.STATUS_CONCERN_REPORTED)
                 if kind == "delay" and not dtext:
                     flags.add(Flag.NEW_DATE_NOT_STATED)
+                if kind == "delay" and stated:
+                    flags.add(Flag.REVISED_DATE_STATED)
                 out.append(_Statement(src, authority, rec, s, f"paragraph {pi + 1}, sentence {si + 1}", subj,
                                       from_ctx, kind, stated, flags, dtext, assumption,
                                       bool(_ON_TRACK.search(s)), concern))
@@ -287,7 +297,8 @@ def evaluate(sources: list[SourceText]) -> DetectorOutput:
                     "the source states that it is unclear" if Flag.SOURCE_STATES_AMBIGUITY in flags else None,
                 ) if r),
                 event_date=st.stated, recorded_on=st.recorded, valid_from=st.recorded,
-                valid_basis="statement_date" if st.recorded else "unknown", key=sig_key))
+                valid_basis="statement_date" if st.recorded else "unknown",
+                calculation=(("business_object", f"commitment:{key}"),) if st.subject else (), key=sig_key))
         # Current status of a named commitment from its dated statements.
         if group[0].subject and len(group) >= 1 and (delays or len(group) > 1):
             dated = sorted((g for g in group if g.recorded), key=lambda g: g.recorded)
@@ -310,6 +321,17 @@ def evaluate(sources: list[SourceText]) -> DetectorOutput:
                     category = last.pop()
                     if category == "delayed" and Flag.NEW_DATE_NOT_STATED in dated[-1].flags:
                         category = "delayed_new_date_not_stated"
+                    elif category == "delayed" and dated[-1].stated:
+                        category = "delayed_revised_date_stated"
+            revisions = [g for g in sorted(dated, key=lambda g: (g.recorded, g.locator))
+                         if g.kind == "delay" and g.stated]
+            if len(revisions) > 1:
+                flags.add(Flag.MULTIPLE_REVISIONS)
+            history = [(f"{g.recorded.isoformat()} {'revised' if g.kind == 'delay' else 'stated'}",
+                        g.stated.isoformat()) for g in sorted(dated, key=lambda g: (g.recorded, g.locator))
+                       if g.stated]
+            current_date = dated[-1].stated if dated and category in ("delayed_revised_date_stated", "date_stated",
+                                                                       "reported_on_track") else None
             ev = tuple(timed_ref(g.src.record_id, g.locator, g.sentence, g.src.fact_time) for g in group)
             authority = (Authority.FORMAL_REPORTED if any(g.authority == Authority.FORMAL_REPORTED for g in dated)
                          else Authority.TRANSCRIPT_SUMMARY)
@@ -324,8 +346,10 @@ def evaluate(sources: list[SourceText]) -> DetectorOutput:
                              "against delivery records",) if dated else (),
                 missing=("statements without a date cannot be ordered",) if undated else (),
                 recorded_on=dated[-1].recorded if dated else None,
-                valid_from=dated[-1].recorded if dated else None,
-                valid_basis="statement_date" if dated else "unknown", related=tuple(keys), key=f"{key}|status"))
+                valid_from=dated[-1].recorded if dated else None, event_date=current_date,
+                valid_basis="statement_date" if dated else "unknown", related=tuple(keys),
+                calculation=(("business_object", f"commitment:{key}"),) + tuple(history),
+                key=f"{key}|status"))
         # The C1 measure: unquantified under the approved rules.
         if commitments:
             out.signals.append(Signal(

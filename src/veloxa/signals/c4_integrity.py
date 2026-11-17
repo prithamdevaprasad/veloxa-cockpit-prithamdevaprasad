@@ -26,7 +26,7 @@ from psycopg import sql as psql
 from ..db import tenant_tx
 from ..risk import detectors as approved
 from ..temporal import Mode, ReadBasis, predicate
-from . import timebasis
+from . import c1_delivery, figures, timebasis
 from .contract import (
     Authority,
     Criterion,
@@ -42,7 +42,7 @@ from .contract import (
     timed_ref,
 )
 
-DETECTOR = "c4_integrity@2"  # @2: per-fact recorded/valid time and source versions
+DETECTOR = "c4_integrity@3"  # @3: meeting-summary figure observations (summary-figures/1)
 _SCALES = {"cr": Decimal(10) ** 7, "crore": Decimal(10) ** 7, "l": Decimal(10) ** 5, "lakh": Decimal(10) ** 5,
            "lakhs": Decimal(10) ** 5}
 _VALUE = re.compile(r"^(?P<cur>Rs\.?\s*)?(?P<num>\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(?P<suffix>[A-Za-z]+)?$")
@@ -56,6 +56,10 @@ class Reported:
     period: str | None
     issued_on: str | None
     fact_time: timebasis.FactTime | None = None
+    parsed: Parsed | None = None          # set by an adapter that already parsed the value (e.g. spoken figures)
+    hedged: bool = False
+    authority: Authority = Authority.FORMAL_REPORTED
+    locator: str = ""
 
 
 @dataclass(frozen=True)
@@ -99,14 +103,21 @@ def compare_reported(rows: list[Reported]) -> DetectorOutput:
             for b in group[i + 1:]:
                 if a.record_id == b.record_id:
                     continue
-                pa, pb = parse(a.value_text), parse(b.value_text)
-                ev = (timed_ref(a.record_id, f"key numbers: {label}", a.value_text, a.fact_time),
-                      timed_ref(b.record_id, f"key numbers: {label}", b.value_text, b.fact_time))
+                pa, pb = a.parsed or parse(a.value_text), b.parsed or parse(b.value_text)
+                ev = (timed_ref(a.record_id, a.locator or f"key numbers: {label}", a.value_text, a.fact_time),
+                      timed_ref(b.record_id, b.locator or f"key numbers: {label}", b.value_text, b.fact_time))
+                summary = Authority.TRANSCRIPT_SUMMARY in (a.authority, b.authority)
+                authority = Authority.TRANSCRIPT_SUMMARY if summary else Authority.FORMAL_REPORTED
                 observed = (f"{a.record_id} reports {label!r} = {a.value_text!r} for period {a.period!r}",
                             f"{b.record_id} reports {label!r} = {b.value_text!r} for period {b.period!r}")
                 flags = {Flag.METRIC_IDENTITY_LABEL_ONLY, Flag.MATERIALITY_NOT_ASSIGNED, Flag.REPORTED_NOT_VERIFIED}
+                if summary:
+                    flags.add(Flag.NON_BINDING_SOURCE)
                 reason = None
-                if pa is None or pb is None:
+                if a.hedged or b.hedged:
+                    flags.add(Flag.VALUE_APPROXIMATE)
+                    reason = "a value is stated approximately, so a difference cannot be attributed"
+                elif pa is None or pb is None:
                     flags.add(Flag.VALUE_FORMAT_UNPARSED)
                     reason = "a value is not written in a parseable number and unit"
                 elif pa.unit != pb.unit:
@@ -119,7 +130,7 @@ def compare_reported(rows: list[Reported]) -> DetectorOutput:
                 if reason:
                     out.signals.append(Signal(
                         DETECTOR, Criterion.C4, SignalType.FIGURE_COMPARISON, Status.UNQUANTIFIED, label,
-                        "C4.reported_vs_reported@1", Value(), frozenset(flags), Authority.FORMAL_REPORTED, ev,
+                        "C4.reported_vs_reported@1", Value(), frozenset(flags), authority, ev,
                         observed=observed, missing=(f"not comparable: {reason}",),
                         decisions_pending=("D15-03a",), key=key))
                     continue
@@ -131,7 +142,7 @@ def compare_reported(rows: list[Reported]) -> DetectorOutput:
                 out.signals.append(Signal(
                     DETECTOR, Criterion.C4, SignalType.FIGURE_DISCREPANCY, Status.PROVISIONAL, label,
                     "C4.reported_vs_reported@1", Value(ValueKind.CATEGORY, category="values_differ_beyond_rounding"),
-                    frozenset(flags), Authority.FORMAL_REPORTED, ev, observed=observed,
+                    frozenset(flags), authority, ev, observed=observed,
                     assumptions=("the two figures are taken to measure the same thing because they carry the same "
                                  "label for the same period; the metric definition is not established",),
                     missing=("no materiality is assigned (D15-03a); this does not say which source is correct",),
@@ -157,6 +168,61 @@ def load_reported(conn: psycopg.Connection, basis: ReadBasis, tz: str = "UTC") -
     return [Reported(r["source_record_id"], r["metric"], r["value_text"], r["period"],
                      r["issued_on"].isoformat() if r["issued_on"] else None,
                      timebasis.figure_time(r["issued_on"], r["period"], r["extracted_at"], tz)) for r in rows]
+
+
+def _bare(o: figures.FigureObservation) -> bool:
+    return o.label is None and o.unit is None and o.number is not None
+
+
+def bare_numbers(sources: list) -> int:
+    return sum(_bare(o) for s in sources for o in figures.from_summary(s.record_id, s.body))
+
+
+def summary_observations(sources: list) -> tuple[list[Signal], list[Reported]]:
+    """Figure observations from meeting summaries, as evidence signals, plus the comparable ones as Reported rows.
+    Labels are kept as written; nothing here is a C4 score or a materiality assessment. A bare number with neither
+    a metric label nor a unit (a speaker number, a duration) has no stated meaning: it is not a figure, and is
+    counted by `bare_numbers` instead of being emitted."""
+    signals, rows = [], []
+    for src in sources:
+        for i, o in enumerate(figures.from_summary(src.record_id, src.body)):
+            if _bare(o):
+                continue
+            flags = {Flag.NON_BINDING_SOURCE, Flag.REPORTED_NOT_VERIFIED, Flag.MATERIALITY_NOT_ASSIGNED}
+            if o.period is None:
+                flags.add(Flag.PERIOD_MISSING)
+            if o.unit is None and o.number is not None:
+                flags.add(Flag.UNIT_MISSING)
+            if o.label is None:
+                flags.add(Flag.LABEL_UNCLEAR)
+            if o.number is None:
+                flags.add(Flag.VALUE_FORMAT_UNPARSED)
+            if o.hedged:
+                flags.add(Flag.VALUE_APPROXIMATE)
+            locator = f"summary figure {i + 1} ({o.start}-{o.end})"
+            calc = [("method", o.method), ("span", o.span)]
+            if o.number is not None:
+                calc.append(("number_as_stated", str(o.number)))
+            if o.low is not None:
+                calc.append(("rounding_interval", f"[{o.low}, {o.high}] {o.unit}" + (f" {o.rate}" if o.rate else "")))
+            signals.append(Signal(
+                DETECTOR, Criterion.C4, SignalType.FIGURE_OBSERVATION, Status.PROVISIONAL,
+                o.label or "unlabelled figure", "C4.summary_figure@1", Value(ValueKind.CATEGORY, category=o.quality),
+                frozenset(flags), Authority.TRANSCRIPT_SUMMARY,
+                (timed_ref(src.record_id, locator, o.sentence, src.fact_time),),
+                observed=(f"figure as stated: \"{o.span}\"",)
+                + ((f"label as written: {o.label!r}",) if o.label else ()),
+                missing=tuple(m for m in (
+                    "no period is stated" if o.period is None else None,
+                    "no unit or currency is stated" if Flag.UNIT_MISSING in flags else None,
+                    "no metric label is stated near the figure" if o.label is None else None,
+                    "the spoken form cannot be read unambiguously" if o.number is None else None) if m),
+                decisions_pending=("D15-03a",), calculation=tuple(calc), key=f"c4|summary|{src.record_id}|{locator}"))
+            if o.quality == "extracted":
+                rows.append(Reported(src.record_id, o.label, o.span, o.period, None, src.fact_time,
+                                     Parsed(o.low, o.high, o.unit + (f" {o.rate}" if o.rate else "")), o.hedged,
+                                     Authority.TRANSCRIPT_SUMMARY, locator))
+    return signals, rows
 
 
 def unmapped_signals(rows: list[Reported], active: list[approved.FigureMapping],
@@ -217,7 +283,22 @@ def detect(conn: psycopg.Connection, basis: ReadBasis, context: dict) -> Detecto
                                      (r.record_id,)))
         else:
             rows.append(r)
-    out = compare_reported(rows)
+    summaries = []
+    for s in c1_delivery.load_sources(conn, basis, tz):
+        if s.kind != "transcript":
+            continue
+        reason = timebasis.excluded(s.fact_time, basis, tz)
+        if reason:
+            withheld.append(Withheld(DETECTOR, Criterion.C4, f"a meeting summary is not used at this read basis: "
+                                     f"{reason}", (s.record_id,)))
+        else:
+            summaries.append(s)
+    observations, spoken = summary_observations(summaries)
+    if (bare := bare_numbers(summaries)):
+        withheld.append(Withheld(DETECTOR, Criterion.C4, f"{bare} number(s) in meeting summaries have neither a "
+                                 "metric label nor a unit; they are not treated as figures"))
+    out = compare_reported(rows + spoken)
+    out.signals += observations
     out.signals += unmapped_signals(rows, active, proposed)
     out.withheld += withheld
     if basis.mode in (Mode.RECORDED_BY, Mode.VALID_AT) and active:
@@ -228,8 +309,6 @@ def detect(conn: psycopg.Connection, basis: ReadBasis, context: dict) -> Detecto
         sigs, notes = approved_signals(conn, basis, active)
         out.signals += sigs
         out.withheld += notes
-    out.withheld.append(Withheld(DETECTOR, Criterion.C4, "figures spoken in meeting summaries are not extracted as "
-                                 "reported figures (prose with uncertain units); they are not compared"))
     if not active:
         out.withheld.append(Withheld(DETECTOR, Criterion.C4, "no owner-approved pairing of a reported figure with a "
                                      "governed metric is recorded (config/figure_mappings.toml), so no "

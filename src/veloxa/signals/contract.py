@@ -64,6 +64,7 @@ class SignalType(StrEnum):
     FIGURE_DISCREPANCY = "figure_discrepancy"          # two sources, apparently one metric, different values
     FIGURE_COMPARISON = "figure_comparison"            # an attempted comparison that could not be made
     FIGURE_UNMAPPED = "figure_unmapped"                # a reported figure with no approved system pairing
+    FIGURE_OBSERVATION = "figure_observation"          # a figure as stated in a meeting summary (source evidence)
 
 
 class Authority(StrEnum):
@@ -129,6 +130,13 @@ class Flag(StrEnum):
     MAPPING_PROPOSED_NOT_APPROVED = "mapping_proposed_not_approved"
     ROUNDING_COULD_EXPLAIN = "rounding_could_explain"
     MATERIALITY_NOT_ASSIGNED = "materiality_not_assigned"
+    PERIOD_MISSING = "period_missing"
+    UNIT_MISSING = "unit_missing"
+    LABEL_UNCLEAR = "label_unclear"
+    VALUE_APPROXIMATE = "value_approximate"            # the speaker hedged ("around", "maybe", "give or take")
+    # C1 revised deadlines
+    REVISED_DATE_STATED = "revised_date_stated"
+    MULTIPLE_REVISIONS = "multiple_revisions"
 
 
 class ValueKind(StrEnum):
