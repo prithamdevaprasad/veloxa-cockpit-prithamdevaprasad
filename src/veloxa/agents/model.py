@@ -51,6 +51,10 @@ class ModelUnavailable(Exception):
     pass
 
 
+class ModelOutputInvalid(Exception):
+    """The structured output failed validation after its one retry (stage failure, §18.2)."""
+
+
 class LLMClient(Protocol):
     name: str
 

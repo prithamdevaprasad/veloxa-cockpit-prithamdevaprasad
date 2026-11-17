@@ -48,7 +48,7 @@ from .authorization import (
     policy_allows,
 )
 from .memory import MemoryScope, MemoryStore
-from .model import FactsOnlyComposer, LLMClient, ModelRequest, ModelUnavailable, parse_output
+from .model import FactsOnlyComposer, LLMClient, ModelOutputInvalid, ModelRequest, ModelUnavailable, parse_output
 
 LABEL = "AI representation of an employee role, built from records. It is not the employee and takes no action."
 PROMPT_VERSION = "agent-turn/1"
@@ -233,12 +233,16 @@ class AgentRuntime:
                                  {"type": "object"}, PROMPT_VERSION,
                                  [{"role": "system", "content": LABEL},
                                   {"role": "user", "content": req.message,
-                                   "facts": [{"fact_id": f["fact_id"], "display": f["display"]} for f in usable]}],
+                                   "facts": [{"fact_id": f["fact_id"], "display": f["display"],
+                                              "data_classes": sorted({permitted[i]["data_class"] for i in f["inputs"]})}
+                                             for f in usable]}],
                                  512, f"{req.session_id}:{req.idempotency_key}")
         parsed = None
         for _ in range(2):                                       # invalid output -> one retry -> stage failure
             try:
                 resp = self.llm.call(req_model)
+            except ModelOutputInvalid:
+                return base | {"status": "failed", "unknowns": base["unknowns"] + ["model output failed validation"]}
             except ModelUnavailable:
                 return base | {"status": "unavailable",
                                "unknowns": base["unknowns"] + ["the model is unavailable; nothing was composed"]}
