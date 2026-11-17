@@ -44,7 +44,7 @@ from .contract import (
     Withheld,
 )
 
-DETECTOR = "c3_continuity@2"  # @2: signal contract v2 (time axes)
+DETECTOR = "c3_continuity@3"  # @3: rota/qualification/ownership/absence/event source contracts
 MEASURE = "C3.continuity@1"
 PENDING = ("Q3", "Q9", "Q10")
 FORBIDDEN_SOURCES = frozenset({"leave", "absence", "sickness", "medical"})  # matched as words in the source kind
@@ -273,8 +273,63 @@ def ownership_signals(system: str, records: list[OwnershipRecord], absence: Abse
         else (), decisions_pending=PENDING, key=f"c3|{system}|ownership")]
 
 
+def _from_sources(rows, context: dict) -> DetectorOutput:
+    from datetime import timedelta
+
+    from . import adapters
+
+    out = DetectorOutput()
+    rota, quals, owners, absences, events = [], [], [], {}, []
+    for r in rows:
+        try:
+            rec = adapters.continuity_record(r.kind, r.record_id, r.payload)
+        except adapters.AdapterError as exc:
+            out.withheld.append(Withheld(DETECTOR, Criterion.C3, f"{r.kind} row refused: {exc}", (r.record_id,)))
+            continue
+        if isinstance(rec, RotaEntry):
+            rota.append(rec)
+        elif isinstance(rec, QualificationRecord):
+            quals.append(rec)
+        elif isinstance(rec, OwnershipRecord):
+            owners.append(rec)
+        elif isinstance(rec, adapters.ContinuityEvent):
+            events.append(rec)
+        else:
+            absences[rec[0]] = rec[1]
+    day = context["assessment_date"]
+    window = (day, day + timedelta(days=1))     # engineering default: coverage on the assessment date (not Q3/Q9)
+    times = {r.record_id: r.fact_time for r in rows}
+    for service in sorted({e.service for e in rota}):
+        try:
+            sigs = service_signals(service, window, rota, quals, absences.get(service))
+        except InvalidC3Input as exc:
+            out.withheld.append(Withheld(DETECTOR, Criterion.C3, f"{service}: contradictory evidence refused: {exc}"))
+            continue
+        out.signals += [adapters.retime(s, times) for s in sigs]
+    for system in sorted({o.system for o in owners} | {s for s in absences if s not in {e.service for e in rota}}):
+        try:
+            sigs = ownership_signals(system, [o for o in owners if o.system == system], absences.get(system))
+        except InvalidC3Input as exc:
+            out.withheld.append(Withheld(DETECTOR, Criterion.C3, f"{system}: contradictory evidence refused: {exc}"))
+            continue
+        out.signals += [adapters.retime(s, times) for s in sigs]
+    for e in events:
+        out.withheld.append(Withheld(DETECTOR, Criterion.C3, f"{e.event} event for {e.scope} on "
+                                     f"{e.effective_on.isoformat()} is recorded but not applied: its effect on record "
+                                     "currency is an open owner decision (Q10)", (e.record.record_id,)))
+    return out
+
+
 def detect(conn, basis, context: dict) -> DetectorOutput:
-    """No admitted source is a rota, qualification, ownership or service-catalogue record in this engine version."""
+    """C3 evidence from admitted continuity sources (adapters.C3_KINDS); missing evidence when none exist."""
+    from . import adapters
+
+    rows, late = adapters.load_rows(conn, basis, adapters.C3_KINDS, context["time_zone"])
+    if rows:
+        out = _from_sources(rows, context)
+        out.withheld += [Withheld(DETECTOR, Criterion.C3, f"a continuity row is not used at this read basis: {why}",
+                                  (rid,)) for rid, why in late]
+        return out
     out = DetectorOutput()
     for what, key in (("on-call rota records", "rota"), ("qualification records", "qualification"),
                       ("system-ownership and named-backup records", "ownership"),

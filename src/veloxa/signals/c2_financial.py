@@ -35,7 +35,7 @@ from .contract import (
     Withheld,
 )
 
-DETECTOR = "c2_financial@2"  # @2: signal contract v2 (time axes)
+DETECTOR = "c2_financial@3"  # @3: financial-obligation source contract (adapters.financial_item)
 MEASURE = "C2.net_exposure_12m@1"
 UNIT = "INR"
 HORIZON_MONTHS = 12
@@ -318,8 +318,40 @@ def exposure_signal(subject: str, items: list[FinancialItem], assessment: date) 
 
 
 def detect(conn, basis, context: dict) -> DetectorOutput:
-    """No admitted source yields forward financial obligations in this engine version: report that explicitly."""
+    """C2 per business object from admitted obligation rows (adapters.C2_KIND); missing evidence when none exist."""
+    from . import adapters
+
+    rows, late = adapters.load_rows(conn, basis, {adapters.C2_KIND}, context["time_zone"])
     out = DetectorOutput()
+    out.withheld += [Withheld(DETECTOR, Criterion.C2, f"an obligation row is not used at this read basis: {why}",
+                              (rid,)) for rid, why in late]
+    if rows:
+        by_subject: dict[str, list[FinancialItem]] = {}
+        broken: dict[str, list[str]] = {}
+        for r in rows:
+            try:
+                subject, item = adapters.financial_item(r.record_id, r.payload)
+                by_subject.setdefault(subject, []).append(item)
+            except adapters.AdapterError as exc:
+                subject = str(r.payload.get("subject") or "unidentified business object")
+                broken.setdefault(subject, []).append(f"{r.record_id}: {exc}")
+                out.withheld.append(Withheld(DETECTOR, Criterion.C2, f"obligation row refused: {exc}", (r.record_id,)))
+        times = {r.record_id: r.fact_time for r in rows}
+        for subject in sorted(set(by_subject) | set(broken)):
+            if subject in broken:   # an incomplete set of obligations is never summed: unquantified
+                out.signals.append(Signal(
+                    DETECTOR, Criterion.C2, SignalType.FINANCIAL_EXPOSURE, Status.UNQUANTIFIED, subject, MEASURE,
+                    Value(), frozenset(), Authority.NONE, missing=tuple(f"row refused: {m}" for m in broken[subject]),
+                    window_start=horizon(context["assessment_date"])[0],
+                    window_end=horizon(context["assessment_date"])[1], key=f"c2|{subject}"))
+                continue
+            try:
+                sig = exposure_signal(subject, by_subject[subject], context["assessment_date"])
+            except ValueError as exc:   # e.g. duplicates disagreeing on timing: never a silent choice
+                out.withheld.append(Withheld(DETECTOR, Criterion.C2, f"{subject}: {exc}"))
+                continue
+            out.signals.append(adapters.retime(sig, times))
+        return out
     out.signals.append(Signal(
         DETECTOR, Criterion.C2, SignalType.FINANCIAL_EXPOSURE, Status.MISSING, "all business objects", MEASURE,
         Value(), frozenset(), Authority.NONE,
