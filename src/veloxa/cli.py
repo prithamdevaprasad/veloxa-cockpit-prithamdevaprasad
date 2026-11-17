@@ -155,6 +155,34 @@ def cmd_workflow_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_workflow_retention(args: argparse.Namespace) -> int:
+    """C26: report which DBOS workflow records retention WOULD remove; delete only with --apply AND an approved
+    owner decision. Prints ids and counts only, never inputs or outputs."""
+    from dbos import DBOSClient
+
+    from .workflows import retention
+    from .workflows.runner import system_database_url
+
+    client = DBOSClient(system_database_url=system_database_url())
+    try:
+        p = retention.plan(client)
+        state = "APPROVED" if p.approved else "NOT APPROVED (proposed periods; dry run only)"
+        print(f"retention: success {p.success_days} days, error {p.error_days} days; {state}")
+        print(f"would remove {len(p.remove)}; legal hold {len(p.held)}; active or pending kept {p.kept_active}")
+        for wid in p.remove:
+            print(f"  remove {wid}")
+        if not args.apply:
+            return 0
+        try:
+            print(f"removed {retention.apply(client, p)}")
+        except retention.RetentionNotApproved as e:
+            print(str(e))
+            return 2
+        return 0
+    finally:
+        client.destroy()
+
+
 def cmd_backup(args: argparse.Namespace) -> int:
     """C31: a verified logical backup of the configured database (read-only on the source)."""
     from pathlib import Path
@@ -363,6 +391,9 @@ def main(argv: list[str] | None = None) -> int:
     p_ws = sub.add_parser("workflow-status", help="C26: show a workflow's status")
     p_ws.add_argument("workflow_id")
     p_ws.set_defaults(func=cmd_workflow_status)
+    p_wr = sub.add_parser("workflow-retention", help="C26: dry-run DBOS record retention (deletes only if approved)")
+    p_wr.add_argument("--apply", action="store_true", help="delete; refused unless the owner decision is configured")
+    p_wr.set_defaults(func=cmd_workflow_retention)
     p_bk = sub.add_parser("backup", help="C31: verified logical backup of the configured database (privileged)")
     p_bk.add_argument("--out", required=True)
     p_bk.set_defaults(func=cmd_backup)

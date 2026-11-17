@@ -308,3 +308,55 @@ def test_workflow_and_step_names_are_pinned():
     assert sorted(re.findall(r'name="(veloxa\.[a-z0-9_.]+)"', src)) == sorted([
         "veloxa.pack_pipeline.admit", "veloxa.pack_pipeline.project", "veloxa.pack_pipeline.identity",
         "veloxa.workflow.audit", "veloxa.pack_pipeline.v1", "veloxa.agent_turn.turn", "veloxa.agent_turn.v1"])
+
+
+def test_retention_is_a_dry_run_until_approved_and_then_deletes_only_the_plan(db, wf, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from dbos import DBOSClient
+
+    from veloxa.workflows import retention
+
+    r, t = wf["runner"], new_tenant(db)
+    done = r.start("veloxa.pack_pipeline.v1", {"tenant_id": str(t), "pack_id": "D1"}, key())
+    r.result(done.workflow_id)
+    held = r.start("veloxa.pack_pipeline.v1", {"tenant_id": str(new_tenant(db)), "pack_id": "D1"}, key())
+    r.result(held.workflow_id)
+    for v in ("VELOXA_WORKFLOW_RETENTION_DECISION", "VELOXA_WORKFLOW_RETENTION_SUCCESS_DAYS",
+              "VELOXA_WORKFLOW_RETENTION_ERROR_DAYS"):
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("VELOXA_WORKFLOW_LEGAL_HOLD", held.workflow_id)
+    client = DBOSClient(system_database_url=wf["sysurl"])
+    try:
+        assert retention.plan(client).remove == ()                              # nothing is 90 days old yet
+        later = datetime.now(UTC) + timedelta(days=91)
+        p = retention.plan(client, now=later)
+        assert (p.success_days, p.error_days, p.approved) == (90, 180, False)     # proposals, not approved
+        assert done.workflow_id in p.remove and held.workflow_id in p.held and held.workflow_id not in p.remove
+        with pytest.raises(retention.RetentionNotApproved):
+            retention.apply(client, p)
+        assert client.list_workflows(workflow_ids=[done.workflow_id], load_input=False, load_output=False)
+        monkeypatch.setenv("VELOXA_WORKFLOW_RETENTION_DECISION", "SYN-RETENTION-TEST")
+        monkeypatch.setenv("VELOXA_WORKFLOW_RETENTION_SUCCESS_DAYS", "90")
+        monkeypatch.setenv("VELOXA_WORKFLOW_RETENTION_ERROR_DAYS", "180")
+        p = retention.plan(client, now=later)
+        assert p.approved and retention.apply(client, p) == len(p.remove)
+        assert client.list_workflows(workflow_ids=[done.workflow_id], load_input=False, load_output=False) == []
+        assert client.list_workflows(workflow_ids=[held.workflow_id], load_input=False, load_output=False)
+    finally:
+        client.destroy()
+    assert admin_rows(db, "SELECT count(*) FROM audit.event WHERE tenant_id = %s AND kind = 'workflow.completed'",
+                      (t,))[0][0] == 1                                          # the audit evidence remains
+
+
+def test_retention_cli_is_dry_run_and_refuses_apply_without_a_decision(db, wf, monkeypatch, capsys):
+    from veloxa.cli import main
+
+    for v in ("VELOXA_WORKFLOW_RETENTION_DECISION", "VELOXA_WORKFLOW_RETENTION_SUCCESS_DAYS",
+              "VELOXA_WORKFLOW_RETENTION_ERROR_DAYS"):
+        monkeypatch.delenv(v, raising=False)
+    assert main(["workflow-retention"]) == 0
+    out = capsys.readouterr().out
+    assert "NOT APPROVED" in out and "success 90 days, error 180 days" in out
+    assert main(["workflow-retention", "--apply"]) == 2
+    assert "not approved" in capsys.readouterr().out
