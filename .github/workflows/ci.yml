@@ -1,9 +1,11 @@
 name: ci
 
+# Verification only: no job in this workflow deploys, publishes or releases anything.
 on:
   push:
-    branches: [main]
+    branches: [main, "feat/**"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
