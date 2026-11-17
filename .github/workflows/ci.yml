@@ -42,6 +42,20 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: pip install --constraint requirements.lock -e ".[dev]"
+      - name: PostgreSQL 18 client tools (PGDG signed apt repository; the runner's default pg_dump is older)
+        run: |
+          sudo apt-get install -y --no-install-recommends postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
+      - name: PostgreSQL utility version check (client must be >= server major)
+        env:
+          VELOXA_PG_TOOLS: /usr/lib/postgresql/18/bin
+        run: |
+          /usr/lib/postgresql/18/bin/pg_dump --version
+          /usr/lib/postgresql/18/bin/pg_restore --version
+          psql_server="$(python -c "import psycopg; print(psycopg.connect('$VELOXA_TEST_ADMIN_DSN').info.server_version // 10000)")"
+          echo "server major: $psql_server"
+          python -c "from veloxa.ops.backup import PgTools; print('client major:', PgTools.from_env().require_major($psql_server))"
       - name: Public safety scan (any finding fails the job)
         run: python scripts/public_scan.py
       - name: Safety-scan gate failure path (a planted finding must fail the scan, even through a pipe)
@@ -55,6 +69,9 @@ jobs:
       - name: Lint
         run: ruff check .
       - name: Tests (synthetic data only; real challenge data never exists in CI)
+        env:
+          VELOXA_PG_TOOLS: /usr/lib/postgresql/18/bin
+          VELOXA_REQUIRE_PG_TOOLS: "1"     # backup tests must run; missing or old tools are an error, never a skip
         run: pytest -m "not realdata"
 
   fresh-clone-compose:

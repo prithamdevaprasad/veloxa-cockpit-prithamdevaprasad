@@ -17,6 +17,10 @@ Tools: `pg_dump` and `pg_restore` at least as new as the server (18). They are f
 - `docker:<container>`: run inside the database container.
 
 The password is passed through the environment, never on a command line.
+
+**Version check.** `PgTools.from_env()` asks the chosen `pg_dump` for its version and REFUSES (ClientToolsMismatch)
+any client older than `MIN_CLIENT_MAJOR`. It never silently uses an older binary found on PATH: pg_dump would
+abort against a newer server anyway, and a clear, actionable error is better than an obscure one.
 """
 
 from __future__ import annotations
@@ -36,10 +40,23 @@ from urllib.parse import urlsplit, urlunsplit
 import psycopg
 
 RESTORE_PREFIX = "veloxa_restore_"
+MIN_CLIENT_MAJOR = 18
 
 
 class BackupError(Exception):
     pass
+
+
+class ClientToolsMismatch(BackupError):
+    """The configured PostgreSQL client tools are older than the server major version they must serve."""
+
+
+def parse_major(version_output: str) -> int | None:
+    """`pg_dump (PostgreSQL) 18.7 (Debian …)` -> 18; None if it is not a pg_dump version line."""
+    import re
+
+    m = re.search(r"\(PostgreSQL\)\s+(\d+)(?:\.\d+)?", version_output)
+    return int(m.group(1)) if m else None
 
 
 @dataclass(frozen=True)
@@ -48,14 +65,46 @@ class PgTools:
     where: str          # bin directory, or container name
 
     @staticmethod
-    def from_env() -> PgTools | None:
+    def from_env(min_major: int = MIN_CLIENT_MAJOR, check: bool = True) -> PgTools | None:
+        """The configured tools (VELOXA_PG_TOOLS, else pg_dump on PATH), version-checked. None if none exist.
+        Raises ClientToolsMismatch for a client older than `min_major`, naming what to configure instead."""
         v = os.environ.get("VELOXA_PG_TOOLS", "")
         if v.startswith("docker:"):
-            return PgTools("docker", v.split(":", 1)[1])
-        if v:
-            return PgTools("path", v)
-        found = shutil.which("pg_dump")
-        return PgTools("path", str(Path(found).parent)) if found else None
+            tools = PgTools("docker", v.split(":", 1)[1])
+        elif v:
+            tools = PgTools("path", v)
+        else:
+            found = shutil.which("pg_dump")
+            if not found:
+                return None
+            tools = PgTools("path", str(Path(found).parent))
+        if check:
+            tools.require_major(min_major)
+        return tools
+
+    def client_version(self) -> str:
+        if self.mode == "docker":
+            cmd = ["docker", "exec", self.where, "pg_dump", "--version"]
+        else:
+            cmd = [str(Path(self.where) / "pg_dump"), "--version"]
+        try:
+            r = subprocess.run(cmd, capture_output=True, timeout=60, check=False, stdin=subprocess.DEVNULL)  # noqa: S603
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise ClientToolsMismatch(f"cannot run pg_dump from {self.describe()}: {e}") from None
+        return r.stdout.decode(errors="replace").strip()
+
+    def require_major(self, min_major: int = MIN_CLIENT_MAJOR) -> int:
+        out = self.client_version()
+        major = parse_major(out)
+        if major is None or major < min_major:
+            raise ClientToolsMismatch(
+                f"PostgreSQL client tools from {self.describe()} report {out or 'no version'!r}; version "
+                f">= {min_major} is required. Install postgresql-client-{min_major} and set VELOXA_PG_TOOLS to its "
+                f"bin directory (e.g. /usr/lib/postgresql/{min_major}/bin), or VELOXA_PG_TOOLS=docker:<container>.")
+        return major
+
+    def describe(self) -> str:
+        return f"container {self.where}" if self.mode == "docker" else f"directory {self.where}"
 
     def run(self, tool: str, args: list[str], dsn: str, data: bytes | None = None) -> subprocess.CompletedProcess:
         """Run a client tool with output captured through a pipe and input passed as bytes (no handle

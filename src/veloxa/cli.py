@@ -189,7 +189,11 @@ def cmd_backup(args: argparse.Namespace) -> int:
 
     from .ops import backup as ops
 
-    tools = ops.PgTools.from_env()
+    try:
+        tools = ops.PgTools.from_env()
+    except ops.ClientToolsMismatch as e:
+        print(f"ERROR: {e}")
+        return 2
     if tools is None:
         print("PostgreSQL client tools (>= 18) not found: set VELOXA_PG_TOOLS (a bin directory or docker:<container>)")
         return 2
@@ -206,7 +210,11 @@ def cmd_restore_drill(args: argparse.Namespace) -> int:
 
     from .ops import backup as ops
 
-    tools = ops.PgTools.from_env()
+    try:
+        tools = ops.PgTools.from_env()
+    except ops.ClientToolsMismatch as e:
+        print(f"ERROR: {e}")
+        return 2
     if tools is None:
         print("PostgreSQL client tools (>= 18) not found: set VELOXA_PG_TOOLS")
         return 2

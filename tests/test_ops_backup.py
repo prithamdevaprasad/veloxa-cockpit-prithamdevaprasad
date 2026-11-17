@@ -2,6 +2,7 @@
 Needs PostgreSQL client tools >= 18: on PATH, or VELOXA_PG_TOOLS=docker:<container> / a bin directory."""
 
 import json
+import os
 import shutil
 
 import psycopg
@@ -10,8 +11,22 @@ import pytest
 from veloxa.ops import backup as ops
 
 pytestmark = pytest.mark.db
-TOOLS = ops.PgTools.from_env()
-needs_tools = pytest.mark.skipif(TOOLS is None, reason="PostgreSQL client tools (>= 18) are not available")
+# A version mismatch is an ERROR, never a skip: these tests must run against PostgreSQL 18-compatible tools.
+# With VELOXA_REQUIRE_PG_TOOLS=1 (set in CI), absent tools are an error too.
+try:
+    TOOLS = ops.PgTools.from_env()
+    TOOLS_ERROR = None
+except ops.ClientToolsMismatch as e:
+    TOOLS, TOOLS_ERROR = None, str(e)
+REQUIRED = os.environ.get("VELOXA_REQUIRE_PG_TOOLS") == "1"
+needs_tools = pytest.mark.skipif(TOOLS is None and TOOLS_ERROR is None and not REQUIRED,
+                                 reason="PostgreSQL client tools (>= 18) are not available")
+
+
+@pytest.fixture(autouse=True)
+def _tools_ok(request):
+    if request.node.get_closest_marker("skipif") and (TOOLS_ERROR or (TOOLS is None and REQUIRED)):
+        pytest.fail(TOOLS_ERROR or "VELOXA_REQUIRE_PG_TOOLS=1 but no PostgreSQL client tools were found")
 
 
 @pytest.fixture
@@ -64,3 +79,43 @@ def test_the_fingerprint_covers_ledger_batches_migrations_and_audit_chains(sourc
 
     fp = ops.fingerprint(_with_db(ADMIN_DSN, source.name))
     assert fp["audit_chains_valid"] is True and len(fp["ledger_md5"]) == 32 and fp["batches"]
+
+
+@pytest.mark.parametrize("out, major", [
+    ("pg_dump (PostgreSQL) 18.7 (Debian 18.7-1.pgdg12+2)", 18),
+    ("pg_dump (PostgreSQL) 16.15 (Ubuntu 16.15-1.pgdg24.04+2)", 16),
+    ("pg_dump (PostgreSQL) 19devel", 19),
+    ("something else", None),
+])
+def test_client_versions_are_parsed(out, major):
+    assert ops.parse_major(out) == major
+
+
+def test_older_client_tools_are_refused_with_an_actionable_error(monkeypatch):
+    t = ops.PgTools("path", "/usr/lib/postgresql/16/bin")
+    monkeypatch.setattr(ops.PgTools, "client_version", lambda self: "pg_dump (PostgreSQL) 16.15 (Ubuntu)")
+    with pytest.raises(ops.ClientToolsMismatch, match=r"16\.15.*>= 18.*postgresql-client-18"):
+        t.require_major()
+    monkeypatch.setattr(ops.PgTools, "client_version", lambda self: "pg_dump (PostgreSQL) 18.7")
+    assert t.require_major() == 18
+    monkeypatch.setattr(ops.PgTools, "client_version", lambda self: "")
+    with pytest.raises(ops.ClientToolsMismatch):
+        t.require_major()
+
+
+def test_explicit_docker_tools_are_still_supported(monkeypatch):
+    monkeypatch.setenv("VELOXA_PG_TOOLS", "docker:some-pg18-container")
+    monkeypatch.setattr(ops.PgTools, "client_version", lambda self: "pg_dump (PostgreSQL) 18.7")
+    t = ops.PgTools.from_env()
+    assert (t.mode, t.where) == ("docker", "some-pg18-container")
+    monkeypatch.setattr(ops.PgTools, "client_version", lambda self: "pg_dump (PostgreSQL) 17.2")
+    with pytest.raises(ops.ClientToolsMismatch):
+        ops.PgTools.from_env()
+
+
+def test_an_old_pg_dump_on_path_is_never_used_silently(monkeypatch, tmp_path):
+    monkeypatch.delenv("VELOXA_PG_TOOLS", raising=False)
+    monkeypatch.setattr(ops.shutil, "which", lambda name: str(tmp_path / "pg_dump"))
+    monkeypatch.setattr(ops.PgTools, "client_version", lambda self: "pg_dump (PostgreSQL) 16.15")
+    with pytest.raises(ops.ClientToolsMismatch):
+        ops.PgTools.from_env()
