@@ -842,3 +842,61 @@ Migrate the real Day 1 database without admitting any new pack, and make admissi
 - **D-15 and ranking:** D-15 version 1 not recorded; `policy.ranking_decision` holds 0 rows; weighted ranking stays off and `top_three` stays null.
 - **Not activated:** no mapping, anchor, guardrail, tie-break or probability; no payroll aggregate released; no agent endpoint.
 - `ARCHITECTURE.md` is unchanged.
+
+## Tue 17 Nov 2026 — C19 disclosure auditor: ledger, segments, background rows, serialization, channels
+
+### Task given to AI
+
+Turn the C19 core into a complete, testable subsystem without releasing payroll aggregates. Agents and D2 were out of scope.
+
+### What AI produced
+
+- **Migration `0009`.**
+  - `policy.disclosure_ledger` is append-only and consecutive per (tenant, principal, measure). RLS isolates tenants and principals. Rows hold coefficient structure only, and request keys are unique.
+  - `policy.disclosure_release` is the owner-recorded enablement. It is empty.
+  - Two SECURITY DEFINER functions:
+    - `payroll_structure(K)` returns who was paid in which month, with pro-rata day counts, and never an amount.
+    - `release_payroll_sum(entry)` is the only payroll value path. It refuses without an allowed decision of the calling principal and an enabled release.
+- **`disclosure/gate.py`.** One service, one transaction:
+  1. an advisory lock on the scope;
+  2. idempotent retries (a reused key cannot change the question);
+  3. M2 segments, one per person, with exact pro-rata coefficients and no extrapolation over gaps;
+  4. duplicate or unlinked register rows refused;
+  5. background rows from the principal's own values (individually authorized, readable-document and public sources are empty by construction);
+  6. the exact core decision;
+  7. a ledger entry;
+  8. the value only through the database function.
+
+  Any failure rolls back, so nothing is recorded and nothing is released.
+- **Channels.**
+  - Ask's payroll tool goes through the gate.
+  - Governed metrics still refuse protected definitions directly.
+  - Evidence views and the briefing cannot reach payroll records (RLS).
+  - Exports, agents and caches do not exist, and a test asserts no such route or cache.
+- **Tests.** Joiner differencing, the small-group and own-value background, controlled concurrency (a barrier, two connections), rollback, principal, measure and tenant isolation, corrections at K, and real Day 1 structure-only refusal. Also a seeded fuzz cross-check of the core against a separately written Bareiss rank. That cross-check is not the §15.6 sdcTable oracle, which needs an R runtime that is unavailable here.
+
+### Points for owner attention (not decided by AI)
+
+- **Release stays off** everywhere (`policy.disclosure_release` is empty). It also needs production identity (C02) and current authorization (C20/C21), which do not exist.
+- **D-14a, k = 5:** the architecture default is used, still awaiting owner confirmation. D-22 is not addressed.
+- **Background coverage is incomplete for real users.** The individually-authorized and readable-document sources are empty because no grant source exists; a real deployment must supply them before release.
+- **Pro-rata day counts reach the auditor process.** The payroll-structure function exposes them to the application process (never returned to a user). They can reflect unpaid days, so this boundary needs privacy review before real use.
+
+### Where AI was wrong, and what changed
+
+| # | AI error or weakness | Who caught it | Correction |
+|---|---|---|---|
+| E61 | A fuzz test "scaled rows" with a fresh factor per coefficient, which changes the row space, and reported a core defect. The core was correct | AI, by checking the basis invariant and the case by hand | One factor per row; the cross-check passes on 400 random structures |
+| E62 | The first gate draft read the HR roster through a helper that opens its own transaction context, which would reset the principal setting that the ledger's RLS and trigger depend on | AI, in review before the first run | The roster is read inside the gate's own transaction |
+
+### Verification actually run (17 Nov 2026)
+
+- `ruff check .`: passed. Public and private scans: CLEAN.
+- A local regression run showed that a private-scan finding stops the gated commit wrapper, while a clean tree commits.
+- `pytest`: **378 passed**, including 8 real-data tests.
+- **Real Day 1 database:** backed up privately, then `0009` applied with `veloxa migrate`. Fingerprints are unchanged, the release and ledger tables are empty, and health is ok.
+
+### Confirmations
+
+- No payroll aggregate was released and no release was enabled. No D-15 decision, mapping, anchor, guardrail or probability was activated.
+- `ARCHITECTURE.md` is unchanged. D2 was not inspected, and no agents were started.
