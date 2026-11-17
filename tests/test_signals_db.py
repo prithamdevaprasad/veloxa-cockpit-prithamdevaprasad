@@ -48,12 +48,12 @@ def packs(db, ingest_conn, tenant, tmp_path):
     sched = Schedule("sig", IST, (Pack("D1", 1, "Day1_Mon_16Nov", D1_AT), Pack("D2", 2, "Day2_Tue_17Nov", D2_AT)))
     d1 = make_d1(tmp_path)
     make_document(d1, "Plan_Q1.pdf", ["Synthetic company: Board update",
-                                      "Quarterly update. Period: Jan to Mar 2099. Sent 9 Apr 2099.",
+                                      "Quarterly update. Period: Jan to Mar 2026. Sent 9 Apr 2026.",
                                       "Key numbers", "Metric Value", "Customers 10", "Product",
-                                      "Orion is on track for GA on 15 June 2099."])
+                                      "Orion is on track for GA on 15 June 2026."])
     d2 = tmp_path / "Day2_Tue_17Nov"
     make_document(d2, "Plan_Q2.pdf", ["Synthetic company: Board update",
-                                      "Quarterly update. Period: Apr to Jun 2099. Sent 9 Jul 2099.",
+                                      "Quarterly update. Period: Apr to Jun 2026. Sent 9 Jul 2026.",
                                       "Key numbers", "Metric Value", "Customers 12", "Product",
                                       "Orion is in final testing. We postponed GA after extra testing."])
     make_transcript(d2, "T9_Synthetic.docx", ["T9 synthetic call",
@@ -128,7 +128,7 @@ def test_runs_are_reproducible_idempotent_and_keep_detector_versions_and_provena
     stored = registry.fetch_signals(app_conn, packs, ref["run_id"])
     assert len(stored) == len(first.signals)
     detectors = {s["detector"] for s in stored}
-    assert detectors == {"c1_delivery@1", "c2_financial@1", "c3_continuity@1", "c4_integrity@1"}
+    assert detectors == {"c1_delivery@2", "c2_financial@2", "c3_continuity@2", "c4_integrity@2"}
     c2 = next(s for s in stored if s["criterion"] == "C2")
     assert c2["status"] == "missing_evidence" and c2["value"]["low"] is None   # missing, never zero
     assert all(s["evidence"] for s in stored if s["status"] in ("active", "provisional"))
@@ -148,14 +148,6 @@ def test_a_detector_cannot_emit_for_another_criterion(app_conn, packs, monkeypat
     monkeypatch.setattr(registry, "REGISTRY", (fake,))
     with pytest.raises(ValueError, match="emitted a signal"):
         _run(app_conn, _basis(app_conn, packs))
-
-
-def test_modes_the_projections_cannot_filter_are_withheld_not_silently_unfiltered(app_conn, packs):
-    for mode in (Mode.RECORDED_BY, Mode.VALID_AT):
-        from datetime import date
-
-        r = _run(app_conn, _basis(app_conn, packs, mode, date(2026, 11, 16)))
-        assert r.signals == [] and all("not run" in w.reason for w in r.withheld)
 
 
 def _insert(conn, tenant, run_id, **over):

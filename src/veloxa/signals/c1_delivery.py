@@ -27,11 +27,11 @@ from psycopg import sql as psql
 
 from ..db import tenant_tx
 from ..temporal import ReadBasis, predicate
+from . import timebasis
 from .contract import (
     Authority,
     Criterion,
     DetectorOutput,
-    EvidenceRef,
     Flag,
     Signal,
     SignalType,
@@ -39,9 +39,10 @@ from .contract import (
     Value,
     ValueKind,
     Withheld,
+    timed_ref,
 )
 
-DETECTOR = "c1_delivery@1"
+DETECTOR = "c1_delivery@2"   # @2: per-fact recorded/valid time and source versions
 MEASURE = "C1.required_rate_ratio@1"
 SOURCE_KINDS = {"document": Authority.FORMAL_REPORTED, "transcript": Authority.TRANSCRIPT_SUMMARY}
 
@@ -79,6 +80,7 @@ class SourceText:
     kind: str            # "document" | "transcript"
     title: str
     body: str
+    fact_time: timebasis.FactTime | None = None   # R, V and E of this source's statements (None in pure tests)
 
 
 def _month(name: str) -> int:
@@ -180,7 +182,10 @@ def extract(sources: list[SourceText]) -> list[_Statement]:
     out = []
     for src in sorted(sources, key=lambda s: s.record_id):
         authority = SOURCE_KINDS[src.kind]
-        rec = recorded_on(src) if src.kind == "document" else None
+        if src.fact_time is not None:      # the source date as checked against E (R <= E)
+            rec = src.fact_time.recorded_day if src.kind == "document" else None
+        else:
+            rec = recorded_on(src) if src.kind == "document" else None
         prose = src.kind == "document"   # summary points are independent: no subject carries between them
         for pi, para in enumerate(sentences(src.body, join_lines=prose)):
             context_subject = None
@@ -272,7 +277,7 @@ def evaluate(sources: list[SourceText]) -> DetectorOutput:
             out.signals.append(Signal(
                 DETECTOR, Criterion.C1, stype, status, subject, f"C1.{st.kind}@1",
                 Value(ValueKind.CATEGORY, category=category), frozenset(flags), st.authority,
-                (EvidenceRef(st.src.record_id, st.locator, st.sentence),),
+                (timed_ref(st.src.record_id, st.locator, st.sentence, st.src.fact_time),),
                 observed=tuple(observed),
                 assumptions=(st.assumption,) if st.assumption else (),
                 missing=tuple(r for r in (
@@ -281,7 +286,8 @@ def evaluate(sources: list[SourceText]) -> DetectorOutput:
                     "a new date is not stated" if Flag.NEW_DATE_NOT_STATED in flags else None,
                     "the source states that it is unclear" if Flag.SOURCE_STATES_AMBIGUITY in flags else None,
                 ) if r),
-                event_date=st.stated, recorded_on=st.recorded, key=sig_key))
+                event_date=st.stated, recorded_on=st.recorded, valid_from=st.recorded,
+                valid_basis="statement_date" if st.recorded else "unknown", key=sig_key))
         # Current status of a named commitment from its dated statements.
         if group[0].subject and len(group) >= 1 and (delays or len(group) > 1):
             dated = sorted((g for g in group if g.recorded), key=lambda g: g.recorded)
@@ -304,7 +310,7 @@ def evaluate(sources: list[SourceText]) -> DetectorOutput:
                     category = last.pop()
                     if category == "delayed" and Flag.NEW_DATE_NOT_STATED in dated[-1].flags:
                         category = "delayed_new_date_not_stated"
-            ev = tuple(EvidenceRef(g.src.record_id, g.locator, g.sentence) for g in group)
+            ev = tuple(timed_ref(g.src.record_id, g.locator, g.sentence, g.src.fact_time) for g in group)
             authority = (Authority.FORMAL_REPORTED if any(g.authority == Authority.FORMAL_REPORTED for g in dated)
                          else Authority.TRANSCRIPT_SUMMARY)
             status = (Status.ACTIVE if dated and Flag.STATUS_CONFLICT not in flags
@@ -317,13 +323,16 @@ def evaluate(sources: list[SourceText]) -> DetectorOutput:
                 assumptions=("the latest dated statement describes the current status; it is not verified "
                              "against delivery records",) if dated else (),
                 missing=("statements without a date cannot be ordered",) if undated else (),
-                recorded_on=dated[-1].recorded if dated else None, related=tuple(keys), key=f"{key}|status"))
+                recorded_on=dated[-1].recorded if dated else None,
+                valid_from=dated[-1].recorded if dated else None,
+                valid_basis="statement_date" if dated else "unknown", related=tuple(keys), key=f"{key}|status"))
         # The C1 measure: unquantified under the approved rules.
         if commitments:
             out.signals.append(Signal(
                 DETECTOR, Criterion.C1, SignalType.DELIVERY_EXPOSURE, Status.UNQUANTIFIED, subject, MEASURE,
                 Value(), frozenset({Flag.THROUGHPUT_NOT_APPROVED, Flag.OPEN_SCOPE_MISSING}),
-                commitments[0].authority, tuple(EvidenceRef(g.src.record_id, g.locator) for g in commitments),
+                commitments[0].authority,
+                tuple(timed_ref(g.src.record_id, g.locator, None, g.src.fact_time) for g in commitments),
                 missing=("no admitted open-scope record (remaining work) for this commitment",
                          "no supported sustained-throughput window: Q7 throughput assumptions are not approved, "
                          "and a passing diagnostic is never proof that they hold",),
@@ -331,22 +340,43 @@ def evaluate(sources: list[SourceText]) -> DetectorOutput:
     return out
 
 
-def load_sources(conn: psycopg.Connection, basis: ReadBasis) -> list[SourceText]:
-    p = predicate(basis, "d")
+def load_sources(conn: psycopg.Connection, basis: ReadBasis, tz: str) -> list[SourceText]:
+    """Sources visible at K (latest version at K, T8), each with its FactTime. R and V are applied per fact by
+    the caller (k_only), from what each source establishes."""
+    p = predicate(basis, "d", k_only=True)
     with tenant_tx(conn, basis.tenant_id, batch_seq=basis.batch_seq):
         rows = conn.execute(psql.SQL(
             'SELECT DISTINCT ON ("d"."source_record_id") "d"."source_record_id", "d"."kind", "d"."title",'
-            ' "d"."body" FROM projection.document_text "d" WHERE {} AND "d"."kind" = ANY(%(kinds)s)'
-            ' AND "d"."data_class" <> ALL(%(protected)s)'
+            ' "d"."body", "s"."extracted_at" FROM projection.document_text "d"'
+            ' JOIN ledger.source_record "s" ON "s"."tenant_id" = "d"."tenant_id"'
+            ' AND "s"."record_id" = "d"."source_record_id" AND "s"."version" = "d"."source_version"'
+            ' WHERE {} AND "d"."kind" = ANY(%(kinds)s) AND "d"."data_class" <> ALL(%(protected)s)'
             ' ORDER BY "d"."source_record_id", "d"."batch_seq" DESC').format(p.clause),
             {**p.params, "kinds": list(SOURCE_KINDS),
              "protected": ["sensitive_personal", "payroll_aggregate"]}).fetchall()
-    return [SourceText(r["source_record_id"], r["kind"], r["title"], r["body"]) for r in rows]
+    out = []
+    for r in rows:
+        src = SourceText(r["source_record_id"], r["kind"], r["title"], r["body"])
+        day = recorded_on(src) if src.kind == "document" else None
+        out.append(SourceText(src.record_id, src.kind, src.title, src.body,
+                              timebasis.statement_time(day, r["extracted_at"], tz)))
+    return out
 
 
 def detect(conn: psycopg.Connection, basis: ReadBasis, context: dict) -> DetectorOutput:
-    sources = load_sources(conn, basis)
+    tz = context["time_zone"]
+    sources, withheld = [], []
+    for s in load_sources(conn, basis, tz):
+        reason = timebasis.excluded(s.fact_time, basis, tz)
+        if reason:
+            withheld.append(Withheld(DETECTOR, Criterion.C1, f"a {s.kind} is not used at this read basis: {reason}",
+                                     (s.record_id,)))
+        else:
+            sources.append(s)
+        if s.fact_time.note:
+            withheld.append(Withheld(DETECTOR, Criterion.C1, s.fact_time.note, (s.record_id,)))
     out = evaluate(sources)
+    out.withheld += withheld
     out.withheld.append(Withheld(DETECTOR, Criterion.C1,
                                  "e-mail is not read by detectors in this version (private communications); "
                                  "challenge brief and data-room readme are not company evidence"))

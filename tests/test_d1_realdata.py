@@ -201,3 +201,34 @@ def test_real_d1_detectors(db, ingest_conn, app_conn, tenant, schedule, data_roo
     assert not any(s.value.numeric for s in result.signals)          # nothing is measurable under approved rules
     assert all(s.lineage_batch_seq == 1 for s in result.signals if s.evidence)
     assert not any(s.status.value == "active" and s.criterion.value in ("C2", "C3", "C4") for s in result.signals)
+
+
+def test_real_d1_detectors_under_all_four_read_modes(db, ingest_conn, app_conn, tenant, schedule, data_root):
+    """All four modes over the real D1 pack. Structure only: every fact used respects R (RECORDED_BY) and V
+    (VALID_AT); meeting summaries (undated) never answer VALID_AT; reruns are deterministic."""
+    from datetime import UTC, date, datetime
+
+    from veloxa import projector
+    from veloxa.db import connect
+    from veloxa.signals import registry
+    from veloxa.temporal import Mode, resolve_basis
+
+    now = datetime.now(UTC)
+    pipeline.admit_pack(ingest_conn, tenant, schedule, "D1", data_root, now)
+    with connect(db.dsn("projection")) as prj:
+        projector.build(prj, tenant)
+    sealed = ledger.sealed_releases(app_conn, tenant)
+    for mode, at in ((Mode.CURRENT, None), (Mode.KNOWN_AT, date(2026, 11, 16)), (Mode.RECORDED_BY, date(2026, 8, 1)),
+                     (Mode.VALID_AT, date(2026, 8, 1))):
+        basis = resolve_basis(tenant, sealed, mode, at, "Asia/Kolkata", now)
+        ctx = registry.context_for(basis, "Asia/Kolkata", [], [])
+        result = registry.run(app_conn, basis, ctx)
+        assert registry.run(app_conn, basis, ctx).output_sha256 == result.output_sha256
+        assert basis.batch_seq == 1 and not any(s.value.numeric for s in result.signals)
+        evidence = [e for s in result.signals for e in s.evidence]
+        assert all(e.version == 1 and e.batch_seq == 1 and e.extracted_at for e in evidence)
+        if mode == Mode.RECORDED_BY:
+            assert all(e.recorded_hi <= basis.recorded_cutoff.isoformat() for e in evidence)
+        if mode == Mode.VALID_AT:
+            assert all(e.valid_basis in ("statement_date", "stated_period") for e in evidence)
+            assert not any(e.record_id.startswith("meeting_summaries:") for e in evidence)

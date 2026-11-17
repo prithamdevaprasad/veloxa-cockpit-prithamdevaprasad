@@ -27,7 +27,7 @@ from psycopg import sql as psql
 
 from .. import config, metrics
 from ..db import tenant_tx
-from ..temporal import ReadBasis, predicate
+from ..temporal import Mode, ReadBasis, predicate
 from .model import MEASURED, MISSING, NOT_APPLICABLE, MeasureDefinition, MeasureValue, Risk
 
 DETECTOR = "reported_vs_system@1"
@@ -92,6 +92,9 @@ def _risk_id(*parts: str) -> str:
 def reported_vs_system(conn: psycopg.Connection, basis: ReadBasis, mappings: list[FigureMapping],
                        ) -> tuple[list[Risk], list[str]]:
     """Returns (risks, notes for signals needing data)."""
+    if mappings and basis.mode in (Mode.RECORDED_BY, Mode.VALID_AT):
+        return [], [f"C4: approved pairings are not compared in {basis.mode}: governed metrics carry no recorded or "
+                    "valid time yet, so the comparison is withheld rather than silently unfiltered"]
     if not mappings:
         return [], ["C4 (information integrity): no owner-approved pairing of a reported figure with a governed "
                     "metric is recorded (config/figure_mappings.toml), so no discrepancy is checked"]

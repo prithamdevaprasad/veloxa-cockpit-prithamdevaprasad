@@ -167,9 +167,29 @@ class Value:
 
 @dataclass(frozen=True)
 class EvidenceRef:
+    """One cited record, with the time axes of the FACT taken from it (§8.1). Strings are ISO dates or instants.
+    version, batch_seq and extracted_at (E) are filled from the ledger when the signal is verified."""
     record_id: str
     locator: str = ""            # where in the record (a sentence, a table row, a figure name)
     excerpt: str | None = None   # the short passage the observation rests on, as written
+    version: int | None = None
+    batch_seq: int | None = None
+    extracted_at: str | None = None      # E
+    recorded_hi: str | None = None       # upper(R), exclusive instant
+    recorded_basis: str | None = None    # source_date | extraction_upper_bound
+    valid_from: str | None = None        # V = [valid_from, valid_to)
+    valid_to: str | None = None
+    valid_basis: str | None = None       # stated_period | statement_date | unknown
+
+
+def timed_ref(record_id: str, locator: str, excerpt: str | None, ft) -> EvidenceRef:
+    """An evidence reference carrying a FactTime (signals.timebasis); ft None leaves the time axes unset."""
+    if ft is None:
+        return EvidenceRef(record_id, locator, excerpt)
+    return EvidenceRef(record_id, locator, excerpt, recorded_hi=ft.recorded_hi.isoformat(),
+                       recorded_basis=ft.recorded_basis.value,
+                       valid_from=ft.valid_from.isoformat() if ft.valid_from else None,
+                       valid_to=ft.valid_to.isoformat() if ft.valid_to else None, valid_basis=ft.valid_basis.value)
 
 
 @dataclass(frozen=True)
@@ -194,6 +214,9 @@ class Signal:
     effective_from: date | None = None
     effective_to: date | None = None
     recorded_on: date | None = None         # R: when the source recorded it, if the source says
+    valid_from: date | None = None          # V of the observation, when established: [valid_from, valid_to)
+    valid_to: date | None = None
+    valid_basis: str = ""                   # stated_period | statement_date | unknown ("" = not applicable)
     related: tuple[str, ...] = ()           # keys of duplicate or correlated signals
     calculation: tuple[tuple[str, str], ...] = ()  # ordered provenance of any arithmetic
     key: str = ""                           # stable identity within the detector (for relating signals)
@@ -226,7 +249,8 @@ class Signal:
         for k in ("criterion", "signal_type", "status", "authority"):
             d[k] = getattr(self, k).value
         d["value"] = {k: (v.value if isinstance(v, StrEnum) else v) for k, v in d["value"].items()}
-        for k in ("window_start", "window_end", "event_date", "effective_from", "effective_to", "recorded_on"):
+        for k in ("window_start", "window_end", "event_date", "effective_from", "effective_to", "recorded_on",
+                  "valid_from", "valid_to"):
             d[k] = d[k].isoformat() if d[k] else None
         d["calculation"] = [list(p) for p in self.calculation]
         return d
@@ -240,6 +264,13 @@ class Signal:
     @property
     def record_ids(self) -> tuple[str, ...]:
         return tuple(sorted({e.record_id for e in self.evidence}))
+
+    @property
+    def recorded_upper(self) -> str | None:
+        """T2: a derived fact is usable only once ALL its inputs are recorded: the latest upper(R) of the
+        evidence (None if no evidence carries R)."""
+        his = [e.recorded_hi for e in self.evidence if e.recorded_hi]
+        return max(his) if his else None
 
 
 @dataclass(frozen=True)

@@ -44,7 +44,7 @@ from .contract import (
     Withheld,
 )
 
-DETECTOR = "c3_continuity@1"
+DETECTOR = "c3_continuity@2"  # @2: signal contract v2 (time axes)
 MEASURE = "C3.continuity@1"
 PENDING = ("Q3", "Q9", "Q10")
 FORBIDDEN_SOURCES = frozenset({"leave", "absence", "sickness", "medical"})  # matched as words in the source kind

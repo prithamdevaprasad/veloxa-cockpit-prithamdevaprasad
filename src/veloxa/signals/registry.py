@@ -20,7 +20,7 @@ import psycopg
 from .. import audit
 from ..db import tenant_tx
 from ..risk import detectors as approved
-from ..temporal import Mode, ReadBasis
+from ..temporal import ReadBasis
 from . import c1_delivery, c2_financial, c3_continuity, c4_integrity
 from .contract import Criterion, DetectorOutput, Signal, Withheld
 from .evidence import verify
@@ -66,7 +66,7 @@ def assessment_date(basis: ReadBasis, tz: str) -> date:
 
 
 def context_for(basis: ReadBasis, tz: str, mappings: list | None = None, proposed: list | None = None) -> dict:
-    return {"assessment_date": assessment_date(basis, tz),
+    return {"assessment_date": assessment_date(basis, tz), "time_zone": tz,
             "mappings": approved.load_mappings() if mappings is None else mappings,
             "proposed_mappings": approved.load_proposed() if proposed is None else proposed}
 
@@ -85,6 +85,7 @@ class RunResult:
     signals: list[Signal]
     withheld: list[Withheld]
     config_sha256: str
+    time_zone: str = "UTC"
 
     @property
     def output_sha256(self) -> str:
@@ -99,13 +100,7 @@ def run(conn: psycopg.Connection, basis: ReadBasis, ctx: dict) -> RunResult:
     withheld: list[Withheld] = []
     if basis.batch_seq == 0:
         withheld.append(Withheld("registry@1", Criterion.C1, "nothing had been admitted at this knowledge point"))
-        return RunResult(basis, ctx["assessment_date"], [], withheld, _config_hash(ctx))
-    if basis.mode in (Mode.RECORDED_BY, Mode.VALID_AT):
-        for d in REGISTRY:
-            withheld.append(Withheld(d.detector_id, d.criterion,
-                                     f"{basis.mode} needs recorded-time and valid-time columns that the detector "
-                                     "projections do not carry; not run (never silently unfiltered)"))
-        return RunResult(basis, ctx["assessment_date"], [], withheld, _config_hash(ctx))
+        return RunResult(basis, ctx["assessment_date"], [], withheld, _config_hash(ctx), ctx.get("time_zone", "UTC"))
     for d in REGISTRY:
         out = d.run(conn, basis, ctx)
         for s in out.signals:
@@ -117,7 +112,7 @@ def run(conn: psycopg.Connection, basis: ReadBasis, ctx: dict) -> RunResult:
     for s in signals:
         seen.setdefault(s.signal_id, s)  # duplicate evidence yields one signal
     ordered = sorted(seen.values(), key=lambda s: (s.criterion, s.signal_type, s.subject, s.signal_id))
-    return RunResult(basis, ctx["assessment_date"], ordered, withheld, _config_hash(ctx))
+    return RunResult(basis, ctx["assessment_date"], ordered, withheld, _config_hash(ctx), ctx.get("time_zone", "UTC"))
 
 
 def record(conn: psycopg.Connection, result: RunResult, now: datetime) -> dict:
@@ -129,19 +124,21 @@ def record(conn: psycopg.Connection, result: RunResult, now: datetime) -> dict:
     with tenant_tx(conn, b.tenant_id, batch_seq=b.batch_seq):
         inserted = conn.execute(
             "INSERT INTO runtime.detector_run (tenant_id, run_id, detected_at, batch_seq, mode, as_of,"
-            " assessment_date, detectors, config_sha256, output_sha256, signal_count, withheld)"
-            " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+            " assessment_date, detectors, config_sha256, output_sha256, signal_count, withheld, recorded_cutoff,"
+            " valid_at, time_zone) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
             (b.tenant_id, run_id, now, b.batch_seq, str(b.mode), b.as_of, result.assessment_date,
              json.dumps([d.detector_id for d in REGISTRY]), result.config_sha256, out_hash,
-             len(result.signals), withheld)).rowcount
+             len(result.signals), withheld, b.recorded_cutoff, b.valid_at, result.time_zone)).rowcount
         if inserted:
             for s in result.signals:
                 conn.execute(
                     "INSERT INTO runtime.risk_signal (tenant_id, run_id, signal_id, detector, criterion, signal_type,"
-                    " status, lineage_batch_seq, evidence, payload) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    " status, lineage_batch_seq, evidence, payload, recorded_upper, valid_from, valid_to)"
+                    " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     (b.tenant_id, run_id, s.signal_id, s.detector, s.criterion.value, s.signal_type.value,
                      s.status.value, s.lineage_batch_seq, list(s.record_ids),
-                     json.dumps(s.body() | {"signal_id": s.signal_id}, default=str)))
+                     json.dumps(s.body() | {"signal_id": s.signal_id}, default=str), s.recorded_upper,
+                     s.valid_from, s.valid_to))
             audit.append(conn, b.tenant_id, "detector.run", {
                 "run_id": run_id, "batch_seq": b.batch_seq, "mode": str(b.mode), "signals": len(result.signals),
                 "detectors": [d.detector_id for d in REGISTRY]})

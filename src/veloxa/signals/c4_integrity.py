@@ -25,7 +25,8 @@ from psycopg import sql as psql
 
 from ..db import tenant_tx
 from ..risk import detectors as approved
-from ..temporal import ReadBasis, predicate
+from ..temporal import Mode, ReadBasis, predicate
+from . import timebasis
 from .contract import (
     Authority,
     Criterion,
@@ -38,9 +39,10 @@ from .contract import (
     Value,
     ValueKind,
     Withheld,
+    timed_ref,
 )
 
-DETECTOR = "c4_integrity@1"
+DETECTOR = "c4_integrity@2"  # @2: per-fact recorded/valid time and source versions
 _SCALES = {"cr": Decimal(10) ** 7, "crore": Decimal(10) ** 7, "l": Decimal(10) ** 5, "lakh": Decimal(10) ** 5,
            "lakhs": Decimal(10) ** 5}
 _VALUE = re.compile(r"^(?P<cur>Rs\.?\s*)?(?P<num>\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(?P<suffix>[A-Za-z]+)?$")
@@ -53,6 +55,7 @@ class Reported:
     value_text: str
     period: str | None
     issued_on: str | None
+    fact_time: timebasis.FactTime | None = None
 
 
 @dataclass(frozen=True)
@@ -97,8 +100,8 @@ def compare_reported(rows: list[Reported]) -> DetectorOutput:
                 if a.record_id == b.record_id:
                     continue
                 pa, pb = parse(a.value_text), parse(b.value_text)
-                ev = (EvidenceRef(a.record_id, f"key numbers: {label}", a.value_text),
-                      EvidenceRef(b.record_id, f"key numbers: {label}", b.value_text))
+                ev = (timed_ref(a.record_id, f"key numbers: {label}", a.value_text, a.fact_time),
+                      timed_ref(b.record_id, f"key numbers: {label}", b.value_text, b.fact_time))
                 observed = (f"{a.record_id} reports {label!r} = {a.value_text!r} for period {a.period!r}",
                             f"{b.record_id} reports {label!r} = {b.value_text!r} for period {b.period!r}")
                 flags = {Flag.METRIC_IDENTITY_LABEL_ONLY, Flag.MATERIALITY_NOT_ASSIGNED, Flag.REPORTED_NOT_VERIFIED}
@@ -138,17 +141,22 @@ def compare_reported(rows: list[Reported]) -> DetectorOutput:
     return out
 
 
-def load_reported(conn: psycopg.Connection, basis: ReadBasis) -> list[Reported]:
-    p = predicate(basis, "r")
+def load_reported(conn: psycopg.Connection, basis: ReadBasis, tz: str = "UTC") -> list[Reported]:
+    """Reported figures visible at K (latest version at K), each with its FactTime: R from the document's own
+    date, V from its stated period (unknown when the period cannot be read)."""
+    p = predicate(basis, "r", k_only=True)
     with tenant_tx(conn, basis.tenant_id, batch_seq=basis.batch_seq):
         rows = conn.execute(psql.SQL(
             'SELECT DISTINCT ON ("r"."source_record_id", "r"."metric") "r"."source_record_id", "r"."metric",'
-            ' "r"."value_text", "r"."period", "r"."issued_on" FROM projection.reported_figure "r" WHERE {}'
+            ' "r"."value_text", "r"."period", "r"."issued_on", "s"."extracted_at"'
+            ' FROM projection.reported_figure "r" JOIN ledger.source_record "s" ON "s"."tenant_id" = "r"."tenant_id"'
+            ' AND "s"."record_id" = "r"."source_record_id" AND "s"."version" = "r"."source_version" WHERE {}'
             ' AND "r"."data_class" <> ALL(%(protected)s)'
             ' ORDER BY "r"."source_record_id", "r"."metric", "r"."batch_seq" DESC').format(p.clause),
             {**p.params, "protected": ["sensitive_personal", "payroll_aggregate"]}).fetchall()
     return [Reported(r["source_record_id"], r["metric"], r["value_text"], r["period"],
-                     r["issued_on"].isoformat() if r["issued_on"] else None) for r in rows]
+                     r["issued_on"].isoformat() if r["issued_on"] else None,
+                     timebasis.figure_time(r["issued_on"], r["period"], r["extracted_at"], tz)) for r in rows]
 
 
 def unmapped_signals(rows: list[Reported], active: list[approved.FigureMapping],
@@ -167,7 +175,7 @@ def unmapped_signals(rows: list[Reported], active: list[approved.FigureMapping],
         out.append(Signal(
             DETECTOR, Criterion.C4, SignalType.FIGURE_UNMAPPED, Status.UNMAPPED, label, "C4.reported_vs_system@1",
             Value(), frozenset(flags), Authority.FORMAL_REPORTED,
-            tuple(EvidenceRef(r.record_id, f"key numbers: {label}", r.value_text) for r in group),
+            tuple(timed_ref(r.record_id, f"key numbers: {label}", r.value_text, r.fact_time) for r in group),
             observed=tuple(f"{r.record_id} reports {label!r} = {r.value_text!r} for period {r.period!r}"
                            for r in group),
             missing=("no owner-approved mapping pairs this reported figure with a system metric; it is not compared"
@@ -200,12 +208,26 @@ def approved_signals(conn: psycopg.Connection, basis: ReadBasis, active: list[ap
 
 def detect(conn: psycopg.Connection, basis: ReadBasis, context: dict) -> DetectorOutput:
     active, proposed = context["mappings"], context.get("proposed_mappings", [])
-    rows = load_reported(conn, basis)
+    tz = context["time_zone"]
+    rows, withheld = [], []
+    for r in load_reported(conn, basis, tz):
+        reason = timebasis.excluded(r.fact_time, basis, tz)
+        if reason:
+            withheld.append(Withheld(DETECTOR, Criterion.C4, f"{r.label!r} is not used at this read basis: {reason}",
+                                     (r.record_id,)))
+        else:
+            rows.append(r)
     out = compare_reported(rows)
     out.signals += unmapped_signals(rows, active, proposed)
-    sigs, notes = approved_signals(conn, basis, active)
-    out.signals += sigs
-    out.withheld += notes
+    out.withheld += withheld
+    if basis.mode in (Mode.RECORDED_BY, Mode.VALID_AT) and active:
+        out.withheld.append(Withheld(DETECTOR, Criterion.C4, f"approved reported-vs-system comparisons are not "
+                                     f"run in {basis.mode}: governed system metrics carry no recorded or valid "
+                                     "time yet (never silently unfiltered)"))
+    else:
+        sigs, notes = approved_signals(conn, basis, active)
+        out.signals += sigs
+        out.withheld += notes
     out.withheld.append(Withheld(DETECTOR, Criterion.C4, "figures spoken in meeting summaries are not extracted as "
                                  "reported figures (prose with uncertain units); they are not compared"))
     if not active:

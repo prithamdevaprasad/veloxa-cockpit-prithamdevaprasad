@@ -27,7 +27,8 @@ def visible_records(conn: psycopg.Connection, basis: ReadBasis, record_ids: set[
         return {}
     with tenant_tx(conn, basis.tenant_id, batch_seq=basis.batch_seq):
         rows = conn.execute(
-            "SELECT DISTINCT ON (record_id) record_id, batch_seq, data_class, kind, system, source_path"
+            "SELECT DISTINCT ON (record_id) record_id, version, batch_seq, data_class, kind, system, source_path,"
+            " extracted_at"
             " FROM ledger.visible_source_record WHERE record_id = ANY(%s) ORDER BY record_id, version DESC",
             (sorted(record_ids),)).fetchall()
     return {r["record_id"]: r for r in rows}
@@ -49,5 +50,8 @@ def verify(conn: psycopg.Connection, basis: ReadBasis, signals: list[Signal]) ->
         lineage = max((seen[rid]["batch_seq"] for rid in s.record_ids), default=0)
         if lineage > basis.batch_seq:  # cannot happen through the view; asserted anyway
             raise EvidenceError(f"{s.detector}: lineage K={lineage} exceeds the read basis K={basis.batch_seq}")
-        out.append(replace(s, lineage_batch_seq=lineage))
+        # The version and E of each cited record, as visible at K (the latest version at or below K, T8).
+        refs = tuple(replace(e, version=seen[e.record_id]["version"], batch_seq=seen[e.record_id]["batch_seq"],
+                             extracted_at=seen[e.record_id]["extracted_at"].isoformat()) for e in s.evidence)
+        out.append(replace(s, evidence=refs, lineage_batch_seq=lineage))
     return out

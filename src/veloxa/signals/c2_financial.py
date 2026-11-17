@@ -35,7 +35,7 @@ from .contract import (
     Withheld,
 )
 
-DETECTOR = "c2_financial@1"
+DETECTOR = "c2_financial@2"  # @2: signal contract v2 (time axes)
 MEASURE = "C2.net_exposure_12m@1"
 UNIT = "INR"
 HORIZON_MONTHS = 12
