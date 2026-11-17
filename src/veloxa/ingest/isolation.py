@@ -114,6 +114,9 @@ def parse_all(items: list[tuple[str, bytes, str, str]], lim: dict | None = None)
     except BrokenProcessPool:
         raise Quarantined("parser_crashed", "(pack)") from None
     finally:
-        for p in list(getattr(pool, "_processes", {}).values()):   # a hung parser is killed, not waited for
+        procs = list(getattr(pool, "_processes", {}).values())
+        for p in procs:                                  # a hung parser is killed, not waited for
             p.kill()
         pool.shutdown(wait=False, cancel_futures=True)
+        for p in procs:                                  # reap: no parser process outlives the call (it would hold
+            p.join(10)                                   # inherited handles, e.g. a caller's output pipe, open)

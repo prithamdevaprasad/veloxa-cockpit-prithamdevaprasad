@@ -176,16 +176,28 @@ def _relaunch(wf, runner_cls, catalogue):
     wf["runner"] = runner
 
 
+def _run_child(argv):
+    """Run the crash child with output to FILES, not pipes: a process that dies abruptly can leave a grandchild
+    (e.g. a parser worker) holding an inherited pipe, and reading a pipe would then wait for ever."""
+    import tempfile
+    from types import SimpleNamespace
+
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        p = subprocess.run(argv, stdout=out, stderr=err, timeout=120, env=os.environ.copy())  # noqa: S603
+        out.seek(0)
+        err.seek(0)
+        o, e = out.read().decode(errors="replace"), err.read().decode(errors="replace")
+    return SimpleNamespace(returncode=p.returncode, stdout=o, stderr=e), o.strip().splitlines()[-1]
+
+
 def _crash_and_recover(db, wf, DBOS, DBOSClient, DBOSActivityRunner, CATALOGUE):  # noqa: N803
     t, k = new_tenant(db), key()
     t2, k2 = new_tenant(db), key()
     child = [sys.executable, str(HERE / "workflow_crash_child.py")]
-    first = subprocess.run(child + [str(t), k], capture_output=True, text=True, timeout=120, env=os.environ.copy())
+    first, wid = _run_child(child + [str(t), k])
     assert first.returncode == 3, first.stderr[-2000:]
-    wid = first.stdout.strip().splitlines()[-1]
-    second = subprocess.run(child + [str(t2), k2], capture_output=True, text=True, timeout=120, env=os.environ.copy())
+    second, cancelled = _run_child(child + [str(t2), k2])
     assert second.returncode == 3, second.stderr[-2000:]
-    cancelled = second.stdout.strip().splitlines()[-1]
     client = DBOSClient(system_database_url=wf["sysurl"])
     try:
         (st,) = client.list_workflows(workflow_ids=[wid], load_input=False, load_output=False)
