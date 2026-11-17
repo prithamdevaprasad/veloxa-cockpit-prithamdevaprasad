@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from ..catalogue import Rule, classify
+from . import isolation
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ def build_manifest(pack_dir: Path, rules: list[Rule]) -> list[ManifestEntry]:
         raise DataMissing(f"release-pack path is not a plain folder: {pack_dir.name}")
     root = pack_dir.resolve()
     entries = []
+    lim, seen_bytes = isolation.limits(), 0
     for path in sorted(pack_dir.rglob("*")):
         if path.is_symlink():
             raise DataMissing(f"symbolic links are not admitted: {path.relative_to(pack_dir).as_posix()}")
@@ -50,8 +52,13 @@ def build_manifest(pack_dir: Path, rules: list[Rule]) -> list[ManifestEntry]:
             raise DataMissing("a file resolves outside the pack folder")
         relpath = path.relative_to(pack_dir).as_posix()
         rule = classify(rules, relpath)  # classify before reading: unknown files are never read
+        size = path.stat().st_size
+        isolation.check_before_read(relpath, size, len(entries), seen_bytes, lim)   # C06: limits BEFORE reading
         data = path.read_bytes()
         read_at = datetime.now(UTC)
+        isolation.check_before_read(relpath, len(data), len(entries), seen_bytes, lim)   # grew while reading
+        isolation.check_content(relpath, path.suffix, data, lim)                      # type and archive guards
+        seen_bytes += len(data)
         entries.append(ManifestEntry(relpath, path, data, hashlib.sha256(data).hexdigest(), len(data), read_at, rule))
     if not entries:
         raise DataMissing(f"release-pack folder is empty: {pack_dir.name}")

@@ -18,10 +18,11 @@ def crash(*_a, **_k):
     os._exit(3)                        # an abrupt process death: no cleanup, no exception handling
 
 
-projector.build = crash
-runner = DBOSActivityRunner(CATALOGUE)
-runner.launch()
-h = runner.start("veloxa.pack_pipeline.v1", {"tenant_id": sys.argv[1], "pack_id": "D1"}, sys.argv[2])
-print(h.workflow_id, flush=True)
-runner.result(h.workflow_id)           # never returns: the projection step kills the process
-os._exit(0)
+if __name__ == "__main__":             # the C06 parser runs in a spawned process, which re-imports this module
+    projector.build = crash
+    runner = DBOSActivityRunner(CATALOGUE)
+    runner.launch()
+    h = runner.start("veloxa.pack_pipeline.v1", {"tenant_id": sys.argv[1], "pack_id": "D1"}, sys.argv[2])
+    print(h.workflow_id, flush=True)
+    runner.result(h.workflow_id)       # never returns: the projection step kills the process
+    os._exit(0)

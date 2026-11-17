@@ -32,9 +32,9 @@ from .. import audit
 from ..catalogue import Rule, load_catalogue
 from ..db import tenant_tx
 from ..releases import AdmissionRefused, Pack, Schedule, check_admissible
+from . import isolation
 from .contracts import validate_rows
 from .manifest import build_manifest, manifest_sha256
-from .parsers import parse
 
 
 @dataclass
@@ -95,8 +95,8 @@ def admit_pack(
         return early
 
     parsed = []  # (entry, data class, envelope)
-    for entry in entries:
-        envelopes = parse(entry.data, entry.suffix, entry.rule.records)
+    parsed_files = isolation.parse_all([(e.relpath, e.data, e.suffix, e.rule.records) for e in entries])  # C06
+    for entry, envelopes in zip(entries, parsed_files, strict=True):
         if entry.rule.contract is not None:  # schema and semantic checks; refuses the whole pack on failure
             validate_rows(entry.relpath, entry.rule.contract, [(e.locator, e.payload) for e in envelopes])
         for env in envelopes:
