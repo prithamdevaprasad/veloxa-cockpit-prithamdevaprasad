@@ -36,7 +36,9 @@ SOURCES = ("keka_hrms", "zoho_books", "documents", "meeting_summaries", "email",
 
 def dsn(admin: str, db: str, role: str | None = None) -> str:
     p = urlsplit(admin)
-    netloc = p.netloc if role is None else f"veloxa_{role}:{ROLE_PASSWORDS[role.upper()]}@{p.netloc.rsplit('@', 1)[-1]}"
+    # The same value bootstrap sets on the (cluster-wide) role: an explicit VELOXA_<ROLE>_PASSWORD wins.
+    pw = os.environ.get(f"VELOXA_{role.upper()}_PASSWORD", ROLE_PASSWORDS[role.upper()]) if role else None
+    netloc = p.netloc if role is None else f"veloxa_{role}:{pw}@{p.netloc.rsplit('@', 1)[-1]}"
     return urlunsplit((p.scheme, netloc, f"/{db}", p.query, p.fragment))
 
 

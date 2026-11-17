@@ -7,7 +7,7 @@ const target = process.env.VELOXA_API_URL ?? "http://127.0.0.1:8000";
 
 export default defineConfig({
   plugins: [react()],
-  server: { port: 5173, strictPort: true, proxy: { "/v1": target, "/health": target } },
-  preview: { port: 4173, strictPort: true, proxy: { "/v1": target, "/health": target } },
+  server: { host: "127.0.0.1", port: 5173, strictPort: true, proxy: { "/v1": target, "/health": target } },
+  preview: { host: "127.0.0.1", port: 4173, strictPort: true, proxy: { "/v1": target, "/health": target } },
   build: { outDir: "dist", sourcemap: true },
 });
