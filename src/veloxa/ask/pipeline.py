@@ -15,6 +15,7 @@ No model writes SQL; every number comes from a governed metric or is a record va
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
@@ -125,6 +126,15 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
         return _record(conn, tenant_id, principal, now, basis, base, _abstained(
             basis, "I read this as a question about a time when nothing had been admitted.",
             ["nothing had been admitted at this knowledge point"] + list(basis.notes)))
+
+    # (3b) a question about a FUTURE value: no declared tool forecasts anything, and Veloxa never extrapolates a
+    # current fact into the future (H-16: forecasts without a basis abstain). Answering with today's figure would be
+    # a different question presented as an answer.
+    if _FORECAST.search(question):
+        return _record(conn, tenant_id, principal, now, basis, base, _abstained(
+            basis, "I read this as a question about a future value.",
+            ["no forecast or plan in the admitted evidence supports a future value; current figures are not "
+             "extrapolated"]))
 
     # (4)-(5) entity linking and bounded plan
     people = _people(conn, basis)
@@ -242,6 +252,24 @@ def _refused(p: policy.Policy, basis: ReadBasis, interpretation: str) -> dict:
     out["grade"]["reasons"] = ["refused by policy"]
     out["refusal"] = {"policy": p.policy_id, "title": p.title, "reason": p.reason, "alternative": p.alternative}
     return out
+
+
+_FORECAST_WORDS = re.compile(r"\b(forecast\w*|project(?:ed|ion)s?|predict\w*)\b", re.I)
+_QUANTITY = re.compile(r"^\s*(what(?:'s| is| was| will)?\b|how (?:much|many)\b)", re.I)
+_FUTURE = re.compile(r"\b(will\b|going to\b|next (?:year|quarter|month|fy)\b|expected to\b|by (?:the )?end of next)",
+                     re.I)
+
+
+class _Forecast:
+    """A question about a FUTURE value: explicit forecast words, or a quantity question in the future tense.
+    A question about a planned event ("where will the summit be held?") is not a forecast."""
+
+    @staticmethod
+    def search(q: str) -> bool:
+        return bool(_FORECAST_WORDS.search(q) or (_QUANTITY.search(q) and _FUTURE.search(q)))
+
+
+_FORECAST = _Forecast()
 
 
 def _abstained(basis: ReadBasis, interpretation: str, unknowns: list[str]) -> dict:

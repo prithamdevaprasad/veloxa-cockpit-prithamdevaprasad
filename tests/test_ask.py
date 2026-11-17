@@ -380,3 +380,14 @@ def test_ask_endpoint_answers_only_an_authenticated_principal_and_returns_typed_
     with api_client(db, monkeypatch, **dev_fixture("T999")) as client:  # authenticated, but not in the HR export
         denied = client.post("/v1/ask", json={"question": "What is the ledger spend?"}, headers=auth)
         assert denied.status_code == 403 and denied.json()["error"] == "not_authorised"
+
+
+@pytest.mark.parametrize("question,forecast", [
+    ("What will revenue be next year?", True), ("What is the headcount forecast?", True),
+    ("How many customers will we have?", True), ("Where will the offsite be held?", False),
+    ("What is the headcount?", False), ("What was spend last quarter?", False)])
+def test_questions_about_future_values_are_recognised_and_planned_events_are_not(question, forecast):
+    """H-16: a forecast without a basis abstains; a current figure is never extrapolated into an answer."""
+    from veloxa.ask import pipeline
+
+    assert pipeline._FORECAST.search(question) is forecast
