@@ -116,6 +116,23 @@ def cmd_project(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_identity_sync(_: argparse.Namespace) -> int:
+    """Register C12 source identities and candidates from every sealed batch (projection role). Decides nothing:
+    release-pack candidates stay unresolved."""
+    from .resolution import integrate
+
+    schedule = load_schedule()
+    tenant_id = config.tenant_uuid(schedule.tenant_slug)
+    with connect(_dsn("projection")) as conn:
+        sealed = [b["batch_seq"] for b in ledger.batches(conn, tenant_id) if b["sealed"]]
+        for k in sealed:
+            counts = integrate.sync_batch(conn, tenant_id, k)
+            print(f"identity sync batch {k}: " + ", ".join(f"{n}={v}" for n, v in counts.items()))
+    if not sealed:
+        print("identity sync: no sealed batch")
+    return 0
+
+
 def cmd_status(_: argparse.Namespace) -> int:
     schedule = load_schedule()
     tenant_id = config.tenant_uuid(schedule.tenant_slug)
@@ -253,6 +270,8 @@ def main(argv: list[str] | None = None) -> int:
     p_prj = sub.add_parser("project", help="build projections for sealed batches")
     p_prj.add_argument("--rebuild", action="store_true", help="drop and rebuild all projections from the ledger")
     p_prj.set_defaults(func=cmd_project)
+    sub.add_parser("identity-sync", help="C12: register identities and candidates from sealed batches (counts only)"
+                   ).set_defaults(func=cmd_identity_sync)
     p_sc = sub.add_parser("selfcheck", help="run startup self-checks for a role")
     p_sc.add_argument("--role", choices=("app", "ingest"), default="app")
     p_sc.set_defaults(func=cmd_selfcheck)
