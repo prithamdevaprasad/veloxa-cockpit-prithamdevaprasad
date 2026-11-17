@@ -29,3 +29,7 @@ token = "Rs. 82 L"
 [[allow]]
 file = "tests/test_signals.py"
 token = "Rs. 4 bn"
+
+[[allow]]
+file = "tests/test_ask_conflicts.py"
+token = "Rs. 3.7 Cr"

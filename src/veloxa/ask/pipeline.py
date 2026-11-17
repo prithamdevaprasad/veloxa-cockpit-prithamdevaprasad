@@ -25,7 +25,7 @@ import psycopg
 from .. import audit, ledger, tools
 from ..db import tenant_tx
 from ..temporal import Mode, ReadBasis, resolve_basis
-from . import planner, policy, timeparse
+from . import conflicts, planner, policy, timeparse
 from .verifier import PROTECTED_CLASSES, SOURCE_CLASS, Claim, verify
 
 PIPELINE_VERSION = "ask-v0.1-facts-only"
@@ -204,13 +204,28 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
     headline = grades[0]
     qualifiers = list(dict.fromkeys([q for c in kept for e in c.evidence if e in facts
                                      for q in facts[e]["qualifiers"]] + [FACTS_ONLY]))
-    status = _status(False, headline, qualifiers, conflict=False)
+    found = conflicts.for_question(conn, basis, tz, question)        # H-11: never one figure when sources disagree
+    status = _status(False, headline, qualifiers, conflict=bool(found))
     shown = [c.text for c in kept[:3]]
     text = ". ".join(s.rstrip(".") for s in shown) + "."
+    if found:
+        text = ("The sources disagree, so no single figure is given. " + text
+                + " " + " ".join(f"{d['subject']}: {d['claims'][0]['value']} ({d['claims'][0]['source']}) vs "
+                                 f"{d['claims'][1]['value']} ({d['claims'][1]['source']}); metric definition "
+                                 f"{d['definition']}, period {d['period'].replace('_', ' ')}." for d in found))
+        extra = sorted({c["record_id"] for d in found for c in d["claims"]} - set(records))
+        for e in tools._evidence(conn, basis, extra):
+            if e.data_class in PROTECTED_CLASSES:
+                continue
+            records[e.record_id] = {"record_id": e.record_id, "kind": e.kind, "system": e.system,
+                                    "source_class": SOURCE_CLASS.get(e.kind, "document"),
+                                    "data_class": e.data_class, "batch_seq": e.batch_seq,
+                                    "source_path": e.source_path, "locator": e.locator, "excerpt": e.excerpt}
     if len(kept) > 3:
         text += f" ({len(kept) - 3} more cited fact{'s' if len(kept) > 4 else ''} below.)"
     cited_records = sorted({i for c in kept for e in c.evidence
-                            for i in ([e] if e in records else facts.get(e, {}).get("inputs", []))})
+                            for i in ([e] if e in records else facts.get(e, {}).get("inputs", []))}
+                           | {c["record_id"] for d in found for c in d["claims"] if c["record_id"] in records})
     used_facts = sorted({e for c in kept for e in c.evidence if e in facts}, key=lambda x: int(x[1:]))
     result = {
         "status": status,
@@ -221,7 +236,7 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
         "qualifiers": qualifiers,
         "claims": [{"text": c.text, "kind": c.kind, "evidence": c.evidence, "verification": c.verification,
                     "grade": g, "notes": c.notes} for c, g in zip(kept, grades, strict=True)],
-        "disagreements": [],
+        "disagreements": found,
         "unknowns": list(dict.fromkeys(unknowns)),
         "refusal": None,
         "read_basis": _basis_json(basis),
