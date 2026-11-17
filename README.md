@@ -52,10 +52,10 @@ Alternatively, copy `.env.example` to `.env` (never committed), set `VELOXA_DATA
 | Service | Holds | Does |
 |---|---|---|
 | `db` | — | PostgreSQL 18 with pgvector and btree_gist |
-| `init` (one-shot) | The administrator, migrator and ingest credentials; the release packs mounted read-only | Creates roles and extensions, applies migrations, and admits every release pack whose release time (10:00 IST on its day) has passed. Then exits. A pack that fails admission is logged and audited, and `init` still succeeds if an earlier batch is sealed (DEC-24). `init` fails if the data folder is missing, a migration fails, the security self-check fails, or no sealed baseline batch exists (e.g. a fresh database whose D1 failed) |
+| `init` (one-shot) | The administrator, migrator and ingest credentials; the release packs mounted read-only | Creates roles and extensions and applies migrations (each committed before anything else runs). On a **fresh** database only, it admits the authorised baseline pack (D1). It **never admits a later pack**, even once released: that is an explicit operation (below). Then it builds projections, self-checks and exits. `init` fails if a migration or the self-check fails, or if a fresh database has no data folder or its baseline admission fails (nothing to serve; DEC-24 availability otherwise) |
 | `api` (long-running) | **Only** the application-role password; **no** data mount | Starts after `init` succeeds; serves `http://127.0.0.1:8000`. It refuses to start if any privileged credential is in its environment |
 
-If a released pack fails admission, the API keeps serving the latest sealed batch, and reports the pack as `pending_admission` with health `degraded`. Unsealed data is never exposed. If `VELOXA_DATA_PATH` is not set, Compose stops with an explanatory message. Restarting is safe: an admitted pack is recognised by its manifest hash and never admitted twice, including when two admission runs race.
+**Admission is explicit and authorised.** A released pack is admitted only by `veloxa ingest --pack <id>`, and only if [`config/admission_authorisations.toml`](config/admission_authorisations.toml) lists it with the owner decision that approves its catalogue rules and data classes (today: D1 only). Anything else is refused before a file is opened, audited with a reason code, and commits nothing. Until then the API keeps serving the latest sealed batch and reports the pack as `awaiting_authorisation` (or `pending_admission` if it is authorised but failed), with health `degraded`. Unsealed data is never exposed. A source re-released in a later pack is a **correction**: a new record version that replaces the old one from its own batch onward, while earlier knowledge points still see the original (T8). If `VELOXA_DATA_PATH` is not set, Compose stops with an explanatory message. Restarting is safe: it admits nothing, and an admitted pack is recognised by its manifest hash and never admitted twice, including when two admission runs race.
 
 **Check it:**
 
@@ -123,7 +123,8 @@ pip install --constraint requirements.lock -e ".[dev]"
 VELOXA_DATA_PATH=/path/to/packs docker compose up -d --wait db
 export VELOXA_TEST_ADMIN_DSN="postgresql://veloxa_admin:local-dev-admin@127.0.0.1:55432/veloxa"
 ruff check .
-pytest                       # everything (226 tests), including the real-data tests if VELOXA_DATA_PATH is set
+python scripts/public_scan.py   # public safety scan: exits 1 on any finding (CI runs it as a gate)
+pytest                       # everything (305 tests), including the real-data tests if VELOXA_DATA_PATH is set
 pytest -m "not realdata"     # what CI runs: synthetic data only
 ```
 
@@ -141,10 +142,10 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
 | Command | Purpose |
 |---|---|
 | `veloxa migrate` | Create roles and extensions; apply migrations once, in order |
-| `veloxa ingest [--pack D1\|released]` | Admit release packs from `VELOXA_DATA_PATH` (default: every released pack) |
+| `veloxa ingest [--pack D1\|released]` | Explicitly admit release packs from `VELOXA_DATA_PATH`; only released packs listed in `config/admission_authorisations.toml` (default: every released, authorised pack) |
 | `veloxa status` | Show the clock, the sealed watermark K and each pack's admission state |
 | `veloxa selfcheck --role app\|ingest` | Startup self-checks (§9.3) |
-| `veloxa init` | Privileged one-shot step: migrate, admit released packs, self-check (needs the privileged credentials) |
+| `veloxa init` | Privileged one-shot step: migrate; bootstrap a fresh database with the authorised baseline pack; never admit a later pack; self-check (needs the privileged credentials) |
 | `veloxa serve` | Run the API with the application role only |
 | `veloxa policy record-d15 --file <toml>` | Record an owner-approved D-15 decision as the next policy version (privileged; the API cannot do this). It does not switch weighted ranking on |
 
@@ -154,7 +155,7 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
 
 | Path | Contents | Architecture |
 |---|---|---|
-| `src/veloxa/migrations/` | Bootstrap (role set, `btree_gist`, `pgvector`); `0001_foundation.sql` (schemas, tenant directory, admission batches, raw manifest, source records, audit chain, triggers, RLS, grants); `0002_hardening.sql` (record-to-manifest hash key, time-ordering checks, protected-pay policy); `0003_projections.sql` (read models, projection role, protected-pay policies); `0004_answers.sql` (append-only answers and citations); `0005_briefing.sql` (D-15 decision register and briefing snapshots); `0006_signals.sql` (append-only detector runs and signals; the database rejects a signal citing a record not admitted and sealed at its K, lineage beyond K, or a number on a missing, unmapped, blocked or unquantified signal). Applied migrations are never rewritten | §6, §8.2, §9.3, §9.4, §15, §21.3 |
+| `src/veloxa/migrations/` | Bootstrap (role set, `btree_gist`, `pgvector`); `0001_foundation.sql` (schemas, tenant directory, admission batches, raw manifest, source records, audit chain, triggers, RLS, grants); `0002_hardening.sql` (record-to-manifest hash key, time-ordering checks, protected-pay policy); `0003_projections.sql` (read models, projection role, protected-pay policies); `0004_answers.sql` (append-only answers and citations); `0005_briefing.sql` (D-15 decision register and briefing snapshots); `0007_signal_time.sql` (the read basis R and V of each detector run, upper(R) and V of each signal; the database rejects RECORDED_BY signals recorded after the cutoff and VALID_AT signals citing facts of unknown or non-holding valid time); `0006_signals.sql` (append-only detector runs and signals; the database rejects a signal citing a record not admitted and sealed at its K, lineage beyond K, or a number on a missing, unmapped, blocked or unquantified signal). Applied migrations are never rewritten | §6, §8.2, §9.3, §9.4, §15, §21.3 |
 | `src/veloxa/ingest/` | File-drop connector: manifest (SHA-256 per file), versioned parsers (xlsx rows, docx, pdf, eml, txt), single-transaction admission and sealing | §7, §8.2 |
 | `src/veloxa/releases.py`, `config/release_schedule.toml` | Release schedule and clock; admission decided before any file is opened | §8.2, §25.1 |
 | `config/source_catalogue.toml` | Classification of each pack file (kind, source system, data class). Unknown files are rejected | §6.3, §7.2 |
@@ -170,7 +171,7 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
 | `config/figure_mappings.toml` | Owner-approved pairings of reported figures with governed metrics (none approved yet) | §16.2 C4 |
 | `src/veloxa/auth.py` | Requester authentication: fail closed by default; explicit local development fixture | §19.1 |
 | `src/veloxa/api.py`, `src/veloxa/cli.py` | API (health, time metadata, ask, briefing) and command line (`signals` prints detector counts only) | §19 |
-| `tests/` | 280 tests: release rules and clock, parsers, contracts, database guarantees, concurrency, temporal modes and leakage canaries, metrics and tools, the ask pipeline, risk comparison, D-15 gate, briefing snapshots, authentication, the API, availability on failed admission, the detector contract and the C1–C4 pipelines, the signal store, real-data checks | §21.2 |
+| `tests/` | 305 tests: release rules and clock, parsers, contracts, database guarantees, concurrency, temporal modes and leakage canaries, metrics and tools, the ask pipeline, risk comparison, D-15 gate, briefing snapshots, authentication, the API, availability on failed admission, the detector contract and the C1–C4 pipelines, the signal store, real-data checks | §21.2 |
 | `Dockerfile`, `docker-compose.yml`, `.github/workflows/ci.yml` | One-command run; CI with lint, tests and a fresh-clone Compose job | §25.1, H-30 |
 
 ## Guarantees enforced today (and tested)
@@ -202,12 +203,12 @@ Inside the container (`docker compose exec app veloxa <command>`) or in the virt
   - The detectors produce evidence signals, not risks: on the real Day 1 pack, C1 has observations but an unquantified measure (no open-scope or throughput records; Q7 not approved), C2 is missing evidence, C3 is missing evidence and blocked, and C4 figures are not comparable or unmapped. The watchlist therefore stays empty until an approved mapping or measurable criterion exists.
   - C1 extraction uses deterministic lexical rules (no model), links statements only by an identical subject name, and does not read e-mail. Figures spoken in meeting summaries are not extracted.
   - There is no weighted ranking, no guardrail tiers and no probabilities. These wait for D-15, then a separately approved implementation.
-- Projections carry no recorded-time or valid-time columns yet, so metrics and tools accept CURRENT and KNOWN_AT only; RECORDED_BY and VALID_AT are refused rather than silently unfiltered.
+- Projections carry no recorded-time or valid-time columns, so governed metrics and the Ask tools accept CURRENT and KNOWN_AT only; RECORDED_BY and VALID_AT are refused rather than silently unfiltered. The evidence detectors support all four modes: they apply R and V per fact, from the source's own date (else R is bounded by extraction time E) and stated period (else V is unknown and the fact never answers VALID_AT).
 - `/v1/ask` runs in facts-only mode (deterministic planner, no model composition, no model entailment pass). The disclosure auditor is not built, so payroll aggregates are refused.
 - Not built yet: entity resolution, ReBAC/ABAC adapters, the historical ACL evaluator and the agents.
 - Release packs must be supplied as an extracted folder, not as the zip file.
 - Each pack is held in memory while it is hashed and parsed. This suits the hackathon pack sizes; large packs need streaming.
-- From a later pack's release time, `init` tries to admit it. Until that pack's parsers and catalogue rules are added (Day 2 onward), its admission is refused, so the API serves the earlier sealed batches and reports the pack as pending.
+- A released later pack stays unadmitted until the owner authorises it (catalogue rules and data classes); the API serves the earlier sealed batches and reports it as `awaiting_authorisation`.
 - A database created before migration `0002` keeps its earlier `extracted_at` values (history is append-only). Recreate a local development database with `docker compose down --volumes` to get the corrected values.
 
 ## Documentation

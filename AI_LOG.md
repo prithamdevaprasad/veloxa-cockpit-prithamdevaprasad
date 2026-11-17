@@ -728,3 +728,62 @@ Build a shared detector contract and registry, and the C1–C4 evidence pipeline
 - Weighted ranking stays disabled and `top_three` stays null.
 - No probability output, guardrail or tie-break was added. No mapping was approved and no anchor was used.
 - `ARCHITECTURE.md` is unchanged. No private decision material, evidence or source content is in the repository.
+
+## Tue 17 Nov 2026 — Operational foundation: explicit admission, signal time axes, corrections, scan gate
+
+### Task given to AI
+
+Migrate the real Day 1 database without admitting any new pack, and make admission an explicit, authorised operation. Complete recorded-time and valid-time support for the detectors. Repair the safety-scan gate so that CI fails on any finding. Then establish the C19 and C32 implementation state. Unresolved owner decisions were not to be changed.
+
+### What AI produced
+
+- **Admission separated from start-up.**
+  - `init` migrates and self-checks. It admits the authorised baseline pack only on a fresh database, and never admits a later pack.
+  - `veloxa ingest --pack <id>` admits only packs listed in `config/admission_authorisations.toml`. Today that is D1, citing the existing owner decisions A-024, A-025 r2 and A-026. Any other pack is refused before a file is opened, and the refusal is audited.
+  - Migrations are committed before any admission is attempted.
+  - Health reports a released, unauthorised pack as `awaiting_authorisation`.
+- **Corrections (T8).** A record re-released in a later pack becomes the next version and supersedes the previous one. The shared visibility predicate now keeps a projection row only if no later version is admitted at or below K, so metrics, tools and detectors never double-count a corrected record. Evidence lookup returns the latest version at K.
+- **Signal time axes.**
+  - Detectors filter K in SQL and apply R and V per fact (`signals/timebasis.py`).
+  - R is the source's own date. If the source has none, or its date is after extraction (R ≤ E), R is bounded only by extraction time E.
+  - V is a stated period or statement date, otherwise unknown. A fact with unknown V never answers VALID_AT.
+  - Each evidence reference records its version, batch, E, R and V with their bases. Each signal records upper(R) and V.
+  - Migration `0007_signal_time.sql` records each run's R cutoff and V instant. The database rejects a RECORDED_BY signal recorded after its cutoff, and a VALID_AT signal citing facts of unknown or non-holding valid time.
+  - All four detectors are now version 2.
+- **Scan gate.**
+  - `scripts/public_scan.py` checks for secrets (redacted in its output), local paths, personal addresses, currency amounts and raw data files. It exits 1 on any finding and never truncates its output.
+  - The allowlist holds exact, invented, pack-verified tokens only.
+  - CI runs every step under `bash -eo pipefail`, gates on the scan, and proves the gate with a planted finding piped through `tail`.
+  - A test shows that the same pipe passes without `pipefail` (the E50 failure mode) and fails with it.
+- **Real Day 1 database** (backed up privately first):
+  - `0006` and `0007` applied with `veloxa migrate`; the second run was a no-op;
+  - restart admitted nothing;
+  - the ledger, batch and audit-chain fingerprints are unchanged by migration and restart;
+  - explicit D2 admission was refused (`not_authorised`, exit 1), and D1 reported `already_admitted`;
+  - a detector run was recorded, and the rerun returned the same run.
+
+### Points for owner attention (not decided by AI)
+
+- **The admission-authorisation register** cites the existing D1 approvals. Adding D2, D3 or D4 is an owner decision, after their catalogue rules and data classes are approved.
+- **A synthetic parsing fixture equalled the unapproved C2 candidate anchor.** It was absent from every pack, but it was replaced by an unrelated invented value rather than allowlisted.
+
+### Where AI was wrong, and what changed
+
+| # | AI error or weakness | Who caught it | Correction |
+|---|---|---|---|
+| E51 | The previous sprint reported "the Day 2 pack is released but not admitted". It was not released: D2 releases at 10:00 IST on 17 Nov, and the claim was inferred from the calendar date | AI, from the API clock while verifying the restart | Corrected here. The D2 admission review waits for its release; no D2 content was reviewed for it |
+| E52 | A scripted edit to the CI workflow interpreted escape sequences and wrote a NUL byte into the YAML | AI, from the file read-back | The file was restored from git and the edit reapplied from a script file with no escape sequences |
+| E53 | While checking the refused D2 admission on the real database, AI again read an exit status through a pipe (`tail`), the E50 mistake | AI, immediately | The exit code was re-read without a pipe (1). CI now runs every step with `pipefail` |
+| E54 | The new R ≤ E rule exposed future-dated synthetic fixtures (a document "sent" in 2099 but extracted in 2026). The rule correctly distrusted them | AI, from the test failure | Fixtures moved to plausible 2026 dates. A test asserts that a source date after its extraction is not trusted |
+
+### Verification actually run (17 Nov 2026)
+
+- `ruff check .`: passed. `python scripts/public_scan.py`: CLEAN, exit 0. The private local scan: CLEAN.
+- `pytest` against PostgreSQL 18: **305 passed**, including the six real-data tests, two of them new. `pytest -m "not realdata"` (what CI runs): 299 passed.
+- **Isolated fresh-clone `docker compose up --build --wait`** with a synthetic pack: D1 bootstrapped and sealed, 0001–0007 applied, health ok.
+
+### Confirmations
+
+- D-15 version 1 was not recorded, and `policy.ranking_decision` holds 0 rows. `WEIGHTED_RANKING_IMPLEMENTED = False` and `top_three` is null.
+- No anchor, guardrail, tie-break, mapping or probability was activated. No pack beyond D1 was authorised or admitted.
+- `ARCHITECTURE.md` is unchanged. No private material is in the repository.
