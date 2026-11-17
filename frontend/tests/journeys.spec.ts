@@ -89,7 +89,7 @@ test("Department views show governed figures only", async ({ page }) => {
 
 test("the layout has no horizontal page scroll", async ({ page }) => {
   await signIn(page);
-  for (const r of ["today", "ask", "conflicts", "agents", "departments"]) {
+  for (const r of ["today", "ask", "conflicts", "agents", "departments", "scenarios"]) {
     await page.goto(`/#/${r}`);
     await page.waitForLoadState("networkidle");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -100,4 +100,12 @@ test("the layout has no horizontal page scroll", async ({ page }) => {
   await expect(page.getByText("Interviews are closed")).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow, "agents with detail").toBeLessThanOrEqual(1);
+});
+
+test("Scenarios never predict and say when the evidence names nothing", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/scenarios");
+  await expect(page.getByRole("heading", { name: "Scenarios" })).toBeVisible();
+  await expect(page.getByText("No named commitments")).toBeVisible();          // the synthetic D1 states none
+  await expect(page.locator("body")).not.toContainText("%");                     // no probability anywhere
 });

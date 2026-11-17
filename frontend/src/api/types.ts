@@ -210,3 +210,17 @@ export interface RiskHistory {
     events: { batch_seq: number; event: "opened" | "changed" | "resolved" | "reopened"; fields?: string[]; reason?: string }[];
   }[];
 }
+
+export interface ScenarioStatement { statement: string; calculation?: string; evidence?: string[]; stated_date?: string | null }
+export interface Scenario {
+  scenario: string;
+  business_object: string;
+  read_basis: ReadBasis;
+  observed: ScenarioStatement[];
+  derived: ScenarioStatement[];
+  assumptions: string[];
+  unknowns: string[];
+  probability: null;
+  ranked: false;
+}
+export interface ScenarioSubjects { read_basis: { batch_seq: number; banner: string }; commitments: string[] }

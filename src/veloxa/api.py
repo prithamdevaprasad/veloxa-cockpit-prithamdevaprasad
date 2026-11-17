@@ -74,6 +74,14 @@ _AGENT_ERRORS = {"not_found": 404, "agent_not_activated": 403, "not_authorised":
                  "invalid_request": 422, "idempotency_conflict": 409}
 
 
+class ShiftRequest(BaseModel):
+    """A deterministic commitment-shift scenario. The shift is an assumption, never evidence."""
+    model_config = ConfigDict(extra="forbid")
+    business_object: str = Field(min_length=1, max_length=120)
+    shift_days: int = Field(ge=-730, le=730)
+    as_known_at: str | None = None
+
+
 class DecisionRequest(BaseModel):
     """A C12 human decision. The decider is the authenticated principal, never a request field."""
     model_config = ConfigDict(extra="forbid")
@@ -220,6 +228,47 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             except ValueError as e:
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
             return briefing.serve(conn, tenant_id, principal, basis, now)
+
+    def _scenario_basis(conn, as_known_at):
+        now = now_fn()
+        spec = timeparse.parse("", now, schedule.time_zone, None, None, as_known_at)
+        return resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), spec.mode, spec.as_of,
+                             schedule.time_zone, now)
+
+    @app.get("/v1/scenarios/commitments")
+    def scenario_commitments(as_known_at: str | None = None, authorization: str | None = Header(default=None)):
+        """Named commitments the admitted evidence states at the basis (scenario subjects)."""
+        from .risk import scenarios
+
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            try:
+                basis = _scenario_basis(conn, as_known_at)
+            except ValueError as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
+            names = scenarios.commitments(conn, basis, schedule.time_zone) if basis.batch_seq else []
+        return {"read_basis": {"batch_seq": basis.batch_seq, "banner": basis.banner()}, "commitments": names}
+
+    @app.post("/v1/scenarios/commitment-shift")
+    def scenario_shift(body: ShiftRequest, authorization: str | None = Header(default=None)):
+        """Observed facts, derived implications, the assumption and the unknowns of moving one commitment.
+        Deterministic; never a probability or a ranking."""
+        from .risk import scenarios
+
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            try:
+                basis = _scenario_basis(conn, body.as_known_at)
+                return scenarios.commitment_shift(conn, basis, schedule.time_zone, body.business_object,
+                                                  body.shift_days)
+            except scenarios.ScenarioError as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_scenario", "detail": str(e)})
+            except ValueError as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
 
     @app.get("/v1/risks/history")
     def risk_history(authorization: str | None = Header(default=None)):
