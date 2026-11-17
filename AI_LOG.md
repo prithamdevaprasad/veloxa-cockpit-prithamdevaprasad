@@ -967,3 +967,63 @@ T6a asks that the cockpit say what to worry about when it opens, without a quest
 ### Verification actually run
 
 - `pytest`: 407 passed. `ruff check .`: passed. Public and private scans: CLEAN, with D2 allowed only after its release.
+
+## 17–18 Nov 2026: Sprints 6–10 on branch `feat/veloxa-sprints-7-10` (local, not pushed or merged)
+
+### Task given to AI
+
+The owner asked for the following, local-first, with no push, merge or deployment and no change to the real database:
+- complete the feasible Sprint 5–10 work;
+- inspect every release-pack file;
+- review the architecture;
+- prepare an owner decision register;
+- harden the platform;
+- write a tested local operating README.
+
+### What AI produced
+
+- **Sprint 6:** the shared agent runtime (agents are configuration; five-tier memory; idempotent turns); migration 0013.
+- **Sprint 7:** the React + Vite + TypeScript cockpit, with Playwright journeys. Today, Ask, conflicts, agents with session history and cancellation, scenarios, timeline, departments and access.
+- **Sprint 8:**
+  - the risk lifecycle across knowledge points;
+  - deterministic scenarios (no probability);
+  - an evidence dependency graph with early warnings, built from visible evidence only and never ranked.
+- **Sprint 10:**
+  - DBOS durable workflows (owner-approved `dbos==3.5.0`) with approval-gated retention, which is a dry run by default (migration 0014);
+  - the governed model client, DENY_ALL by default with hard budgets (0015);
+  - telemetry;
+  - verified backups and restore drills;
+  - gateway controls;
+  - C02 JWKS rotation, not wired to any IdP;
+  - C06 ingestion isolation;
+  - execution isolation in the database (0016);
+  - SAST and dependency audit;
+  - CI jobs, a load probe and operations designs (`docs/operations/`).
+- **Docs:** `README.md` rewritten as an operating manual; every command was run. `LOCAL_DEVELOPMENT.md` added.
+
+### Where AI was wrong, and what changed
+
+| # | AI error or weakness | Who caught it | Correction |
+|---|---|---|---|
+| E66 | The individual-pay pre-screen recognised people by name or role but not by employee ID. "What is the salary of <ID>?" returned an unrelated profile answer instead of a refusal. No pay was disclosed: the database denies payroll to the API role | AI, while testing the README end to end | Employee IDs are passed to the pre-screen in Ask and agents; regression tests added |
+| E67 | `load-env.ps1`, when dot-sourced, left the last loaded value in a session variable | AI, README testing | The loader runs in its own scope; tested that no variable holds a value |
+| E68 | The Vite servers bound `localhost`, which is IPv6-only on Windows, so `127.0.0.1:5173` was refused | AI, README testing | Both servers bind `127.0.0.1` |
+| E69 | Process-isolated parsing broke on Windows `spawn` for entry points without a main guard (`python -m veloxa`, a test helper) | Full test run | Main guards added |
+| E70 | The demo connected with hard-coded role passwords while bootstrap applied any configured ones | AI review | The demo uses the same values bootstrap sets |
+| E71 | A heredoc edit swallowed a backslash continuation, and a pipe once hid a failing test run | AI | Edits go through scripts or the edit tool; exit codes are always checked before output is filtered |
+
+### Verification actually run
+
+- **pytest:** full suite passing, exit 0 (final counts are in the final report).
+- **Browser and gold:** Playwright 30/30 (desktop, tablet, mobile); gold 30/30 on admitted D1.
+- **Lint and scans:** ruff clean; confidentiality scans clean on every commit; dependency audit clean.
+- **Migrations 0013–0016:** tested on disposable PostgreSQL 18 only, including the upgrade of a restored copy of the real database.
+- **Real database:** unchanged at 0012; fingerprint before and after identical.
+
+### Confirmations
+
+- Nothing was pushed, merged or deployed. The real database is unchanged.
+- Payroll release stays off. D-15 is not recorded, and `top_three` stays null.
+- No later pack was admitted. No real identity was approved.
+- `ARCHITECTURE.md` is unchanged.
+- Every operational value (retention, budgets, limits, provider) is a proposal in the owner's register, not a policy.
