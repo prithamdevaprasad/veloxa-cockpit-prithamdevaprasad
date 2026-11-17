@@ -81,25 +81,36 @@ def build(admin_dsn: str) -> tuple[str, uuid.UUID]:
     return name, tenant
 
 
-def drop_leftovers(admin: str) -> None:
-    """Remove demo databases this script created and could not finish (never any other database)."""
+def drop_leftovers(admin: str) -> list[str]:
+    """Remove demo databases this script created and could not finish: names `veloxa_demo_` + exactly 8 hex
+    characters, as `build` makes them. Never any other database."""
+    import re
+
     import psycopg
 
+    dropped = []
     with psycopg.connect(admin, autocommit=True) as c:
         for (n,) in c.execute("SELECT datname FROM pg_database").fetchall():
-            if n.startswith("veloxa_demo_") and len(n) == len("veloxa_demo_") + 8:
+            if re.fullmatch(r"veloxa_demo_[0-9a-f]{8}", n):
                 c.execute(f'DROP DATABASE IF EXISTS "{n}" WITH (FORCE)')
+                dropped.append(n)
+    return dropped
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--cleanup", action="store_true", help="drop leftover demo databases and exit")
     args = ap.parse_args()
     admin = os.environ.get("VELOXA_TEST_ADMIN_DSN")
     if not admin:
         print("VELOXA_TEST_ADMIN_DSN is required (a PostgreSQL 18 administrator DSN for a disposable database)")
         return 2
+    if args.cleanup:
+        dropped = drop_leftovers(admin)
+        print(f"dropped {len(dropped)} leftover demo database(s)" + (f": {', '.join(dropped)}" if dropped else ""))
+        return 0
     drop_leftovers(admin)       # a previous run killed abruptly (e.g. by a test runner) could not drop its database
     try:
         name, _ = build(admin)
