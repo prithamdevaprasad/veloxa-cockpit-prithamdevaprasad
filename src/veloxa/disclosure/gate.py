@@ -13,13 +13,16 @@ One request, one transaction, serialized per (tenant, principal, measure) by a t
   value through the database function;  9. commit; only then is the value returned.
 A failure anywhere rolls the whole transaction back: no ledger entry, no value (fail closed).
 
-Background rows (§15.3), each with its basis:
+Background rows (§15.3), each with its basis, all decided by CURRENT authorization (C20 ReBAC AND C21 ABAC;
+never C32 history, titles or e-mail participation):
 - own values: the principal's own person-segments (unit rows);
-- individually authorised values: none, because this deployment grants no individual pay access (current ReBAC/ABAC,
-  C20/C21, does not exist; nothing is inferred from titles or historical access);
-- readable documents with payroll aggregates: none, because payroll-aggregate records are not readable by the
-  application role for any principal;
-- public values: none configured.
+- individually authorised values: a unit row for each person whose `pay:<person>` resource the principal may
+  `read_value` now (an explicit relationship tuple, purpose disclosure_background);
+- readable documents with payroll aggregates: for each payroll-aggregate posting the principal may `read_value`
+  now (`pay_document:<record id>`), a row over the register cells of the posting's month (ASSUMPTION A-C19-01: a
+  monthly payroll posting totals that month's register; listed for owner review);
+- public values: none, because no public-value source is approved (PUBLIC_VALUE_SOURCES is empty).
+Individually authorised segments are also ALLOWED variables (knowing them is not a violation).
 Segments: one per person (M2 default). A segment splits only on a recorded pay change the principal may know; no
 pay-change source is admitted, so none splits. Pay values are never used to infer a change.
 """
@@ -41,6 +44,8 @@ from ..temporal import Mode, ReadBasis
 from . import core
 
 MEASURE = "payroll.gross"
+PUBLIC_VALUE_SOURCES: tuple[str, ...] = ()   # owner approval required to add any (none approved)
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 ENGINE_VERSION = "c19-gate/1"
 
 
@@ -110,6 +115,35 @@ class DisclosureGate:
     def __init__(self, k: int = core.DEFAULT_K):
         self.k = k                                    # D-14a architecture default; not changed here
 
+    @staticmethod
+    def _background(conn, tenant_id, me: str, structure: list[dict], k_batch: int):
+        """(rows, allowed segment variables, provenance) from current authorization only."""
+        from ..authz.current import Resource, authorize
+
+        own = {segment_var(me)} if any(s["person"] == me for s in structure) else set()
+        rows = [{v: Fraction(1)} for v in own]
+        allowed, basis = set(own), [("own_value", me)] if own else []
+        for person in sorted({s["person"] for s in structure} - {me}):
+            d = authorize(conn, me, tenant_id, "read_value", Resource("pay", person, tenant_id, "sensitive_personal"),
+                          "disclosure_background")
+            if d.allowed:
+                rows.append({segment_var(person): Fraction(1)})
+                allowed.add(segment_var(person))
+                basis.append(("individually_authorised", person))
+        docs = conn.execute("SELECT * FROM policy.payroll_aggregate_documents(%s)", (k_batch,)).fetchall()
+        for doc in docs:
+            d = authorize(conn, me, tenant_id, "read_value",
+                          Resource("pay_document", doc["record_id"], tenant_id, "payroll_aggregate"),
+                          "disclosure_background")
+            if not d.allowed:
+                continue
+            month = f"{_MONTHS[doc['txn_date'].month - 1]}-{doc['txn_date'].year}"
+            r, _, _ = build_rows(structure, {s["person"] for s in structure}, (month,))
+            if r:
+                rows.append(r)
+                basis.append(("readable_document", doc["record_id"]))
+        return rows, allowed, basis
+
     def request(self, conn: psycopg.Connection, principal: tools.Principal, basis: ReadBasis,
                 req: PayrollRequest) -> Release:
         try:
@@ -160,12 +194,11 @@ class DisclosureGate:
                 return self._record(conn, basis, me, req, fp, seq, {}, [], 0, "refused", str(exc))
             if not q_row:
                 return self._record(conn, basis, me, req, fp, seq, {}, [], 0, "refused", "no_recorded_cells")
-            own = {segment_var(me)} if any(s["person"] == me for s in structure) else set()
-            background = [{v: Fraction(1)} for v in own]          # own values (§15.3); no other background exists
+            background, allowed_vars, _ = self._background(conn, basis.tenant_id, me, structure, basis.batch_seq)
             ledger_rows = [_parse(r) for h in history if h["decision"] == "allowed" for r in h["rows"]]
             protected = {segment_var(s["person"]) for s in structure}
             decision = core.decide(background + ledger_rows, core.Query(req.statistic, (q_row,), (size,)),
-                                   protected, own, self.k)
+                                   protected, allowed_vars, self.k)
             return self._record(conn, basis, me, req, fp, seq, q_row, cells, size,
                                 "allowed" if decision.allowed else "denied", decision.reason)
 

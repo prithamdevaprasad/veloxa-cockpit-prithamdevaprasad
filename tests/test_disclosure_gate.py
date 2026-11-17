@@ -290,3 +290,39 @@ def test_there_is_no_export_agent_or_cache_path_to_bypass_the_gate(db, monkeypat
     src = Path(tools.__file__).resolve().parent
     assert not [p.name for p in src.rglob("*.py") if "lru_cache" in p.read_text(encoding="utf-8")
                 or "functools.cache" in p.read_text(encoding="utf-8")]               # no protected caching exists
+
+
+# ---------------------------------------------------------------------------------------------- current-authz bg
+
+
+def grant(db, tenant, rtype, rid, who="T001"):
+    tid = uuid.uuid4()
+    with psycopg.connect(db.admin_dsn, autocommit=True) as admin:
+        admin.execute("SELECT set_config('app.tenant_id', %s, false)", (str(tenant),))
+        admin.execute("INSERT INTO policy.relationship_tuple (tenant_id, tuple_id, resource_type, resource_id,"
+                      " relation, subject_type, subject_id, source) VALUES (%s,%s,%s,%s,'read_value','person',%s,"
+                      "'synthetic test')", (tenant, tid, rtype, rid, who))
+    return tid
+
+
+def test_an_individually_authorised_value_is_background_knowledge(db, app_conn, payroll):
+    enable(db, payroll)
+    t = grant(db, payroll, "pay", "person:T002")                 # T001 may currently see T002's pay
+    d = ask(app_conn, payroll, me(1), ("Jan-2099",))              # knowing T001 and T002 leaves 4 < k
+    assert (d.released, d.reason) == (False, "small_group")
+    with psycopg.connect(db.admin_dsn, autocommit=True) as admin:
+        admin.execute("SELECT set_config('app.tenant_id', %s, false)", (str(payroll),))
+        admin.execute("INSERT INTO policy.relationship_revocation (tenant_id, tuple_id) VALUES (%s, %s)", (payroll, t))
+    assert ask(app_conn, payroll, me(1), ("Jan-2099",)).released   # revoked now: no longer background
+    assert ask(app_conn, payroll, me(3), ("Feb-2099",)).released   # another principal never uses T001's grant
+
+
+def test_a_readable_payroll_document_is_background_knowledge(db, ingest_conn, app_conn, payroll):
+    enable(db, payroll)
+    with tenant_tx(ingest_conn, payroll):
+        (doc,) = ingest_conn.execute("SELECT record_id FROM ledger.source_record WHERE data_class ="
+                                     " 'payroll_aggregate'").fetchall()
+    assert ask(app_conn, payroll, me(4), ("Jan-2099",)).released    # T004 cannot read the posting: fine
+    grant(db, payroll, "pay_document", doc["record_id"], who="T005")
+    d = ask(app_conn, payroll, me(5), ("Jan-2099",))   # the Jan posting minus Eng-in-Jan isolates Ops (2 < k)
+    assert (d.released, d.reason) == (False, "small_group")
