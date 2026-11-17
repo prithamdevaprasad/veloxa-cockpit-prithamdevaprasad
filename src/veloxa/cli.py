@@ -183,6 +183,39 @@ def cmd_workflow_retention(args: argparse.Namespace) -> int:
         client.destroy()
 
 
+def cmd_tenant(args: argparse.Namespace) -> int:
+    """Operator-only tenant administration (privileged credentials). Never available through the API."""
+    from . import tenancy
+
+    with connect(_admin_dsn()) as conn:
+        try:
+            if args.tenant_command == "create":
+                tid = tenancy.create_tenant(conn, args.slug, args.tz, args.name or args.slug, synthetic=args.synthetic)
+                print(f"tenant {args.slug} created ({tid}); admission: submission; evidence access: rebac")
+            elif args.tenant_command == "show":
+                s = tenancy.settings(conn, tenancy.tenant_by_slug(conn, args.slug))
+                print(f"{s.slug}: {s.display_name}; tz {s.time_zone}; synthetic {s.synthetic}; admission "
+                      f"{s.admission_mode}; evidence access {s.evidence_access}; status {s.status}; v{s.version}")
+            elif args.tenant_command == "add-issuer":
+                v = tenancy.add_issuer(conn, tenancy.tenant_by_slug(conn, args.slug), args.issuer, args.audience,
+                                       args.jwks_url, tuple(args.alg))
+                print(f"issuer {args.issuer} recorded (version {v})")
+            elif args.tenant_command == "invite-admin":
+                pid, token = tenancy.operator_invite_admin(conn, tenancy.tenant_by_slug(conn, args.slug), args.email,
+                                                           args.name)
+                print(f"first-administrator invitation for {pid}. One-time token (shown once, give it to the "
+                      "invitee over a trusted channel):")
+                print(token)
+            elif args.tenant_command == "bootstrap-synthetic-admin":
+                tenancy.bootstrap_synthetic_admin(conn, tenancy.tenant_by_slug(conn, args.slug), args.principal,
+                                                  args.name)
+                print(f"synthetic administrator {args.principal} active")
+        except tenancy.TenancyError as e:
+            print(f"ERROR: {e}")
+            return 2
+    return 0
+
+
 def cmd_backup(args: argparse.Namespace) -> int:
     """C31: a verified logical backup of the configured database (read-only on the source)."""
     from pathlib import Path
@@ -402,6 +435,29 @@ def main(argv: list[str] | None = None) -> int:
     p_wr = sub.add_parser("workflow-retention", help="C26: dry-run DBOS record retention (deletes only if approved)")
     p_wr.add_argument("--apply", action="store_true", help="delete; refused unless the owner decision is configured")
     p_wr.set_defaults(func=cmd_workflow_retention)
+    p_ten = sub.add_parser("tenant", help="operator: tenants, issuers and first administrators (privileged)")
+    ten = p_ten.add_subparsers(dest="tenant_command", required=True)
+    t1 = ten.add_parser("create")
+    t1.add_argument("--slug", required=True)
+    t1.add_argument("--tz", required=True)
+    t1.add_argument("--name")
+    t1.add_argument("--synthetic", action="store_true", help="a synthetic (demo/test) tenant")
+    ten.add_parser("show").add_argument("--slug", required=True)
+    t3 = ten.add_parser("add-issuer", help="the tenant's own OIDC issuer (no secrets)")
+    t3.add_argument("--slug", required=True)
+    t3.add_argument("--issuer", required=True)
+    t3.add_argument("--audience", required=True)
+    t3.add_argument("--jwks-url", required=True)
+    t3.add_argument("--alg", nargs="+", default=["RS256"], choices=["RS256", "ES256"])
+    t4 = ten.add_parser("invite-admin")
+    t4.add_argument("--slug", required=True)
+    t4.add_argument("--email", required=True)
+    t4.add_argument("--name", required=True)
+    t5 = ten.add_parser("bootstrap-synthetic-admin", help="SYNTHETIC tenants only: an admin without an IdP")
+    t5.add_argument("--slug", required=True)
+    t5.add_argument("--principal", required=True)
+    t5.add_argument("--name", required=True)
+    p_ten.set_defaults(func=cmd_tenant)
     p_bk = sub.add_parser("backup", help="C31: verified logical backup of the configured database (privileged)")
     p_bk.add_argument("--out", required=True)
     p_bk.set_defaults(func=cmd_backup)
