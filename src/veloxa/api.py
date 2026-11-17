@@ -58,6 +58,22 @@ class AskRequest(BaseModel):
     as_known_at: str | None = Field(default=None, description="date or instant; implies KNOWN_AT")
 
 
+class SessionRequest(BaseModel):
+    """Open an interview session. The interviewer is the authenticated principal, never a request field."""
+    model_config = ConfigDict(extra="forbid")
+    as_known_at: str | None = Field(default=None, description="date or instant; default: current knowledge")
+
+
+class MessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    message: str = Field(min_length=1, max_length=2000)
+    idempotency_key: str = Field(min_length=8, max_length=200)
+
+
+_AGENT_ERRORS = {"not_found": 404, "agent_not_activated": 403, "not_authorised": 403, "invalid_time": 422,
+                 "invalid_request": 422, "idempotency_conflict": 409}
+
+
 class DecisionRequest(BaseModel):
     """A C12 human decision. The decider is the authenticated principal, never a request field."""
     model_config = ConfigDict(extra="forbid")
@@ -81,8 +97,11 @@ def _app_dsn() -> str:
     return config.db_settings().dsn("veloxa_app", config.role_password("app"))
 
 
-def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = None) -> FastAPI:
-    """`clock` is a test-only injection point (a code parameter, not configuration)."""
+def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = None,
+               agent_runtime: Callable | None = None) -> FastAPI:
+    """`clock` and `agent_runtime` (a factory taking a connection) are test-only injection points (code
+    parameters, not configuration). By default agents run on the in-process agent-tool PDP, the C32 knowledge
+    boundary and the facts-only composer: no model provider is configured."""
     assert_unprivileged()
     auth_settings = auth.settings_from_env()  # raises if the development fixture is half-configured
     schedule = load_schedule()
@@ -314,5 +333,99 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
         if found is None:
             return JSONResponse(status_code=404, content={"error": "not_found"})
         return found
+
+    def _runtime(conn):
+        from .agents.runtime import AgentRuntime
+
+        return agent_runtime(conn) if agent_runtime else AgentRuntime(conn, schedule.time_zone)
+
+    def _agent_error(e):
+        return JSONResponse(status_code=_AGENT_ERRORS.get(e.code, 400), content={"error": e.code, "detail": e.detail})
+
+    @app.get("/v1/agents")
+    def list_agents(authorization: str | None = Header(default=None)):
+        """The agent registry: every agent's category, activation state and configuration version. Unassigned
+        slots represent nobody; no person, persona or manager is shown or invented."""
+        from .agents import registry
+
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            agents = registry.listing(conn, tenant_id)
+        return {"runtime_version": registry.RUNTIME_VERSION,
+                "agents": [{"agent_id": a.agent_id, "category": a.category, "activation": a.activation,
+                            "config_version": a.config_version, "assigned": a.represented_person is not None,
+                            "tools": list(a.tools)} for a in agents]}
+
+    @app.post("/v1/agents/{agent_id}/sessions")
+    def open_agent_session(agent_id: str, body: SessionRequest, authorization: str | None = Header(default=None)):
+        from .agents.runtime import AgentError
+
+        now = now_fn()
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now)
+            if isinstance(principal, JSONResponse):
+                return principal
+            try:
+                spec = timeparse.parse("", now, schedule.time_zone, None, None, body.as_known_at)
+                basis = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), spec.mode, spec.as_of,
+                                      schedule.time_zone, now)
+            except ValueError as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
+            try:
+                return _runtime(conn).open_session(tenant_id, principal, agent_id, basis)
+            except AgentError as e:
+                return _agent_error(e)
+
+    @app.post("/v1/sessions/{session_id}/messages")
+    def agent_message(session_id: uuid.UUID, body: MessageRequest, authorization: str | None = Header(default=None)):
+        """One agent turn: cited claims from KB ∩ AZ ∩ POL only, labelled as an AI representation; idempotent per
+        (session, idempotency_key)."""
+        from .agents.runtime import AgentError, AgentRequest
+
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            try:
+                return _runtime(conn).execute(AgentRequest(tenant_id, principal, session_id, body.message,
+                                                           body.idempotency_key))
+            except AgentError as e:
+                return _agent_error(e)
+
+    @app.post("/v1/sessions/{session_id}/close")
+    def close_agent_session(session_id: uuid.UUID, authorization: str | None = Header(default=None)):
+        from .agents.runtime import AgentError
+
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            try:
+                closed = _runtime(conn).close_session(tenant_id, principal, session_id)
+            except AgentError as e:
+                return _agent_error(e)
+        return {"session_id": str(session_id), "working_memory_closed": closed}
+
+    @app.get("/v1/agents/{agent_id}/memories")
+    def agent_memories(agent_id: str, authorization: str | None = Header(default=None)):
+        """Memory items in the caller's own scope (this agent, this interviewer), at current knowledge. Items whose
+        sources the caller may no longer see are withheld and counted."""
+        from .agents.authorization import CurrentAuthorization
+        from .agents.memory import MemoryScope, MemoryStore
+
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            k = ledger.sealed_watermark(conn, tenant_id)
+            items, withheld = MemoryStore(conn, CurrentAuthorization(conn)).recall(
+                MemoryScope(tenant_id, agent_id, principal.principal_id), k)
+        return {"agent_id": agent_id, "batch_seq": k, "withheld": withheld,
+                "items": [{"memory_id": str(i["memory_id"]), "tier": i["tier"], "label": i["label"],
+                           "content": i["content"], "knowledge_basis": i["knowledge_basis"],
+                           "source_records": i["source_records"], "batch_seq": i["batch_seq"],
+                           "created_at": i["created_at"].isoformat()} for i in items]}
 
     return app

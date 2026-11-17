@@ -116,6 +116,18 @@ def cmd_project(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_agents_seed(_: argparse.Namespace) -> int:
+    """Publish the 14 proposed agent slots, unassigned and blocked (configuration role). Idempotent."""
+    from .agents import registry
+
+    schedule = load_schedule()
+    tenant_id = config.tenant_uuid(schedule.tenant_slug)
+    with connect(_dsn("projection")) as conn:
+        created = registry.seed_slots(conn, tenant_id)
+    print(f"agent slots published: {len(created)} (all unassigned and blocked)")
+    return 0
+
+
 def cmd_identity_sync(_: argparse.Namespace) -> int:
     """Register C12 source identities and candidates from every sealed batch (projection role). Decides nothing:
     release-pack candidates stay unresolved."""
@@ -270,6 +282,8 @@ def main(argv: list[str] | None = None) -> int:
     p_prj = sub.add_parser("project", help="build projections for sealed batches")
     p_prj.add_argument("--rebuild", action="store_true", help="drop and rebuild all projections from the ledger")
     p_prj.set_defaults(func=cmd_project)
+    sub.add_parser("agents-seed", help="publish the 14 proposed agent slots (unassigned, blocked)"
+                   ).set_defaults(func=cmd_agents_seed)
     sub.add_parser("identity-sync", help="C12: register identities and candidates from sealed batches (counts only)"
                    ).set_defaults(func=cmd_identity_sync)
     p_sc = sub.add_parser("selfcheck", help="run startup self-checks for a role")
