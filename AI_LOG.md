@@ -787,3 +787,58 @@ Migrate the real Day 1 database without admitting any new pack, and make admissi
 - D-15 version 1 was not recorded, and `policy.ranking_decision` holds 0 rows. `WEIGHTED_RANKING_IMPLEMENTED = False` and `top_three` is null.
 - No anchor, guardrail, tie-break, mapping or probability was activated. No pack beyond D1 was authorised or admitted.
 - `ARCHITECTURE.md` is unchanged. No private material is in the repository.
+
+## Tue 17 Nov 2026 — C32 historical ACL evaluator, C4 and C1 adapters, C2/C3 source contracts, C19 core
+
+### Task given to AI
+
+- Build the C32 historical ACL evaluator on synthetic bitemporal history, with ACL-H1 to ACL-H6.
+- Add the first source adapters: C4 meeting-summary figures and C1 revised deadlines, plus C2 and C3 source contracts.
+- Prepare C19 without enabling payroll disclosure.
+- Respect the D2 release boundary.
+
+### What AI produced
+
+- **C32.** ACL history is admitted like other evidence: JSON Lines rows, versioned and sealed. It is projected into `projection.acl_history` (migration `0008`).
+  - The evaluator implements the §5.3 contract and §10.7 semantics.
+  - The effective decision is current authorization AND a historical `allowed`.
+  - The unset owner parameters D-10a and D-10b tolerate no staleness.
+  - Real Day 1 data has no ACL history, so every evaluation is `unknown`.
+- **C4.** Figures are extracted from meeting summaries by a deterministic method (`summary-figures/1`).
+  - Each figure keeps its exact span, number, stated unit and rate, an absolute period only if stated, a rounding interval, hedging and a quality state.
+  - Labels are never normalised, and an unstated period or unit is never inferred.
+- **C1.** Revised deadlines are extracted, with an ordered date history and a business-object reference.
+- **C2 and C3 source contracts.** Strictly validated rows. Only binding instruments or system records count for C2. Leave data is refused. Currency is used only as stated, and Q10 events are recorded but never applied.
+- **C19.** The exact §15.4 core, which is isolated and asserted not wired in.
+
+### Points for owner attention (not decided by AI)
+
+- **The 14 agents.** The brief names four departments but no IDs. A candidate mapping (exactly 14 people) is in the private workspace for confirmation. No agent is built.
+- **Owner parameters left unset.**
+  - **D-10a and D-10b:** the evaluator applies them as zero tolerance and no extra lookback.
+  - **D-14a:** the C19 core uses the architecture's default, k = 5.
+- **Production catalogue.** It still has no rule for ACL, obligation or continuity exports. Adding one, and choosing its data class, is an owner decision.
+
+### Where AI was wrong, and what changed
+
+| # | AI error or weakness | Who caught it | Correction |
+|---|---|---|---|
+| E55 | The first C32 fixture attached a 10-group chain to the main test subject, so every evaluation for that person hit the depth limit. The evaluator was right: deny precedence needs complete expansion | AI, from the test run | The chain moved to its own subject |
+| E56 | A C32 test expected a stale ACL to report existence unknown; the correct reason was `stale_beyond_limit` | AI, from the test run | The test now asserts both reasons on the right resources |
+| E57 | C1 took a milestone term ("GA") as the subject of a commitment | AI, from a smoke test | A milestone term is never a subject; a test covers it |
+| E58 | A C19 test expected a sum over five people to be safe for a principal who knows their own pay. The core correctly found that it reveals the other four (fewer than k) | AI, from the test run | The test now asserts that inference |
+| E59 | Real-data extraction emitted bare numbers (speaker numbers, durations) as figure observations | AI, from the real-data counts | A number with neither label nor unit is not a figure; it is counted and withheld |
+| E60 | The local pre-commit gate was invoked as `set -e; gate; git commit`. In this shell `set -e` did not stop the chain, so three commits (cdedeef, 2293949, de3d344) were made while the private scan reported a finding. It was a currency symbol inside a regex pattern, which was reviewed and is safe. Nothing had been pushed | AI, when the gate stopped the docs commit | Every unpushed commit's tree was re-scanned. The reviewed literal was allowlisted exactly (file and token). The gate is now chained with `&&`, which was verified to stop. CI still gates every push |
+
+### Verification actually run (17 Nov 2026)
+
+- `ruff check .`: passed. The public and private scans: CLEAN.
+- `pytest`: **360 passed**, including 7 real-data tests.
+- **Real Day 1 database:** backed up earlier; `0008` applied with `veloxa migrate`; the ledger and batch fingerprints are unchanged; ACL history has 0 rows; health ok.
+
+### Confirmations
+
+- **D2:** not released at the time of the work (03:00 UTC; release 04:30 UTC). It was not opened, catalogued or admitted.
+- **D-15 and ranking:** D-15 version 1 not recorded; `policy.ranking_decision` holds 0 rows; weighted ranking stays off and `top_three` stays null.
+- **Not activated:** no mapping, anchor, guardrail, tie-break or probability; no payroll aggregate released; no agent endpoint.
+- `ARCHITECTURE.md` is unchanged.
