@@ -115,7 +115,8 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
 
     # (2) refusal pre-screen: before anything is read for the question. Names come from the latest sealed export
     # and are used only to recognise that a question targets an individual.
-    refusal = policy.prescreen(question, [p["full_name"] for p in _people(conn, current)])
+    people = _people(conn, current)          # names AND employee IDs: either one identifies an individual
+    refusal = policy.prescreen(question, [p["full_name"] for p in people] + [p["emp_id"] for p in people])
     if refusal:
         reading = f"I read this as a request covered by {refusal.policy.policy_id} ({refusal.policy.title})."
         return _record(conn, tenant_id, principal, now, current, base, _refused(refusal.policy, current, reading))

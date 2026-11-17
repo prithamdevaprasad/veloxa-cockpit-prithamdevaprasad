@@ -103,8 +103,9 @@ def _names_in(text: str, people: list[str]) -> bool:
 
 
 def prescreen(question: str, people: list[str]) -> Refusal | None:
-    """Return the first matching refusal, or None. `people` are full names from the HR export at the latest
-    sealed batch (used only to recognise that a question targets an individual; nothing is disclosed)."""
+    """Return the first matching refusal, or None. `people` are the full names AND employee IDs from the HR
+    export at the latest sealed batch (used only to recognise that a question targets an individual; nothing is
+    disclosed). Either form names one person, so "what is the salary of <employee ID>" is refused like a name."""
     q = question.strip()
     names = _names_in(q, people)
     if _has(_ACTION, q):

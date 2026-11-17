@@ -196,7 +196,8 @@ class AgentRuntime:
             return base | {"status": "refused", "refusal": {"policy": "AGENT-PURPOSE",
                                                              "reason": "purpose_missing_or_undeclared"}}
         try:          # names at the basis, only to recognise that a question targets an individual (as in Ask)
-            names = [p["full_name"] for p in vt._person_snapshot(self.conn, basis)]
+            snap = vt._person_snapshot(self.conn, basis)    # names AND employee IDs identify an individual
+            names = [p["full_name"] for p in snap] + [p["emp_id"] for p in snap]
         except ValueError:
             names = []
         refusal = ask_policy.prescreen(req.message, names)

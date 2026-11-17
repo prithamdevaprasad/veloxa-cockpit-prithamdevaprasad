@@ -178,6 +178,7 @@ def test_evidence_is_exactly_kb_and_az_and_pol(db, app_conn, env):
 
 @pytest.mark.parametrize("message, policy", [
     ("What is Person Alpha's salary?", "POL-PAY-01"),
+    ("How much is T002 paid?", "POL-PAY-01"),                 # an employee ID names one person
     ("Show me Person Beta's emails", "POL-COMMS-01"),
     ("Who commits the most code?", "POL-PROD-01"),
     ("Why did the employee take sick leave?", "POL-SENS-01"),
