@@ -94,13 +94,7 @@ def admit_pack(
     if early is not None:
         return early
 
-    parsed = []  # (entry, data class, envelope)
-    parsed_files = isolation.parse_all([(e.relpath, e.data, e.suffix, e.rule.records) for e in entries])  # C06
-    for entry, envelopes in zip(entries, parsed_files, strict=True):
-        if entry.rule.contract is not None:  # schema and semantic checks; refuses the whole pack on failure
-            validate_rows(entry.relpath, entry.rule.contract, [(e.locator, e.payload) for e in envelopes])
-        for env in envelopes:
-            parsed.append((entry, entry.rule.class_for_row(env.payload), env))
+    parsed = parse_entries(entries)          # (entry, data class, envelope); shared with the validation dry run
 
     # 3. One transaction: lock -> re-check -> batch -> raw manifest -> records -> seal -> audit.
     with tenant_tx(conn, tenant_id, principal_id="ingest:file-drop"):
@@ -129,7 +123,7 @@ def admit_pack(
             )
             # T8: a record re-released in a later pack is a CORRECTION: a new version that supersedes the
             # latest earlier one. Earlier versions are never touched, so "as known at K" stays reproducible.
-            ids = [f"{e.rule.system}:{e.relpath}#{env.locator_key()}" for e, _, env in parsed]
+            ids = [record_id(e, env) for e, _, env in parsed]
             prior = {r["record_id"]: r["v"] for r in conn.execute(
                 "SELECT record_id, max(version) AS v FROM ledger.source_record WHERE tenant_id = %s"
                 " AND record_id = ANY(%s) GROUP BY record_id", (tenant_id, ids)).fetchall()}
@@ -155,6 +149,32 @@ def admit_pack(
             "files": len(entries), "records": len(parsed), "records_by_class": by_class,
         })
     return AdmissionResult(pack.id, pack.batch_seq, "admitted", len(entries), len(parsed), by_class, by_kind)
+
+
+def record_id(entry, env) -> str:
+    """Record identity: `system:relpath#locator`, or `system:key:<business key>` when the catalogue rule has an
+    approved business key (never a row number alone when a stable key is approved)."""
+    k = entry.rule.record_key(env.locator_key(), env.payload)
+    return f"{entry.rule.system}:{k}" if k.startswith("key:") else f"{entry.rule.system}:{entry.relpath}#{k}"
+
+
+def parse_entries(entries: list) -> list:
+    """Parse (C06-isolated) and validate every manifest entry: [(entry, data class, envelope)]. The SAME function
+    serves admission and the validation dry run, so both see the same bytes, hashes and records."""
+    parsed = []
+    parsed_files = isolation.parse_all([(e.relpath, e.data, e.suffix, e.rule.records) for e in entries])  # C06
+    for entry, envelopes in zip(entries, parsed_files, strict=True):
+        if entry.rule.contract is not None:  # schema and semantic checks; refuses the whole pack on failure
+            validate_rows(entry.relpath, entry.rule.contract, [(e.locator, e.payload) for e in envelopes])
+        for env in envelopes:
+            parsed.append((entry, entry.rule.class_for_row(env.payload), env))
+    return parsed
+
+
+def prepare_pack(pack_dir: Path, rules: list[Rule]) -> tuple[list, str, list]:
+    """(entries, manifest digest, parsed records) for a pack folder, without touching the database."""
+    entries = build_manifest(pack_dir, rules)
+    return entries, manifest_sha256(entries), parse_entries(entries)
 
 
 @dataclass

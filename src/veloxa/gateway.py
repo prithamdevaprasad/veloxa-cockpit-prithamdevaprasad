@@ -11,6 +11,8 @@ controls; none is deployed.
   - Client key: a hash of the bearer credential when present (never the credential itself), else the peer address.
   - `X-Forwarded-For` is honoured only from the proxy named in `VELOXA_TRUSTED_PROXY` (the WAF/gateway boundary),
     so a client cannot choose its own identity for limiting.
+- Uploads (`POST /v1/submissions`) have their own body ceiling, `VELOXA_MAX_UPLOAD_BYTES` (default 70 MiB of
+  base64 JSON). C06 then applies its per-file and per-pack limits before anything is stored.
 - `/health` is exempt from limiting, so an orchestrator's probes are never throttled.
 - **Expensive endpoints** (Ask, agent messages, scenarios: the model-capable paths) have their own, stricter bucket:
   `VELOXA_RATE_LIMIT_EXPENSIVE_PER_MIN`, default 10 per client per minute. This is a PROPOSED pilot value awaiting
@@ -80,6 +82,8 @@ def client_key(request: Request) -> str:
 
 def install(app) -> None:
     max_body = int(os.environ.get("VELOXA_MAX_BODY_BYTES", "65536"))
+    # Uploads (POST /v1/submissions: base64 JSON) have their own ceiling, sized for the C06 per-file limit.
+    max_upload = int(os.environ.get("VELOXA_MAX_UPLOAD_BYTES", str(70 * 2**20)))
     bucket = TokenBucket(int(os.environ.get("VELOXA_RATE_LIMIT_PER_MIN", "120")))
     costly = TokenBucket(int(os.environ.get("VELOXA_RATE_LIMIT_EXPENSIVE_PER_MIN", "10")))
     app.state.rate_limiter = bucket
@@ -98,9 +102,10 @@ def install(app) -> None:
                                        content={"error": "rate_limited", "detail": "too many requests"})
         if refusal is None and request.method in ("POST", "PUT", "PATCH"):
             length = request.headers.get("content-length")
-            if length is not None and (not length.isdigit() or int(length) > max_body):
+            limit = max_upload if (request.method == "POST" and path == "/v1/submissions") else max_body
+            if length is not None and (not length.isdigit() or int(length) > limit):
                 refusal = JSONResponse(status_code=413, content={"error": "payload_too_large",
-                                                                 "detail": f"bodies are limited to {max_body} bytes"})
+                                                                 "detail": f"bodies are limited to {limit} bytes"})
             elif length not in (None, "0") and \
                     request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
                 refusal = JSONResponse(status_code=415, content={"error": "unsupported_media_type",

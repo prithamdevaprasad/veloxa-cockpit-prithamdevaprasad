@@ -216,6 +216,26 @@ def cmd_tenant(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_intake_work(args: argparse.Namespace) -> int:
+    """The data-room system worker (ingest and projection roles): validate uploads, admit authorised submissions."""
+    import time as _t
+
+    from . import intake
+    from .storage import LocalContentStore
+
+    store = LocalContentStore.from_env()
+    if store is None:
+        print("ERROR: VELOXA_ORIGINALS_DIR (the immutable original store) is required")
+        return 2
+    while True:
+        with connect(_dsn("ingest")) as ing, connect(_dsn("projection")) as prj:
+            done = intake.work_once(ing, prj, store)
+        print(f"intake: validated {done['validated']}, admitted {done['admitted']}, failed {done['failed']}")
+        if args.once:
+            return 0 if not done["failed"] else 1
+        _t.sleep(args.interval)
+
+
 def cmd_backup(args: argparse.Namespace) -> int:
     """C31: a verified logical backup of the configured database (read-only on the source)."""
     from pathlib import Path
@@ -458,6 +478,10 @@ def main(argv: list[str] | None = None) -> int:
     t5.add_argument("--principal", required=True)
     t5.add_argument("--name", required=True)
     p_ten.set_defaults(func=cmd_tenant)
+    p_in = sub.add_parser("intake-work", help="data-room worker: validate uploads, admit authorised submissions")
+    p_in.add_argument("--once", action="store_true")
+    p_in.add_argument("--interval", type=float, default=10.0)
+    p_in.set_defaults(func=cmd_intake_work)
     p_bk = sub.add_parser("backup", help="C31: verified logical backup of the configured database (privileged)")
     p_bk.add_argument("--out", required=True)
     p_bk.set_defaults(func=cmd_backup)

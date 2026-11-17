@@ -164,7 +164,22 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
             r, n = evidence_authz.gate(r, principal.access)
             withheld_by_permission += n
         results.append(r)
+    # Bounded, deterministic fallback: when the intent tools found nothing for a question that NAMES a subject
+    # (a capitalised term such as a project or vendor), search admitted text once for it. Recorded in diagnostics.
+    fallback = None
+    first = question.split()[0] if question.split() else ""
+    named = [w for w in re.findall(r"\b[A-Z][A-Za-z0-9-]{2,}\b", question)
+             if w != first and w.lower() in set(the_plan.focus_terms)]
+    if (named and not any(x.facts or x.evidence for x in results)
+            and not any(st.tool == "text_search" for st in the_plan.steps)):
+        fallback = " OR ".join(dict.fromkeys(w.lower() for w in named))
+        r = tools.TOOLS["text_search"](conn, basis, principal, query=fallback)
+        if principal.access is not None:
+            r, n = evidence_authz.gate(r, principal.access)
+            withheld_by_permission += n
+        results.append(r)
     base["diagnostics"] = {
+        "fallback_text_search": fallback,
         "stage": "executed",
         "plan": [{"tool": st.tool, "why": st.why} for st in the_plan.steps],
         "tools": [{"tool": x.tool, "status": x.status, "facts": len(x.facts), "evidence": len(x.evidence)}

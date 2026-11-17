@@ -109,7 +109,7 @@ def _app_dsn() -> str:
 
 
 def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = None,
-               agent_runtime: Callable | None = None) -> FastAPI:
+               agent_runtime: Callable | None = None, store_factory: Callable | None = None) -> FastAPI:
     """`clock` and `agent_runtime` (a factory taking a connection) are test-only injection points (code
     parameters, not configuration). By default agents run on the in-process agent-tool PDP, the C32 knowledge
     boundary and the facts-only composer: no model provider is configured."""
@@ -702,4 +702,8 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
     from . import api_workspace
 
     api_workspace.register(app, state=state, principal_of=_principal, now_fn=now_fn, oidc_auth=oidc_auth)
+    from . import api_dataroom
+
+    api_dataroom.register(app, state=state, principal_of=_principal, now_fn=now_fn,
+                          **({"store_factory": store_factory} if store_factory else {}))
     return app
