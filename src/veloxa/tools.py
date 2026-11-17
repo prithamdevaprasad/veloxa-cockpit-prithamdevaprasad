@@ -207,12 +207,18 @@ def headcount(conn: psycopg.Connection, basis: ReadBasis, principal: Principal, 
 
 
 def payroll_total(conn: psycopg.Connection, basis: ReadBasis, principal: Principal, **_) -> ToolResult:
-    defs = metrics.load_definitions()
-    try:
-        metrics.run(conn, defs["payroll_total"], basis)
-    except metrics.MetricError as e:
-        return ToolResult("payroll_total", "withheld", reason=e.reason)
-    return ToolResult("payroll_total", "withheld", reason="disclosure_auditor_unavailable")  # never reached
+    """A protected aggregate: ONLY through the C19 disclosure gate, on the requester's own ledger (§15). Each Ask
+    question is a new request (no retry semantics). Refused unless the gate releases it."""
+    import uuid
+
+    from .disclosure.gate import DisclosureGate, PayrollRequest
+
+    r = DisclosureGate().request(conn, principal, basis, PayrollRequest(request_key=f"ask:{uuid.uuid4()}"))
+    if not r.released:
+        return ToolResult("payroll_total", "withheld", reason=r.reason)
+    return ToolResult("payroll_total", "ok", facts=[Fact(
+        f"F-payroll-{r.entry_id}", "Total gross payroll (an audited aggregate)", r.value, "INR", "derived", [],
+        "payroll.gross", [f"released under disclosure decision {r.entry_id}"])])
 
 
 def board_statements(conn: psycopg.Connection, basis: ReadBasis, principal: Principal,

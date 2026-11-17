@@ -82,9 +82,9 @@ def test_decisions_take_structure_only_never_values():
     assert core.DEFAULT_K == 5                                # D-14a default, unchanged
 
 
-def test_the_core_is_not_wired_into_any_application_path():
+def test_the_core_is_reached_only_through_the_disclosure_gate():
     src = Path(core.__file__).resolve().parents[1]
-    users = [p for p in src.rglob("*.py") if "disclosure" not in p.parts and "veloxa.disclosure" in
-             p.read_text(encoding="utf-8")]
-    assert users == []                                        # payroll aggregates stay withheld everywhere
-    assert all("NOT" in v or "core helper" in v for v in core.DEPENDENCIES.values())
+    users = sorted(p.name for p in src.rglob("*.py") if "disclosure" not in p.parts
+                   and ("disclosure.gate" in p.read_text(encoding="utf-8")
+                        or "disclosure import core" in p.read_text(encoding="utf-8")))
+    assert users == ["tools.py"]                              # Ask's payroll tool, via the gate only

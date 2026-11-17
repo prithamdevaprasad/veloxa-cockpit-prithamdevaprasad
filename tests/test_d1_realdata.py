@@ -259,3 +259,26 @@ def test_real_d1_historical_acl_is_unknown_without_acl_history(db, ingest_conn, 
     for person in people[:3]:
         results = ev.evaluate_many(person, "read", docs, basis, "POINT_IN_TIME")
         assert all(r.outcome == "unknown" and not effective_decision(True, r) for r in results.values())
+
+
+def test_real_d1_payroll_stays_withheld_through_the_c19_gate(db, ingest_conn, app_conn, tenant, schedule, data_root):
+    """C19 over the real D1 pack. Structure only: the structure function returns no amount, and the gate refuses
+    because release is not enabled. No value is read, compared or printed."""
+    from datetime import UTC, datetime
+
+    from veloxa import projector, tools
+    from veloxa.db import connect
+    from veloxa.disclosure.gate import DisclosureGate, PayrollRequest
+    from veloxa.temporal import Mode, resolve_basis
+
+    now = datetime.now(UTC)
+    pipeline.admit_pack(ingest_conn, tenant, schedule, "D1", data_root, now)
+    with connect(db.dsn("projection")) as prj:
+        projector.build(prj, tenant)
+    basis = resolve_basis(tenant, ledger.sealed_releases(app_conn, tenant), Mode.CURRENT, None, "Asia/Kolkata", now)
+    with tenant_tx(app_conn, tenant, "person:probe", 1):
+        structure = app_conn.execute("SELECT * FROM policy.payroll_structure(1)").fetchall()
+    assert len(structure) == 56 and all("Gross" not in str(list(s)) for s in structure)
+    ceo = tools.resolve_principal_by_title(app_conn, basis, "CEO")
+    r = DisclosureGate().request(app_conn, ceo, basis, PayrollRequest("realdata-probe-1"))
+    assert (r.released, r.value, r.reason) == (False, None, "release_not_enabled")

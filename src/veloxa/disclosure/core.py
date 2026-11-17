@@ -31,15 +31,18 @@ DEFAULT_K = 5   # D-14a default (architecture §26.1); owner confirmation pendin
 PERMITTED = frozenset({"SUM", "AVG", "DERIVED"})
 REFUSED = frozenset({"MAX", "MIN", "MEDIAN", "PERCENTILE", "VARIANCE"})
 
-DEPENDENCIES = {
-    "append_only_ledger": "policy.disclosure_ledger per (tenant, principal scope, measure); NOT IMPLEMENTED",
-    "serialization": "audit and append in one transaction, serialized per (tenant, scope, measure); NOT IMPLEMENTED",
-    "background_rows": "own values, individually authorized values, readable documents, public values; NOT "
-                       "IMPLEMENTED (needs C32/current authorization to know what a principal may read)",
-    "m2_segments": "person-segments from admitted payroll records with recorded pay changes; core helper only",
-    "channels": "metrics, Ask, briefing, evidence views, agents (interviewer ledger), exports, APIs, caches; "
-                "NOT INTEGRATED (every channel still refuses protected aggregates)",
-    "test_oracle": "out-of-process statistical disclosure-control fuzzing (§15.6); NOT IMPLEMENTED",
+DEPENDENCIES = {   # state as at 17 Nov 2026 (see disclosure/gate.py and migration 0009)
+    "append_only_ledger": "IMPLEMENTED: policy.disclosure_ledger per (tenant, principal, measure), append-only, RLS by "
+                          "tenant and principal",
+    "serialization": "IMPLEMENTED: one transaction per request under an advisory lock on (tenant, principal, measure)",
+    "background_rows": "IMPLEMENTED for own values; individually authorised, readable-document and public sources are "
+                       "EMPTY BY CONSTRUCTION in this deployment (no grant source exists); C20/C21 NOT IMPLEMENTED",
+    "m2_segments": "IMPLEMENTED: one segment per person from the admitted register via policy.payroll_structure; no "
+                   "pay-change source exists, so no segment splits",
+    "channels": "Ask payroll tool goes through the gate; metrics refuse protected definitions directly; evidence, "
+                "briefing: no payroll reachable (RLS); exports, agents, caches: DO NOT EXIST",
+    "release": "BLOCKED_BY_OWNER_DECISION: policy.disclosure_release is empty; also needs production identity (C02)",
+    "test_oracle": "NOT IMPLEMENTED: sdcTable needs an R runtime unavailable here; a seeded Bareiss cross-check exists",
 }
 
 

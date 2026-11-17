@@ -149,7 +149,7 @@ def test_person_tool_returns_record_facts_with_exact_evidence(app_conn, tenant, 
 @pytest.mark.db
 def test_payroll_total_tool_is_withheld(app_conn, tenant, projected):
     r = tools.payroll_total(app_conn, _basis(app_conn, tenant), ALPHA)
-    assert (r.status, r.reason, r.facts) == ("withheld", "disclosure_auditor_unavailable", [])
+    assert (r.status, r.reason, r.facts) == ("withheld", "release_not_enabled", [])   # C19 gate: release is off
 
 
 @pytest.mark.db
