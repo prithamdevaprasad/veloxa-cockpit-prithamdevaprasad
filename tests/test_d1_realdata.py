@@ -232,3 +232,30 @@ def test_real_d1_detectors_under_all_four_read_modes(db, ingest_conn, app_conn, 
         if mode == Mode.VALID_AT:
             assert all(e.valid_basis in ("statement_date", "stated_period") for e in evidence)
             assert not any(e.record_id.startswith("meeting_summaries:") for e in evidence)
+
+
+def test_real_d1_historical_acl_is_unknown_without_acl_history(db, ingest_conn, app_conn, tenant, schedule,
+                                                                data_root):
+    """C32 over the real D1 pack: D1 carries no ACL, identity or membership history, and e-mail parties are not
+    ACL evidence, so every historical evaluation is `unknown` (never allowed). Structure only."""
+    from datetime import UTC, datetime
+
+    from veloxa import projector
+    from veloxa.acl.historical import HistoricalAclEvaluator, effective_decision
+    from veloxa.db import connect
+    from veloxa.temporal import Mode, resolve_basis
+
+    now = datetime.now(UTC)
+    pipeline.admit_pack(ingest_conn, tenant, schedule, "D1", data_root, now)
+    with connect(db.dsn("projection")) as prj:
+        projector.build(prj, tenant)
+    basis = resolve_basis(tenant, ledger.sealed_releases(app_conn, tenant), Mode.CURRENT, None, "Asia/Kolkata", now)
+    with tenant_tx(app_conn, tenant, batch_seq=1):
+        assert app_conn.execute("SELECT count(*) AS n FROM projection.acl_history").fetchone()["n"] == 0
+        people = [r["entity_id"] for r in app_conn.execute("SELECT entity_id FROM projection.person").fetchall()]
+        docs = [r["record_id"] for r in app_conn.execute(
+            "SELECT record_id FROM ledger.visible_source_record WHERE kind IN ('email', 'document')").fetchall()]
+    ev = HistoricalAclEvaluator(app_conn)
+    for person in people[:3]:
+        results = ev.evaluate_many(person, "read", docs, basis, "POINT_IN_TIME")
+        assert all(r.outcome == "unknown" and not effective_decision(True, r) for r in results.values())

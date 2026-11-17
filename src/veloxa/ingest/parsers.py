@@ -19,6 +19,7 @@ PARSER_VERSIONS = {
     "pdf": "pdf/1",
     "eml": "eml/1",
     "text": "text/1",
+    "jsonl_rows": "jsonl-rows/1",
 }
 
 
@@ -32,6 +33,8 @@ class Envelope:
         loc = self.locator
         if "sheet" in loc:
             return f"{loc['sheet']}!r{loc['row']}"
+        if "line" in loc:
+            return f"line{loc['line']}"
         return "document"
 
 
@@ -126,14 +129,32 @@ def parse_text(data: bytes) -> list[Envelope]:
     return [Envelope({"lines": len(lines)}, {"lines": lines}, PARSER_VERSIONS["text"])]
 
 
+def parse_jsonl_rows(data: bytes) -> list[Envelope]:
+    """One envelope per non-empty line of a JSON Lines export (e.g. a connector's ACL history stream). Each line
+    must be a JSON object; anything else refuses the whole file (fail closed). Values are kept as written."""
+    import json
+
+    out = []
+    for i, line in enumerate(data.decode("utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        obj = json.loads(line)
+        if not isinstance(obj, dict):
+            raise ValueError(f"line {i} is not a JSON object")
+        out.append(Envelope({"line": i}, obj, PARSER_VERSIONS["jsonl_rows"]))
+    return out
+
+
 def parse(data: bytes, suffix: str, mode: str) -> list[Envelope]:
     """Parse the exact bytes that were hashed (never re-read the file)."""
     if mode == "none":
         return []
     suffix = suffix.lower()
     if mode == "rows":
+        if suffix == ".jsonl":
+            return parse_jsonl_rows(data)
         if suffix != ".xlsx":
-            raise ValueError(f"row extraction is only defined for .xlsx, not {suffix}")
+            raise ValueError(f"row extraction is only defined for .xlsx and .jsonl, not {suffix}")
         return parse_xlsx_rows(data)
     if mode == "document":
         parser = {".docx": parse_docx, ".pdf": parse_pdf, ".eml": parse_eml, ".txt": parse_text}.get(suffix)

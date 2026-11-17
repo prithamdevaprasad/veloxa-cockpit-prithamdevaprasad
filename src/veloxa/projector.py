@@ -15,6 +15,7 @@ from email.utils import getaddresses, parsedate_to_datetime
 import psycopg
 
 from . import audit
+from .acl import projection as acl_projection
 from .db import tenant_tx
 
 _PERSON_SQL = """
@@ -103,6 +104,7 @@ def _build_batch(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int) -> int:
     params = {"t": tenant_id, "k": k}
     rows += conn.execute(_PERSON_SQL, params).rowcount
     rows += conn.execute(_LEDGER_SQL, params).rowcount
+    rows += acl_projection.project_batch(conn, tenant_id, k)  # C32 input: admitted ACL history only
     prose = conn.execute(
         "SELECT record_id, version, kind, system, data_class, payload FROM ledger.source_record"
         " WHERE tenant_id = %(t)s AND batch_seq = %(k)s AND kind = ANY(%(kinds)s)",
@@ -157,6 +159,6 @@ def rebuild(conn: psycopg.Connection, tenant_id: uuid.UUID) -> list[tuple[int, i
     """Drop this tenant's projections and rebuild them from the ledger (§6.2: projections are disposable)."""
     with tenant_tx(conn, tenant_id, principal_id="projection-worker"):
         conn.execute("SELECT pg_advisory_xact_lock(hashtext('projection.build:' || %s))", (str(tenant_id),))
-        for table in ("person", "ledger_line", "reported_figure", "document_text", "build"):
+        for table in ("person", "ledger_line", "reported_figure", "document_text", "acl_history", "build"):
             conn.execute(f"DELETE FROM projection.{table} WHERE tenant_id = %s", (tenant_id,))  # fixed table names
     return build(conn, tenant_id)
