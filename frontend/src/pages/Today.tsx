@@ -8,6 +8,7 @@ export function TodayPage({ onAsk }: { onAsk: (q: string) => void }) {
   const [releases] = useApi((s) => api.releases(s), []);
   const [conflicts] = useApi((s) => api.conflicts(undefined, s), []);
   const [agents] = useApi((s) => api.agents(s), []);
+  const [history] = useApi((s) => api.riskHistory(s), []);
 
   return (
     <>
@@ -73,6 +74,26 @@ export function TodayPage({ onAsk }: { onAsk: (q: string) => void }) {
             </ol>
           )
         )}
+      </Section>
+
+      <Section title="Key changes" subtitle="How risks and adverse evidence appeared, changed, resolved or reopened
+        from one admitted knowledge point to the next. Derived from the evidence; never ranked.">
+        {history.state === "loading" && <Loading lines={2} />}
+        {history.state === "error" && <ErrorState error={history.error} />}
+        {history.state === "ready" && (history.data.items.length === 0 ? (
+          <EmptyState title="No changes">Nothing has appeared or changed across knowledge points {history.data.knowledge_points.join(", ")}.</EmptyState>
+        ) : (
+          <div className="table-wrap"><table aria-label="Key changes">
+            <thead><tr><th>Item</th><th>History</th></tr></thead>
+            <tbody>{history.data.items.map((it) => (
+              <tr key={it.item_id}><td>{it.title}<div className="small muted">{it.kind.replace("_", " ")}</div></td>
+                <td>{it.events.map((e, i) => (
+                  <div key={i} className="small"><Badge value={e.event === "resolved" ? "answered" : e.event === "changed" ? "qualified" : "open"}
+                    label={e.event} /> at K={e.batch_seq}{e.fields ? ` (${e.fields.join(", ")})` : ""}</div>
+                ))}</td></tr>
+            ))}</tbody>
+          </table></div>
+        ))}
       </Section>
 
       <div className="grid-2">

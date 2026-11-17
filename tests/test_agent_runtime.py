@@ -219,3 +219,15 @@ def test_the_model_cannot_invent_cite_foreign_evidence_or_write_memory(db, app_c
     assert failed["status"] == "failed" and len(rogue.seen) == 2                     # one retry, then failure
     down = ask(runtime(app_conn, llm=UnavailableLLM()), tenant, sid, "What is our headcount?", key="syn-key-down")
     assert down["status"] == "unavailable" and down["claims"] == []
+
+
+def test_tools_that_need_an_assessment_instant_run_for_agents(db, app_conn, env):
+    """Regression (Sprint 8): the session basis carries its assessment instant, so the Today and conflict tools run
+    instead of failing with 'the read basis has no assessment instant'."""
+    tenant, basis = env
+    cfg = publish(db, tenant, syn_agent("engineering"))
+    rt = runtime(app_conn)
+    sid = rt.open_session(tenant, ALPHA, cfg.agent_id, basis)["session_id"]
+    turn = ask(rt, tenant, sid, "Look things up", key="syn-key-instant",
+               calls=(ToolCall("briefing.today"), ToolCall("conflicts.register")))
+    assert all(t["decision"] == "allowed" and t["status"] in ("ok", "no_data") for t in turn["tools"]), turn["tools"]

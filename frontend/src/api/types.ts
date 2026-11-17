@@ -195,3 +195,18 @@ export interface Memories {
   withheld: number;
   items: MemoryItem[];
 }
+
+export interface RiskHistory {
+  lifecycle_version: string;
+  knowledge_points: number[];
+  ranked: false;
+  items: {
+    item_id: string;
+    kind: "watchlist_risk" | "evidence_signal";
+    title: string;
+    business_object: string;
+    evidence: string[];
+    unknowns: string[];
+    events: { batch_seq: number; event: "opened" | "changed" | "resolved" | "reopened"; fields?: string[]; reason?: string }[];
+  }[];
+}

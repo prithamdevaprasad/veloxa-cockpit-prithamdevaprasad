@@ -221,6 +221,18 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
             return briefing.serve(conn, tenant_id, principal, basis, now)
 
+    @app.get("/v1/risks/history")
+    def risk_history(authorization: str | None = Header(default=None)):
+        """How each risk and adverse evidence item appeared, changed, resolved or reopened across sealed knowledge
+        points. Derived from the evidence at each K (nothing stored); never ranked while D-15 is pending."""
+        from .risk import lifecycle
+
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            return lifecycle.compute(conn, tenant_id, principal)
+
     @app.get("/v1/conflicts")
     def get_conflicts(mode: str | None = None, as_of: str | None = None, as_known_at: str | None = None,
                       authorization: str | None = Header(default=None)):

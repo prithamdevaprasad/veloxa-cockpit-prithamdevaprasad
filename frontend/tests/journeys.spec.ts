@@ -20,6 +20,7 @@ test("Journey A: Today, evidence packs and a follow-up question", async ({ page 
   await expect(page.getByRole("heading", { name: "Today" })).toBeVisible();
   await expect(page.getByText("Unranked", { exact: true })).toBeVisible();          // D-15 pending: never ranked
   await expect(page.getByRole("cell", { name: "D1" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Key changes" })).toBeVisible();     // risk lifecycle (Sprint 8)
   await expect(page.getByText("sealed").first()).toBeVisible();
   await page.goto("/#/ask");
   await page.getByLabel("Question", { exact: true }).fill("What is our headcount?");

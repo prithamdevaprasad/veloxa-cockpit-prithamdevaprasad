@@ -31,7 +31,7 @@ from datetime import UTC, datetime
 import psycopg
 from pydantic import ValidationError
 
-from .. import audit
+from .. import audit, ledger
 from .. import tools as vt
 from ..ask import policy as ask_policy
 from ..db import tenant_tx
@@ -144,6 +144,15 @@ class AgentRuntime:
             raise AgentError("not_found", "no such session for this interviewer")
         return s
 
+    def _basis(self, tenant_id, s) -> ReadBasis:
+        """The session's pinned K with its assessment instant: now for CURRENT, the release of K for KNOWN_AT."""
+        if s["mode"] == "CURRENT":
+            now = datetime.now(UTC)
+            return ReadBasis(tenant_id, s["batch_seq"], Mode.CURRENT, now, now, None)
+        released = dict(ledger.sealed_releases(self.conn, tenant_id)).get(s["batch_seq"])
+        return ReadBasis(tenant_id, s["batch_seq"], Mode(s["mode"]), released, released, s["as_of"],
+                         nothing_admitted=released is None)
+
     def _config(self, tenant_id, agent_id, version) -> registry.AgentConfig:
         with tenant_tx(self.conn, tenant_id):
             r = self.conn.execute("SELECT * FROM runtime.agent_config WHERE tenant_id = %s AND agent_id = %s AND"
@@ -169,7 +178,7 @@ class AgentRuntime:
 
         cfg = self._config(req.tenant_id, s["agent_id"], s["config_version"])
         current = registry.latest(self.conn, req.tenant_id, s["agent_id"])
-        basis = ReadBasis(req.tenant_id, s["batch_seq"], Mode(s["mode"]), None, None, s["as_of"])
+        basis = self._basis(req.tenant_id, s)
         turn = self._turn(req, s, cfg, current, basis)
         return self._record(req, s, cfg, basis, digest, turn)
 
