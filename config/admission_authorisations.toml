@@ -1,0 +1,16 @@
+# Release packs AUTHORISED for admission (ARCHITECTURE.md §7.3, §8.2; DECISIONS.md).
+#
+# Admission is an explicit administrative operation (`veloxa ingest --pack <id>`). A pack is admitted only if it
+# is released AND listed here with the owner decision that authorises it (its catalogue rules and data classes
+# approved). A pack that is not listed is refused before any of its files is opened (fail closed).
+# `veloxa init` never admits a later pack: it migrates, and admits the authorised BASELINE pack only when the
+# database has no sealed batch at all (a fresh database).
+#
+# Adding a pack here is an owner decision. Do not add one without it.
+
+[[pack]]
+id = "D1"
+baseline = true
+approved_by = "Owner"
+approved_on = 2026-11-16
+decision_record = "DECISIONS.md, 16 Nov 2026: A-024 (D1 data classes, strict fail-closed), A-025 r2, A-026"

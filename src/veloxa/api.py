@@ -30,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import auth, config, ledger, selfcheck, tools
 from .ask import pipeline, timeparse
 from .db import connect
-from .releases import current_time, load_schedule
+from .releases import current_time, load_authorisations, load_schedule
 from .risk import briefing
 from .temporal import Mode, resolve_basis
 
@@ -74,10 +74,12 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
         not sealed is reported as pending; nothing from it is ever exposed (unsealed rows are not counted)."""
         now = now_fn()
         sealed = {b["pack_id"]: b for b in ledger.batches(conn, tenant_id) if b["sealed"]}
+        authorised = load_authorisations()  # released but unauthorised packs are never admitted automatically
         rows = []
         for p in schedule.packs:
             b = sealed.get(p.id)
-            status = "sealed" if b else ("pending_admission" if p.release_at <= now else "not_released")
+            status = ("sealed" if b else "not_released" if p.release_at > now
+                      else "pending_admission" if p.id in authorised else "awaiting_authorisation")
             rows.append({
                 "pack": p.id,
                 "batch_seq": p.batch_seq,
@@ -108,10 +110,12 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             failures = selfcheck.run(conn)
             _, _, rows = _pack_states(conn)
         pending = [r["pack"] for r in rows if r["status"] == "pending_admission"]
+        awaiting = [r["pack"] for r in rows if r["status"] == "awaiting_authorisation"]
         return {
-            "status": "ok" if not failures and not pending else "degraded",
+            "status": "ok" if not failures and not pending and not awaiting else "degraded",
             "selfcheck": "pass" if not failures else "fail",
             "pending_admission": pending,
+            "awaiting_authorisation": awaiting,
             "auth": auth_settings.mode,
         }
 

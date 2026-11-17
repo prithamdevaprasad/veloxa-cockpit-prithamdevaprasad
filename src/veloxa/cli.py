@@ -14,9 +14,15 @@ import time
 
 from . import config, ledger, projector, selfcheck
 from .db import connect
-from .ingest.pipeline import AdmissionFailure, admit_pack, admit_released, record_failure
+from .ingest.pipeline import AdmissionFailure, admit_pack, record_failure
 from .migrate import migrate
-from .releases import AdmissionRefused, current_time, load_schedule
+from .releases import (
+    AdmissionRefused,
+    current_time,
+    load_authorisations,
+    load_schedule,
+    require_authorised,
+)
 
 
 def _dsn(role: str) -> str:
@@ -62,22 +68,27 @@ EXIT_OK, EXIT_ADMISSION_FAILED, EXIT_DATA_MISSING, EXIT_NO_SEALED_BASELINE = 0, 
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
-    """Admit packs. Exit 0 if everything requested is admitted (or simply not released yet), 1 if an admission
-    failed (recorded as an audit event; nothing partial is committed), 2 if the data folder is missing."""
+    """Admit packs: an EXPLICIT administrative operation. Only released packs listed in
+    config/admission_authorisations.toml are admitted; anything else is refused before a file is opened.
+    Exit 0 if everything requested is admitted (or simply not released yet), 1 if an admission failed or was
+    refused (recorded as an audit event; nothing partial is committed), 2 if the data folder is missing."""
     root = _data_root()
     if root is None:
         return EXIT_DATA_MISSING
     schedule = load_schedule()
     tenant_id = config.tenant_uuid(schedule.tenant_slug)
     now = current_time()
+    authorised = load_authorisations()
     with connect(_dsn("ingest")) as conn:
-        if args.pack == "released":
-            results, failure = admit_released(conn, tenant_id, schedule, root, now)
-        else:
+        results, failure = [], None
+        requested = [p.id for p in schedule.released(now)] if args.pack == "released" else [args.pack]
+        for pack_id in requested:
             try:
-                results, failure = [admit_pack(conn, tenant_id, schedule, args.pack, root, now)], None
-            except Exception as exc:
-                results, failure = [], AdmissionFailure(args.pack, exc)
+                require_authorised(pack_id, authorised)
+                results.append(admit_pack(conn, tenant_id, schedule, pack_id, root, now))
+            except Exception as exc:  # nothing partial is ever committed
+                failure = AdmissionFailure(pack_id, exc)
+                break
         for r in results:
             print(f"{r.pack_id}: {r.status} as batch {r.batch_seq}: {r.file_count} files, {r.record_count} records"
                   + (f", by class {r.by_class}" if r.by_class else ""))
@@ -186,29 +197,44 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
 
 def cmd_init(args: argparse.Namespace) -> int:
-    """Privileged one-shot step: wait for the database, migrate, admit released packs, self-check ingest.
+    """Privileged one-shot start-up step: wait for the database, migrate, then self-check. It NEVER admits a later
+    release pack: admission is an explicit operation (`veloxa ingest --pack <id>`).
 
-    Availability (owner decisions, 16 Nov 2026): if a LATER pack fails admission, init still succeeds so the API
-    keeps running on the latest SEALED batch. The failure is logged and audited; nothing partial is committed,
-    and unsealed data is never visible. init fails (and the API does not start) if the data folder is missing,
-    a migration fails, the security self-check fails, or there is NO sealed baseline batch at all (for example
-    a fresh database whose first pack failed admission).
+    Only a FRESH database (no sealed batch at all) is bootstrapped, with the authorised baseline pack(s) from
+    config/admission_authorisations.toml. Migrations are committed before any admission is attempted, so a failed
+    admission can never roll back or corrupt a migrated schema. Availability (owner decision, 16 Nov 2026): with a
+    sealed baseline the API serves it; init fails only if a migration or the self-check fails, or if a fresh
+    database has no data folder or its baseline admission fails (nothing to serve).
     """
     _wait_for_db()
     cmd_migrate(args)
-    ingest_rc = cmd_ingest(argparse.Namespace(pack="released"))
-    if ingest_rc == EXIT_DATA_MISSING:
-        return ingest_rc
     schedule = load_schedule()
+    tenant_id = config.tenant_uuid(schedule.tenant_slug)
     with connect(_dsn("ingest")) as conn:
-        k = ledger.sealed_watermark(conn, config.tenant_uuid(schedule.tenant_slug))
+        k = ledger.sealed_watermark(conn, tenant_id)
     if k == 0:
-        print("init: FAILED: no sealed baseline batch exists, so there is nothing to serve; the API will not start",
-              file=sys.stderr)
-        return EXIT_NO_SEALED_BASELINE
-    if ingest_rc == EXIT_ADMISSION_FAILED:
-        print(f"init: continuing; the API will serve the latest sealed batch (K = {k}) and report the pending pack",
-              file=sys.stderr)
+        baseline = [a.pack_id for a in load_authorisations().values() if a.baseline]
+        if not baseline:
+            print("init: FAILED: the database has no sealed batch and no authorised baseline pack",
+                  file=sys.stderr)
+            return EXIT_NO_SEALED_BASELINE
+        for pack_id in sorted(baseline, key=lambda i: schedule.pack(i).batch_seq):
+            rc = cmd_ingest(argparse.Namespace(pack=pack_id))
+            if rc == EXIT_DATA_MISSING:
+                return rc
+        with connect(_dsn("ingest")) as conn:
+            k = ledger.sealed_watermark(conn, tenant_id)
+        if k == 0:
+            print("init: FAILED: no sealed baseline batch exists, so there is nothing to serve; the API will not "
+                  "start", file=sys.stderr)
+            return EXIT_NO_SEALED_BASELINE
+    with connect(_dsn("ingest")) as conn:
+        admitted = {b["pack_id"] for b in ledger.batches(conn, tenant_id)}
+    for p in schedule.released(current_time()):
+        if p.id not in admitted:
+            print(f"init: {p.id} is released but not admitted; init never admits a later pack. Admission is an "
+                  f"explicit, authorised operation (veloxa ingest --pack {p.id}). Serving K = {k}.",
+                  file=sys.stderr)
     cmd_project(argparse.Namespace(rebuild=False))
     return cmd_selfcheck(argparse.Namespace(role="ingest"))
 
@@ -230,7 +256,8 @@ def main(argv: list[str] | None = None) -> int:
     p_sc = sub.add_parser("selfcheck", help="run startup self-checks for a role")
     p_sc.add_argument("--role", choices=("app", "ingest"), default="app")
     p_sc.set_defaults(func=cmd_selfcheck)
-    sub.add_parser("init", help="privileged one-shot: migrate and admit released packs").set_defaults(func=cmd_init)
+    p_init = sub.add_parser("init", help="privileged one-shot: migrate; bootstrap a fresh database only")
+    p_init.set_defaults(func=cmd_init)
     p_pol = sub.add_parser("policy", help="owner decisions (privileged)")
     pol_sub = p_pol.add_subparsers(dest="policy_command", required=True)
     p_d15 = pol_sub.add_parser("record-d15", help="record an owner-approved D-15 decision file as a new version")

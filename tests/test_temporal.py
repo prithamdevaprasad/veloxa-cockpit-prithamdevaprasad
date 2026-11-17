@@ -73,12 +73,16 @@ def test_invalid_requests_are_rejected(mode, as_of):
 
 def test_predicates_use_identifiers_and_bound_parameters_only():
     b = resolve_basis(T, BATCHES, Mode.VALID_AT, date(2026, 9, 1), IST, NOW)
-    p = predicate(b, "f", recorded_column="recorded", valid_column="valid")
+    p = predicate(b, "f", recorded_column="recorded", valid_column="valid", latest_version=False)
     text = p.clause.as_string(None)
     assert text == '"f"."batch_seq" <= %(k)s AND "f"."valid" @> %(v)s::timestamptz'
     assert p.params == {"k": 2, "v": b.valid_at}
+    latest = predicate(b, "f", recorded_column="recorded", valid_column="valid").clause.as_string(None)
+    assert latest == text + (' AND NOT EXISTS (SELECT 1 FROM ledger.source_record "f_later" WHERE'
+                             ' "f_later".tenant_id = "f".tenant_id AND "f_later".record_id = "f".source_record_id'
+                             ' AND "f_later".version > "f".source_version AND "f_later".batch_seq <= %(k)s)')
     r = predicate(resolve_basis(T, BATCHES, Mode.RECORDED_BY, date(2026, 9, 1), IST, NOW), "f",
-                  recorded_column="recorded", valid_column="valid")
+                  recorded_column="recorded", valid_column="valid", latest_version=False)
     assert r.clause.as_string(None) == '"f"."batch_seq" <= %(k)s AND upper("f"."recorded") <= %(r)s'
 
 

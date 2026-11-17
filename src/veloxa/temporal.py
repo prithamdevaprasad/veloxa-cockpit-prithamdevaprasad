@@ -121,6 +121,8 @@ def predicate(
     batch_column: str = "batch_seq",
     recorded_column: str | None = None,
     valid_column: str | None = None,
+    latest_version: bool = True,
+    k_only: bool = False,
 ) -> Predicate:
     """Visibility predicate for one table alias (§8.4 T1-T3).
 
@@ -128,12 +130,17 @@ def predicate(
     T2: if the basis has a recorded cutoff and the table records R, upper(recorded) <= R.
     T3: if the basis has a valid instant and the table records V, valid @> V.
     A table that lacks the R or V column the basis requires is refused rather than silently unfiltered.
+    T8: with latest_version (the default; every projection carries source_record_id and source_version), a row is
+    visible only if no LATER version of its source record is admitted at or below K, so a correction replaces
+    the corrected row from its own batch onward and earlier knowledge points still see the original.
     """
     a = sql.Identifier(alias)
     parts = [sql.SQL("{}.{} <= %(k)s").format(a, sql.Identifier(batch_column))]
     params: dict = {"k": basis.batch_seq}
-    needs_r = basis.mode == Mode.RECORDED_BY
-    needs_v = basis.mode == Mode.VALID_AT
+    # k_only: the caller applies R and V itself, per FACT (T2: recorded time belongs to the fact), e.g. the
+    # evidence detectors, whose facts carry their own recorded and valid intervals. K is still enforced here.
+    needs_r = basis.mode == Mode.RECORDED_BY and not k_only
+    needs_v = basis.mode == Mode.VALID_AT and not k_only
     if needs_r and recorded_column is None:
         raise ValueError("RECORDED_BY requires a recorded-time column on every queried table")
     if needs_v and valid_column is None:
@@ -141,7 +148,12 @@ def predicate(
     if recorded_column is not None and basis.recorded_cutoff is not None and needs_r:
         parts.append(sql.SQL("upper({}.{}) <= %(r)s").format(a, sql.Identifier(recorded_column)))
         params["r"] = basis.recorded_cutoff
-    if valid_column is not None and basis.valid_at is not None:
+    if valid_column is not None and basis.valid_at is not None and not k_only:
         parts.append(sql.SQL("{}.{} @> %(v)s::timestamptz").format(a, sql.Identifier(valid_column)))
         params["v"] = basis.valid_at
+    if latest_version:
+        parts.append(sql.SQL(
+            "NOT EXISTS (SELECT 1 FROM ledger.source_record {lv} WHERE {lv}.tenant_id = {a}.tenant_id"
+            " AND {lv}.record_id = {a}.source_record_id AND {lv}.version > {a}.source_version"
+            " AND {lv}.batch_seq <= %(k)s)").format(lv=sql.Identifier(f"{alias}_later"), a=a))
     return Predicate(sql.SQL(" AND ").join(parts), params)

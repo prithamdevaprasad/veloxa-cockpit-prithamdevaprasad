@@ -32,7 +32,7 @@ def test_health_and_time_metadata(veloxa_d1, monkeypatch):
 
     with TestClient(create_app(dsn=veloxa_d1)) as client:
         assert client.get("/health").json() == {"status": "ok", "selfcheck": "pass", "pending_admission": [],
-                                                "auth": "none"}
+                                                "awaiting_authorisation": [], "auth": "none"}
 
         clock = client.get("/v1/meta/clock").json()
         assert clock["sealed_watermark"] == 1 and clock["time_zone"] == "Asia/Kolkata"
@@ -53,11 +53,12 @@ def test_api_keeps_serving_the_latest_sealed_batch_when_a_released_pack_is_not_a
     after_d2_release = datetime.fromisoformat("2026-11-17T12:00:00+05:30")  # D2 released, never admitted here
     with TestClient(create_app(dsn=veloxa_d1, clock=lambda: after_d2_release)) as client:
         health = client.get("/health").json()
-        assert health == {"status": "degraded", "selfcheck": "pass", "pending_admission": ["D2"], "auth": "none"}
+        assert health == {"status": "degraded", "selfcheck": "pass", "pending_admission": [],
+                          "awaiting_authorisation": ["D2"], "auth": "none"}  # D2 is not authorised for admission
         assert client.get("/v1/meta/clock").json()["sealed_watermark"] == 1
         packs = {p["pack"]: p for p in client.get("/v1/meta/releases").json()["packs"]}
         assert packs["D1"]["status"] == "sealed"
-        assert packs["D2"]["status"] == "pending_admission" and not packs["D2"]["admitted"]
+        assert packs["D2"]["status"] == "awaiting_authorisation" and not packs["D2"]["admitted"]
         assert packs["D2"]["record_count"] is None and packs["D2"]["sealed_at"] is None
         assert packs["D3"]["status"] == "not_released"
 

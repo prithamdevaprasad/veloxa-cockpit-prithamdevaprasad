@@ -127,15 +127,21 @@ def admit_pack(
                     for e in entries
                 ],
             )
+            # T8: a record re-released in a later pack is a CORRECTION: a new version that supersedes the
+            # latest earlier one. Earlier versions are never touched, so "as known at K" stays reproducible.
+            ids = [f"{e.rule.system}:{e.relpath}#{env.locator_key()}" for e, _, env in parsed]
+            prior = {r["record_id"]: r["v"] for r in conn.execute(
+                "SELECT record_id, max(version) AS v FROM ledger.source_record WHERE tenant_id = %s"
+                " AND record_id = ANY(%s) GROUP BY record_id", (tenant_id, ids)).fetchall()}
             cur.executemany(
-                "INSERT INTO ledger.source_record (tenant_id, record_id, version, batch_seq, source_path,"
+                "INSERT INTO ledger.source_record (tenant_id, record_id, version, supersedes, batch_seq, source_path,"
                 " raw_object, locator, kind, system, parser_version, data_class, extracted_at, payload)"
-                " VALUES (%s, %s, 1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 [
-                    (tenant_id, f"{e.rule.system}:{e.relpath}#{env.locator_key()}", pack.batch_seq, e.relpath,
+                    (tenant_id, rid, prior.get(rid, 0) + 1, prior.get(rid), pack.batch_seq, e.relpath,
                      e.sha256, json.dumps(env.locator), e.rule.kind, e.rule.system, env.parser_version, cls,
                      e.read_at, json.dumps(env.payload))
-                    for e, cls, env in parsed
+                    for rid, (e, cls, env) in zip(ids, parsed, strict=True)
                 ],
             )
         conn.execute(

@@ -74,8 +74,8 @@ def _evidence(conn: psycopg.Connection, basis: ReadBasis, record_ids: list[str],
         return []
     with tenant_tx(conn, basis.tenant_id, batch_seq=basis.batch_seq):
         rows = conn.execute(
-            "SELECT record_id, kind, system, data_class, batch_seq, source_path, locator"
-            " FROM ledger.visible_source_record WHERE record_id = ANY(%s) ORDER BY record_id",
+            "SELECT DISTINCT ON (record_id) record_id, kind, system, data_class, batch_seq, source_path, locator"
+            " FROM ledger.visible_source_record WHERE record_id = ANY(%s) ORDER BY record_id, version DESC",
             (sorted(set(record_ids)),),
         ).fetchall()
     out = []

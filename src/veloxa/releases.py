@@ -99,3 +99,36 @@ def check_admissible(schedule: Schedule, pack_id: str, now: datetime, sealed: se
     if missing:
         raise AdmissionRefused("out_of_order", f"pack {pack.id} requires earlier packs first: {', '.join(missing)}")
     return pack
+
+
+@dataclass(frozen=True)
+class Authorisation:
+    pack_id: str
+    baseline: bool
+    approved_by: str
+    approved_on: object
+    decision_record: str
+
+
+def load_authorisations(path: Path | None = None) -> dict[str, Authorisation]:
+    """Owner-authorised packs. A missing file authorises nothing (fail closed); an incomplete entry is refused."""
+    path = path or (config.config_dir() / "admission_authorisations.toml")
+    if not path.is_file():
+        return {}
+    out = {}
+    for raw in tomllib.loads(path.read_text(encoding="utf-8")).get("pack", []):
+        for k in ("id", "approved_by", "approved_on", "decision_record"):
+            if not str(raw.get(k, "")).strip():
+                raise ValueError(f"admission authorisation {raw!r}: {k} is required (owner decision)")
+        out[raw["id"]] = Authorisation(raw["id"], bool(raw.get("baseline", False)), raw["approved_by"],
+                                       raw["approved_on"], raw["decision_record"])
+    return out
+
+
+def require_authorised(pack_id: str, authorisations: dict[str, Authorisation]) -> Authorisation:
+    """Decided before any file of the pack is opened."""
+    if pack_id not in authorisations:
+        raise AdmissionRefused("not_authorised", f"pack {pack_id} is not authorised for admission "
+                               "(config/admission_authorisations.toml); its catalogue rules and data classes need "
+                               "an owner decision first")
+    return authorisations[pack_id]
