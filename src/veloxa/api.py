@@ -29,8 +29,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import auth, config, ledger, selfcheck, tools
 from .ask import pipeline, timeparse
+from .authz.current import RelationshipStore
 from .db import connect
 from .releases import current_time, load_authorisations, load_schedule
+from .resolution import store as resolution
 from .risk import briefing
 from .temporal import Mode, resolve_basis
 
@@ -54,6 +56,15 @@ class AskRequest(BaseModel):
     mode: str | None = Field(default=None, description="CURRENT | KNOWN_AT | RECORDED_BY | VALID_AT")
     as_of: str | None = Field(default=None, description="the R or V date for RECORDED_BY or VALID_AT")
     as_known_at: str | None = Field(default=None, description="date or instant; implies KNOWN_AT")
+
+
+class DecisionRequest(BaseModel):
+    """A C12 human decision. The decider is the authenticated principal, never a request field."""
+    model_config = ConfigDict(extra="forbid")
+    candidate_id: uuid.UUID
+    outcome: str = Field(pattern="^(approved|rejected|deferred)$")
+    rationale: str = Field(min_length=1, max_length=2000)
+    decision_record: str = Field(min_length=1, max_length=200)
 
 
 def _app_dsn() -> str:
@@ -196,6 +207,48 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
         return {"today": b["today"], "top_three": b["top_three"], "ranking_mode": b["ranking_mode"],
                 "owner_decision_status": b["owner_decision_status"], "read_basis": b["read_basis"],
                 "snapshot_id": b["snapshot_id"], "full_briefing": f"/v1/briefing/{b['snapshot_id']}"}
+
+    def _resolver(conn, authorization: str | None):
+        """C12 decisions need the ReBAC relation `resolve` on identity_queue:default. No tuple grants it by
+        default, so the queue is closed until the owner records one."""
+        principal = _principal(conn, authorization, now_fn())
+        if isinstance(principal, JSONResponse):
+            return principal
+        try:
+            granted, _ = RelationshipStore(conn).check(tenant_id, principal.principal_id, "resolve",
+                                                       "identity_queue", "default")
+        except Exception:  # noqa: BLE001 - an unavailable relationship store denies
+            granted = False
+        if not granted:
+            return JSONResponse(status_code=403, content={
+                "error": "not_authorised", "detail": "resolving identities needs the `resolve` relation on the queue"})
+        return principal
+
+    @app.get("/v1/identity/queue")
+    def identity_queue(authorization: str | None = Header(default=None)):
+        """Candidates awaiting a human decision, with their rule classification (never a score)."""
+        with connect(state["dsn"]) as conn:
+            principal = _resolver(conn, authorization)
+            if isinstance(principal, JSONResponse):
+                return principal
+            rows = resolution.queue(conn, tenant_id)
+        return {"candidates": [{k: (str(v) if isinstance(v, uuid.UUID) else v) for k, v in r.items()}
+                               for r in rows]}
+
+    @app.post("/v1/identity/decisions")
+    def identity_decision(body: DecisionRequest, authorization: str | None = Header(default=None)):
+        """Append a versioned decision. Approval of anything but a synthetic test identity is refused (403)."""
+        with connect(state["dsn"]) as conn:
+            principal = _resolver(conn, authorization)
+            if isinstance(principal, JSONResponse):
+                return principal
+            try:
+                return resolution.decide(conn, tenant_id, principal.principal_id, body.candidate_id, body.outcome,
+                                         body.rationale, body.decision_record)
+            except resolution.NotPermitted as e:
+                return JSONResponse(status_code=403, content={"error": "decision_not_permitted", "detail": str(e)})
+            except resolution.Invalid as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_decision", "detail": str(e)})
 
     @app.get("/v1/briefing/{snapshot_id}")
     def get_briefing_snapshot(snapshot_id: uuid.UUID, authorization: str | None = Header(default=None)):
