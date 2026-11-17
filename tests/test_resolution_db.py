@@ -193,7 +193,11 @@ def test_the_api_needs_a_resolver_relation_and_refuses_real_approvals(db, monkey
         assert str(cand) in {c["candidate_id"] for c in queued} and all("score" not in c for c in queued)
         assert client.post("/v1/identity/decisions", json=body | {"decided_by": "someone"},
                            headers=AUTH).status_code == 422                   # the decider is never a field
-        ok = client.post("/v1/identity/decisions", json=body, headers=AUTH)
+        req = client.post("/v1/identity/requests", json={"candidate_id": str(cand), "reason": "review"}, headers=AUTH)
+        assert req.status_code == 200 and req.json()["candidate_id"] == str(cand)
+        ok = client.post("/v1/identity/decisions", json=body | {"request_key": "syn-api-key-1"}, headers=AUTH)
+        again = client.post("/v1/identity/decisions", json=body | {"request_key": "syn-api-key-1"}, headers=AUTH)
+        assert again.json()["replayed"] is True and again.json()["decision_id"] == ok.json()["decision_id"]
         assert ok.status_code == 200 and ok.json()["version"] == 1
         bad = client.post("/v1/identity/decisions", json=body | {"candidate_id": str(real_cand)}, headers=AUTH)
         assert bad.status_code == 403 and bad.json()["error"] == "decision_not_permitted"

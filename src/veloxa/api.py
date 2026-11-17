@@ -65,6 +65,16 @@ class DecisionRequest(BaseModel):
     outcome: str = Field(pattern="^(approved|rejected|deferred)$")
     rationale: str = Field(min_length=1, max_length=2000)
     decision_record: str = Field(min_length=1, max_length=200)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=50)
+    request_key: str | None = Field(default=None, min_length=8, max_length=200,
+                                    description="a replay with the same key returns the original decision")
+
+
+class ResolutionRequest(BaseModel):
+    """Asks for a human decision on a candidate; the requester is the authenticated principal."""
+    model_config = ConfigDict(extra="forbid")
+    candidate_id: uuid.UUID
+    reason: str = Field(min_length=1, max_length=2000)
 
 
 def _app_dsn() -> str:
@@ -235,6 +245,20 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
         return {"candidates": [{k: (str(v) if isinstance(v, uuid.UUID) else v) for k, v in r.items()}
                                for r in rows]}
 
+    @app.post("/v1/identity/requests")
+    def identity_request(body: ResolutionRequest, authorization: str | None = Header(default=None)):
+        """Record a request for a human decision (no state changes)."""
+        with connect(state["dsn"]) as conn:
+            principal = _resolver(conn, authorization)
+            if isinstance(principal, JSONResponse):
+                return principal
+            try:
+                rid = resolution.request_decision(conn, tenant_id, principal.principal_id, body.candidate_id,
+                                                  body.reason)
+            except resolution.Invalid as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_request", "detail": str(e)})
+        return {"request_id": str(rid), "candidate_id": str(body.candidate_id)}
+
     @app.post("/v1/identity/decisions")
     def identity_decision(body: DecisionRequest, authorization: str | None = Header(default=None)):
         """Append a versioned decision. Approval of anything but a synthetic test identity is refused (403)."""
@@ -244,7 +268,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
                 return principal
             try:
                 return resolution.decide(conn, tenant_id, principal.principal_id, body.candidate_id, body.outcome,
-                                         body.rationale, body.decision_record)
+                                         body.rationale, body.decision_record, body.evidence_refs, body.request_key)
             except resolution.NotPermitted as e:
                 return JSONResponse(status_code=403, content={"error": "decision_not_permitted", "detail": str(e)})
             except resolution.Invalid as e:
