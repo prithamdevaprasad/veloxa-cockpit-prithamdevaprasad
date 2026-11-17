@@ -160,5 +160,6 @@ def rebuild(conn: psycopg.Connection, tenant_id: uuid.UUID) -> list[tuple[int, i
     with tenant_tx(conn, tenant_id, principal_id="projection-worker"):
         conn.execute("SELECT pg_advisory_xact_lock(hashtext('projection.build:' || %s))", (str(tenant_id),))
         for table in ("person", "ledger_line", "reported_figure", "document_text", "acl_history", "build"):
-            conn.execute(f"DELETE FROM projection.{table} WHERE tenant_id = %s", (tenant_id,))  # fixed table names
+            conn.execute(f"DELETE FROM projection.{table} WHERE tenant_id = %s",  # noqa: S608  (fixed names)
+                         (tenant_id,))
     return build(conn, tenant_id)

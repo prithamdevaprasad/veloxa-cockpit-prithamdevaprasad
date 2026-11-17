@@ -50,7 +50,7 @@ def allowlist() -> set[tuple[str, str]]:
 def files(root: Path | None) -> list[tuple[str, Path]]:
     if root is not None:
         return [(p.relative_to(root).as_posix(), p) for p in sorted(root.rglob("*")) if p.is_file()]
-    out = subprocess.run(["git", "-C", str(REPO), "ls-files", "--cached", "--others", "--exclude-standard"],
+    out = subprocess.run(["git", "-C", str(REPO), "ls-files", "--cached", "--others", "--exclude-standard"],  # noqa: S603,S607
                          capture_output=True, text=True, check=True).stdout.splitlines()
     return [(f, REPO / f) for f in out if (REPO / f).is_file()]
 

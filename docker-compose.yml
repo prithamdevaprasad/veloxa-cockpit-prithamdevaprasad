@@ -60,7 +60,7 @@ services:
 
   api:
     image: veloxa-cockpit:local
-    command: ["veloxa", "serve"]
+    command: ["veloxa", "serve", "--host", "0.0.0.0"]
     depends_on:
       db:
         condition: service_healthy

@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "tests")]
 ROLE_PASSWORDS = {"MIGRATOR": "local-dev-migrator", "APP": "local-dev-app", "INGEST": "local-dev-ingest",
                   "PROJECTION": "local-dev-projection"}
-DEMO_TOKEN = "synthetic-demo-fixture-token-0123456789abcdef"
+DEMO_TOKEN = "synthetic-demo-fixture-token-0123456789abcdef"  # noqa: S105  (documented local demo fixture)
 SOURCES = ("keka_hrms", "zoho_books", "documents", "meeting_summaries", "email", "challenge_brief", "data_room")
 
 

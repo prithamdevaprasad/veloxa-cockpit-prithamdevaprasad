@@ -384,7 +384,8 @@ def main(argv: list[str] | None = None) -> int:
     p_d15.add_argument("--file", required=True)
     p_d15.set_defaults(func=cmd_policy_record_d15)
     p_srv = sub.add_parser("serve", help="run the API (application role only)")
-    p_srv.add_argument("--host", default="0.0.0.0")
+    p_srv.add_argument("--host", default="127.0.0.1",
+                       help="bind address (default loopback; containers pass 0.0.0.0 explicitly)")
     p_srv.add_argument("--port", type=int, default=8000)
     p_srv.set_defaults(func=cmd_serve)
     args = parser.parse_args(argv)

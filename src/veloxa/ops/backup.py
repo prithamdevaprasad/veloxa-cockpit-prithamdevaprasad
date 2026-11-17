@@ -57,18 +57,23 @@ class PgTools:
         found = shutil.which("pg_dump")
         return PgTools("path", str(Path(found).parent)) if found else None
 
-    def run(self, tool: str, args: list[str], dsn: str, stdin=None, stdout=None) -> subprocess.CompletedProcess:
+    def run(self, tool: str, args: list[str], dsn: str, data: bytes | None = None) -> subprocess.CompletedProcess:
+        """Run a client tool with output captured through a pipe and input passed as bytes (no handle
+        inheritance, which is unreliable through Docker Desktop's CLI shim on Windows)."""
         p = urlsplit(dsn)
         env = {**os.environ, "PGPASSWORD": p.password or ""}
         if self.mode == "docker":            # inside the container the server is on localhost:5432
             conn = ["-h", "localhost", "-p", "5432", "-U", p.username or "postgres"]
-            cmd = ["docker", "exec", "-i", "-e", "PGPASSWORD", self.where, tool, *conn, *args]
+            cmd = ["docker", "exec", *(["-i"] if data is not None else []), "-e", "PGPASSWORD", self.where, tool,
+                   *conn, *args]
             env["MSYS_NO_PATHCONV"] = "1"
         else:
             conn = ["-h", p.hostname or "localhost", "-p", str(p.port or 5432), "-U", p.username or "postgres"]
             cmd = [str(Path(self.where) / tool), *conn, *args]
-        return subprocess.run(cmd, stdin=stdin, stdout=stdout or subprocess.PIPE, stderr=subprocess.PIPE, env=env,
-                              timeout=600, check=False)
+        # argv list, no shell; the tools and their arguments come from configuration, never from requests
+        return subprocess.run(  # noqa: S603
+            cmd, input=data, stdin=None if data is not None else subprocess.DEVNULL, capture_output=True, env=env,
+            timeout=600, check=False)
 
 
 def _with_db(dsn: str, database: str) -> str:
@@ -122,11 +127,10 @@ def backup(tools: PgTools, admin_dsn: str, database: str, out_dir: Path) -> dict
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:6]
     dump = out_dir / f"{database}-{stamp}.dump"
     src = _with_db(admin_dsn, database)
-    with dump.open("wb") as f:
-        r = tools.run("pg_dump", ["--format=custom", "--dbname", database], src, stdout=f)
-    if r.returncode != 0:
-        dump.unlink(missing_ok=True)
+    r = tools.run("pg_dump", ["--format=custom", "--dbname", database], src)
+    if r.returncode != 0 or not r.stdout.startswith(b"PGDMP"):
         raise BackupError(f"pg_dump failed: {r.stderr.decode(errors='replace')[-400:]}")
+    dump.write_bytes(r.stdout)
     with psycopg.connect(src, autocommit=True) as c:
         version = c.execute("SHOW server_version").fetchone()[0]
     manifest = {"database": database, "created_at": datetime.now(UTC).isoformat(), "file": dump.name,
@@ -145,8 +149,7 @@ def verify(tools: PgTools, admin_dsn: str, dump: Path, manifest: dict) -> list[s
         problems.append("checksum mismatch: the backup file changed or is corrupt")
     if dump.stat().st_size != manifest["bytes"]:
         problems.append("size mismatch")
-    with dump.open("rb") as f:
-        r = tools.run("pg_restore", ["--list"], admin_dsn, stdin=f)
+    r = tools.run("pg_restore", ["--list"], admin_dsn, data=dump.read_bytes())
     if r.returncode != 0:
         problems.append("the archive is not readable by pg_restore")
     return problems
@@ -166,8 +169,7 @@ def restore_drill(tools: PgTools, admin_dsn: str, dump: Path, manifest: dict, ke
             raise BackupError("the drill target already exists; refusing to restore over it")
         c.execute(f'CREATE DATABASE "{target}"')
     try:
-        with dump.open("rb") as f:
-            r = tools.run("pg_restore", ["--dbname", target, "--exit-on-error"], admin_dsn, stdin=f)
+        r = tools.run("pg_restore", ["--dbname", target, "--exit-on-error"], admin_dsn, data=dump.read_bytes())
         if r.returncode != 0:
             return {"ok": False, "differences": [f"pg_restore failed: {r.stderr.decode(errors='replace')[-400:]}"],
                     "target": target, "seconds": time.monotonic() - started}
