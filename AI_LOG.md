@@ -1016,7 +1016,8 @@ The owner asked for the following, local-first, with no push, merge or deploymen
 
 - **pytest:** full suite passing, exit 0 (final counts are in the final report).
 - **Browser and gold:** Playwright 30/30 (desktop, tablet, mobile); gold 30/30 on admitted D1.
-- **Lint and scans:** ruff clean; confidentiality scans clean on every commit; dependency audit clean.
+- **Lint and scans:** ruff clean; confidentiality scans clean on every commit and over the whole branch history.
+- **Dependency audit:** Python clean. npm was clean on 17 Nov; on 18 Nov a newly published advisory with no patched release (picomatch, via Vite; development time only) makes it fail. It is recorded in `docs/DEPENDENCIES.md` and not suppressed.
 - **Migrations 0013–0016:** tested on disposable PostgreSQL 18 only, including the upgrade of a restored copy of the real database.
 - **Real database:** unchanged at 0012; fingerprint before and after identical.
 
