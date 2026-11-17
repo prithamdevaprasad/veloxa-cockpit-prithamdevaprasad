@@ -13,14 +13,14 @@ IST = "Asia/Kolkata"
 
 BOARD_TEXT = [
     "Company: Board update\nQuarterly update. Period: Jan to Mar 2099. Sent 9 Apr 2099. Confidential.\n"
-    "Key numbers\nMetric Value\nRevenue (recurring) Rs. 1.5 Cr\nCustomers 12\nRunway 9 months\nProduct\nAll good.\n"
+    "Key numbers\nMetric Value\nRevenue (recurring) Rs. 3.7 Cr\nCustomers 12\nRunway 9 months\nProduct\nAll good.\n"
 ]
 
 
 def test_reported_figures_are_read_exactly_as_written_and_the_table_ends_at_the_next_heading():
     period, issued, figures = projector.parse_reported_figures(BOARD_TEXT)
     assert period == "Jan to Mar 2099" and issued == date(2099, 4, 9)
-    assert figures == [("Revenue (recurring)", "Rs. 1.5 Cr"), ("Customers", "12"), ("Runway", "9 months")]
+    assert figures == [("Revenue (recurring)", "Rs. 3.7 Cr"), ("Customers", "12"), ("Runway", "9 months")]
 
 
 def test_a_document_without_a_key_numbers_table_yields_no_figures():

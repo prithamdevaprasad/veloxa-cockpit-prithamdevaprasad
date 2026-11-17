@@ -1,0 +1,31 @@
+# Exact tokens the public scan (scripts/public_scan.py) may accept. Each is an INVENTED test value, checked against
+# the release packs before it was added. Never add a real company value, a value from a private decision
+# document, or a prefix that would admit other amounts.
+
+[[allow]]
+file = "tests/test_metrics_tools.py"
+token = "Rs. 3.7 Cr"
+
+[[allow]]
+file = "tests/test_signals.py"
+token = "Rs. 9 Cr"
+
+[[allow]]
+file = "tests/test_signals.py"
+token = "Rs. 7.3 Cr"
+
+[[allow]]
+file = "tests/test_signals.py"
+token = "Rs. 7.34 Cr"
+
+[[allow]]
+file = "tests/test_signals.py"
+token = "Rs. 8.9 Cr"
+
+[[allow]]
+file = "tests/test_signals.py"
+token = "Rs. 82 L"
+
+[[allow]]
+file = "tests/test_signals.py"
+token = "Rs. 4 bn"

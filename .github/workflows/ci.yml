@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# Every run step uses `bash --noprofile --norc -eo pipefail`: a failing command anywhere in a pipeline (for
+# example a scan piped into tail) fails the step. Never weaken this.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
@@ -36,6 +42,16 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: pip install --constraint requirements.lock -e ".[dev]"
+      - name: Public safety scan (any finding fails the job)
+        run: python scripts/public_scan.py
+      - name: Safety-scan gate failure path (a planted finding must fail the scan, even through a pipe)
+        run: |
+          planted="$(mktemp -d)"
+          python -c "print('token = \"' + 'gh' + 'p_' + 'a' * 36 + '\"')" > "$planted/planted.txt"
+          if python scripts/public_scan.py --root "$planted" | tail -n 1; then
+            echo "the scan did not fail on a planted finding"; exit 1
+          fi
+          echo "gate verified: the planted finding failed the scan"
       - name: Lint
         run: ruff check .
       - name: Tests (synthetic data only; real challenge data never exists in CI)
