@@ -31,6 +31,7 @@ These are the only owner statements this file relies on. They are quoted from th
 | 16 Nov 2026 | "Do not invent final answers for genuinely unresolved choices." Approximate disclosure handling (D-22) is to be kept in the deferred section | Part C |
 | 16 Nov 2026 | "Do not copy private research documents, the original challenge ZIP, employee data, payroll, emails, transcripts or source exports into the repository." | DEC-03 |
 | 16 Nov 2026 | "I will personally decide the frontend direction in a later phase." | Frontend deferred (Part C) |
+| 17 Nov 2026 | Frontend direction chosen when asked: "React + Vite + TS" for the CEO cockpit, and Playwright added as a test-only dependency for browser tests | `frontend/` (Sprint 7); the backend contracts of §19 are unchanged |
 | 16 Nov 2026 | Historical ACL instruction: "Current interviewer authorization is always mandatory. Historical permissions cannot bypass current revocation." "Historical eligibility does not prove the employee actually read something." "Missing history returns `unknown` and fails closed." Preserve `KB ∩ AZ ∩ POL` | DEC-06, DEC-13 (`ARCHITECTURE.md` v1.0.1) |
 
 | 16 Nov 2026 | "Backend stack: Approve Python 3.12, FastAPI, psycopg 3 and plain-SQL migrations as the production implementation technology direction." | DEC-23 |
