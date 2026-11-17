@@ -32,7 +32,8 @@ def test_health_and_time_metadata(veloxa_d1, monkeypatch):
 
     with TestClient(create_app(dsn=veloxa_d1)) as client:
         assert client.get("/health").json() == {"status": "ok", "selfcheck": "pass", "pending_admission": [],
-                                                "awaiting_authorisation": [], "auth": "none"}
+                                                "awaiting_authorisation": [], "auth": "none",
+            "model": {"model": "disabled", "reason": "no provider configured (DENY_ALL); facts-only composition"}}
 
         clock = client.get("/v1/meta/clock").json()
         assert clock["sealed_watermark"] == 1 and clock["time_zone"] == "Asia/Kolkata"
@@ -54,7 +55,9 @@ def test_api_keeps_serving_the_latest_sealed_batch_when_a_released_pack_is_not_a
     with TestClient(create_app(dsn=veloxa_d1, clock=lambda: after_d2_release)) as client:
         health = client.get("/health").json()
         assert health == {"status": "degraded", "selfcheck": "pass", "pending_admission": [],
-                          "awaiting_authorisation": ["D2"], "auth": "none"}  # D2 is not authorised for admission
+                          "awaiting_authorisation": ["D2"], "auth": "none",   # D2 is not authorised for admission
+                          "model": {"model": "disabled",
+                                    "reason": "no provider configured (DENY_ALL); facts-only composition"}}
         assert client.get("/v1/meta/clock").json()["sealed_watermark"] == 1
         packs = {p["pack"]: p for p in client.get("/v1/meta/releases").json()["packs"]}
         assert packs["D1"]["status"] == "sealed"

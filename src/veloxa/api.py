@@ -31,6 +31,7 @@ from . import auth, config, ledger, selfcheck, tools
 from .ask import pipeline, timeparse
 from .authz.current import RelationshipStore
 from .db import connect
+from .llm import config as llm_config
 from .releases import current_time, load_authorisations, load_schedule
 from .resolution import store as resolution
 from .risk import briefing
@@ -206,6 +207,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             "pending_admission": pending,
             "awaiting_authorisation": awaiting,
             "auth": auth_settings.mode,
+            "model": llm_config.status(),
         }
 
     @app.get("/v1/meta/clock")
@@ -438,8 +440,10 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
 
     def _runtime(conn):
         from .agents.runtime import AgentRuntime
+        from .llm.config import agent_composer
 
-        return agent_runtime(conn) if agent_runtime else AgentRuntime(conn, schedule.time_zone)
+        return agent_runtime(conn) if agent_runtime else AgentRuntime(conn, schedule.time_zone,
+                                                                      llm=agent_composer(conn))
 
     def _agent_error(e):
         return JSONResponse(status_code=_AGENT_ERRORS.get(e.code, 400), content={"error": e.code, "detail": e.detail})

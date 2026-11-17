@@ -39,3 +39,29 @@ def test_headers_validation_limits_and_the_proxy_boundary(db, monkeypatch, tmp_p
         assert all(c.get("/health").status_code != 429 for _ in range(8))     # probes are exempt
         spoof = [c.get("/v1/meta/clock", headers={"X-Forwarded-For": f"10.0.0.{i}"}).status_code for i in range(8)]
         assert 429 in spoof                                             # an untrusted client cannot pick its key
+
+
+def test_expensive_paths_are_classified_exactly():
+    from veloxa.gateway import expensive
+
+    assert expensive("POST", "/v1/ask") and expensive("POST", "/v1/scenarios/commitment-shift")
+    assert expensive("POST", "/v1/sessions/abc/messages")
+    assert not expensive("POST", "/v1/sessions/abc/close") and not expensive("GET", "/v1/ask")
+    assert not expensive("GET", "/v1/today") and not expensive("POST", "/v1/identity/decisions")
+
+
+@pytest.mark.db
+def test_the_expensive_bucket_is_stricter_and_per_client(db, monkeypatch, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from conftest import DEV_TOKEN, api_client, dev_fixture, ensure_configured_d1
+
+    ensure_configured_d1(db, tmp_path)
+    monkeypatch.setenv("VELOXA_RATE_LIMIT_EXPENSIVE_PER_MIN", "3")
+    with api_client(db, monkeypatch, **dev_fixture()) as c:
+        auth = {"Authorization": f"Bearer {DEV_TOKEN}"}
+        with ThreadPoolExecutor(5) as ex:                                   # concurrent requests, one client
+            codes = list(ex.map(lambda _: c.post("/v1/ask", json={"question": "What is our headcount?"},
+                                                 headers=auth).status_code, range(5)))
+        assert sorted(codes) == [200, 200, 200, 429, 429]
+        assert c.get("/v1/meta/clock", headers=auth).status_code == 200      # cheap paths are unaffected

@@ -12,6 +12,9 @@ controls; none is deployed.
   - `X-Forwarded-For` is honoured only from the proxy named in `VELOXA_TRUSTED_PROXY` (the WAF/gateway boundary),
     so a client cannot choose its own identity for limiting.
 - `/health` is exempt from limiting, so an orchestrator's probes are never throttled.
+- **Expensive endpoints** (Ask, agent messages, scenarios: the model-capable paths) have their own, stricter bucket:
+  `VELOXA_RATE_LIMIT_EXPENSIVE_PER_MIN`, default 10 per client per minute. This is a PROPOSED pilot value awaiting
+  owner approval, not an approved production limit.
 """
 
 from __future__ import annotations
@@ -33,6 +36,13 @@ SECURITY_HEADERS = {
     "Cross-Origin-Resource-Policy": "same-origin",
 }
 EXEMPT = {"/health"}
+_EXPENSIVE = (("POST", "/v1/ask"), ("POST", "/v1/scenarios/"), ("POST", "/v1/sessions/"))
+
+
+def expensive(method: str, path: str) -> bool:
+    if path.startswith("/v1/sessions/") and not path.endswith("/messages"):
+        return False                                     # session open/close are cheap; only messages compose
+    return any(method == m and (path == p or (p.endswith("/") and path.startswith(p))) for m, p in _EXPENSIVE)
 
 
 class TokenBucket:
@@ -71,6 +81,7 @@ def client_key(request: Request) -> str:
 def install(app) -> None:
     max_body = int(os.environ.get("VELOXA_MAX_BODY_BYTES", "65536"))
     bucket = TokenBucket(int(os.environ.get("VELOXA_RATE_LIMIT_PER_MIN", "120")))
+    costly = TokenBucket(int(os.environ.get("VELOXA_RATE_LIMIT_EXPENSIVE_PER_MIN", "10")))
     app.state.rate_limiter = bucket
 
     @app.middleware("http")
@@ -78,7 +89,10 @@ def install(app) -> None:
         path = request.url.path
         refusal = None
         if path not in EXEMPT:
-            wait = bucket.take(client_key(request))
+            key = client_key(request)
+            wait = bucket.take(key)
+            if not wait and expensive(request.method, path):
+                wait = costly.take(key)
             if wait > 0:
                 refusal = JSONResponse(status_code=429, headers={"Retry-After": str(max(1, int(wait + 0.999)))},
                                        content={"error": "rate_limited", "detail": "too many requests"})
