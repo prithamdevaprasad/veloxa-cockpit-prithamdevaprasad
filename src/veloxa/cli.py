@@ -116,6 +116,45 @@ def cmd_project(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_workflow_pack(args: argparse.Namespace) -> int:
+    """Run the durable pack pipeline (admit, project, identity sync) for one pack through DBOS (C26). Needs the
+    ingest and projection credentials and VELOXA_WORKFLOW_DATABASE_URL. Idempotent per --key."""
+    from .workflows.catalogue import CATALOGUE
+    from .workflows.runner import DBOSActivityRunner
+
+    schedule = load_schedule()
+    tenant_id = config.tenant_uuid(schedule.tenant_slug)
+    runner = DBOSActivityRunner(CATALOGUE)
+    runner.launch()
+    try:
+        h = runner.start("veloxa.pack_pipeline.v1", {"tenant_id": str(tenant_id), "pack_id": args.pack},
+                         args.key or f"pack-{args.pack}-{tenant_id}")
+        out = runner.result(h.workflow_id)
+        print(f"workflow {h.workflow_id}: batch {out['batch_seq']}, projected rows {out['projected_rows']}")
+    finally:
+        runner.shutdown()
+    return 0
+
+
+def cmd_workflow_status(args: argparse.Namespace) -> int:
+    """Show a workflow's status (ids and status only; never inputs or outputs)."""
+    from dbos import DBOSClient
+
+    from .workflows.runner import system_database_url
+
+    client = DBOSClient(system_database_url=system_database_url())
+    try:
+        found = client.list_workflows(workflow_ids=[args.workflow_id], load_input=False, load_output=False)
+    finally:
+        client.destroy()
+    if not found:
+        print("no such workflow")
+        return 1
+    s = found[0]
+    print(f"{s.workflow_id}: {s.status} (workflow {s.name}, version {s.app_version})")
+    return 0
+
+
 def cmd_agents_seed(_: argparse.Namespace) -> int:
     """Publish the 14 proposed agent slots, unassigned and blocked (configuration role). Idempotent."""
     from .agents import registry
@@ -282,6 +321,13 @@ def main(argv: list[str] | None = None) -> int:
     p_prj = sub.add_parser("project", help="build projections for sealed batches")
     p_prj.add_argument("--rebuild", action="store_true", help="drop and rebuild all projections from the ledger")
     p_prj.set_defaults(func=cmd_project)
+    p_wf = sub.add_parser("workflow-pack", help="C26: run the durable pack pipeline for one pack (DBOS)")
+    p_wf.add_argument("--pack", required=True)
+    p_wf.add_argument("--key", default=None, help="idempotency key (default: pack and tenant)")
+    p_wf.set_defaults(func=cmd_workflow_pack)
+    p_ws = sub.add_parser("workflow-status", help="C26: show a workflow's status")
+    p_ws.add_argument("workflow_id")
+    p_ws.set_defaults(func=cmd_workflow_status)
     sub.add_parser("agents-seed", help="publish the 14 proposed agent slots (unassigned, blocked)"
                    ).set_defaults(func=cmd_agents_seed)
     sub.add_parser("identity-sync", help="C12: register identities and candidates from sealed batches (counts only)"
