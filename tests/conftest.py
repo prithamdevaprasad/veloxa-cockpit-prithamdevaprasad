@@ -149,7 +149,8 @@ def api_client(db, monkeypatch, **env):
 
     from veloxa.api import PRIVILEGED_ENV, create_app
 
-    for name in PRIVILEGED_ENV + ("VELOXA_DEV_AUTH", "VELOXA_DEV_TOKEN", "VELOXA_DEV_PRINCIPAL"):
+    for name in PRIVILEGED_ENV + ("VELOXA_DEV_AUTH", "VELOXA_DEV_TOKEN", "VELOXA_DEV_PRINCIPAL", "VELOXA_DEV_TENANT",
+                                  "VELOXA_OIDC"):
         monkeypatch.delenv(name, raising=False)
     for k, v in env.items():
         monkeypatch.setenv(k, v)

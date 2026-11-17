@@ -27,9 +27,11 @@ from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import auth, config, ledger, selfcheck, tools
+from . import auth, config, ledger, selfcheck, tenancy, tools
 from .ask import pipeline, timeparse
+from .authz import evidence as evidence_authz
 from .authz.current import RelationshipStore
+from .authz.identity import Rejected
 from .db import connect
 from .llm import config as llm_config
 from .releases import current_time, load_authorisations, load_schedule
@@ -114,7 +116,22 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
     assert_unprivileged()
     auth_settings = auth.settings_from_env()  # raises if the development fixture is half-configured
     schedule = load_schedule()
-    tenant_id = config.tenant_uuid(schedule.tenant_slug)
+    tenant_id = config.tenant_uuid(schedule.tenant_slug)        # the deployment's primary (release-schedule) tenant
+    # Real workspaces sign in with their OWN OIDC issuer (VELOXA_OIDC=1; issuers are tenant data, migration 0017).
+    oidc_auth = None
+    if os.environ.get("VELOXA_OIDC") == "1":
+        from .authz.oidc import OidcAuthenticator
+
+        oidc_auth = OidcAuthenticator()
+    dev_slug = os.environ.get("VELOXA_DEV_TENANT", "").strip() or schedule.tenant_slug
+
+    def dev_tenant_id(conn):
+        """The development fixture's tenant: VELOXA_DEV_TENANT (a slug), default the primary tenant. A
+        non-primary fixture tenant must be SYNTHETIC: the fixture never signs into a real workspace."""
+        row = conn.execute("SELECT tenant_id, synthetic FROM directory.tenant WHERE slug = %s", (dev_slug,)).fetchone()
+        if row is None or (row["tenant_id"] != tenant_id and not row["synthetic"]):
+            return None
+        return row["tenant_id"]
     now_fn = clock or current_time
     state: dict = {}
 
@@ -207,6 +224,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             "pending_admission": pending,
             "awaiting_authorisation": awaiting,
             "auth": auth_settings.mode,
+            "oidc": "per-tenant issuers" if oidc_auth is not None else "off",
             "model": llm_config.status(),
         }
 
@@ -222,24 +240,64 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             now, _, rows = _pack_states(conn)
         return {"now": now.isoformat(), "packs": rows}
 
+    def _tz(conn, tid) -> str:
+        row = conn.execute("SELECT time_zone FROM directory.tenant WHERE tenant_id = %s", (tid,)).fetchone()
+        return row["time_zone"] if row else schedule.time_zone
+
+    def _with_access(conn, p: tools.Principal, tid) -> tools.Principal:
+        """Attach the tenant and, for `rebac` tenants, the principal's current per-document evidence access."""
+        from dataclasses import replace as _replace
+
+        s_ = tenancy.settings(conn, tid)
+        acc = evidence_authz.access_for(conn, tid, p.principal_id, "rebac") if s_.evidence_access == "rebac" else None
+        return _replace(p, tenant_id=tid, access=acc)
+
+    def _directory_principal(conn, tid, pid: str):
+        m = tenancy.member(conn, tid, pid)
+        if m is None or m["status"] != "active":
+            return None
+        return tools.Principal(pid, "authenticated", m["email"])
+
     def _principal(conn, authorization: str | None, now: datetime):
-        """The authenticated principal, or an error response. Never derived from request content."""
-        emp_id = auth_settings.authenticate(authorization)
-        if emp_id is None:
-            detail = ("an authenticated principal is required; no identity provider is configured, so "
-                      "requester-facing endpoints are closed" if auth_settings.mode == "none"
-                      else "an authenticated principal is required")
+        """The authenticated principal (with its tenant), or an error response. Never derived from request content.
+        Real workspaces: the tenant's own OIDC issuer (VELOXA_OIDC=1). Local development and synthetic tenants:
+        the explicit development fixture."""
+        def _401(detail):
             return JSONResponse(status_code=401, headers={"WWW-Authenticate": "Bearer"},
                                 content={"error": "not_authenticated", "detail": detail})
-        current = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), Mode.CURRENT, None,
-                                schedule.time_zone, now)
-        principal = tools.resolve_principal_by_emp_id(conn, current, emp_id) if current.batch_seq else None
-        if principal is None:
-            return JSONResponse(status_code=403, content={
-                "error": "not_authorised",
-                "detail": "the authenticated principal does not resolve to exactly one person in the latest sealed "
-                          "HR export"})
-        return principal
+
+        def _403(detail):
+            return JSONResponse(status_code=403, content={"error": "not_authorised", "detail": detail})
+
+        presented = (authorization or "").partition(" ")[2].strip()
+        if oidc_auth is not None and presented.count(".") == 2:
+            signin = oidc_auth.authenticate(conn, presented, now)
+            if isinstance(signin, Rejected):
+                return _401(f"sign-in rejected ({signin.reason})")
+            p = _directory_principal(conn, signin.tenant_id, signin.principal_id)
+            if p is None:
+                return _403("the workspace member is not active")
+            return _with_access(conn, p, signin.tenant_id)
+        emp_id = auth_settings.authenticate(authorization)
+        if emp_id is None:
+            return _401("an authenticated principal is required; no identity provider is configured, so "
+                        "requester-facing endpoints are closed" if auth_settings.mode == "none" and oidc_auth is None
+                        else "an authenticated principal is required")
+        tid = dev_tenant_id(conn)
+        if tid is None:
+            return _403("the development fixture names an unknown tenant")
+        settings_ = tenancy.settings(conn, tid)
+        if settings_.admission_mode == "release_schedule" and not emp_id.startswith("person:"):
+            current = resolve_basis(tid, ledger.sealed_releases(conn, tid), Mode.CURRENT, None, _tz(conn, tid), now)
+            principal = tools.resolve_principal_by_emp_id(conn, current, emp_id) if current.batch_seq else None
+            if principal is None:
+                return _403("the authenticated principal does not resolve to exactly one person in the latest "
+                            "sealed HR export")
+        else:
+            principal = _directory_principal(conn, tid, emp_id)
+            if principal is None:
+                return _403("the development principal is not an active member of the workspace")
+        return _with_access(conn, principal, tid)
 
     @app.post("/v1/ask")
     def ask(body: AskRequest, authorization: str | None = Header(default=None)):
@@ -248,8 +306,9 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now)
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
             try:
-                return pipeline.answer(conn, tenant_id, schedule.time_zone, principal, body.question, now,
+                return pipeline.answer(conn, tenant_id, tz, principal, body.question, now,
                                        mode=body.mode, as_of=body.as_of, as_known_at=body.as_known_at)
             except pipeline.InvalidTime as e:
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
@@ -264,19 +323,20 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now)
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
             try:
-                spec = timeparse.parse("", now, schedule.time_zone, mode, as_of, as_known_at)
+                spec = timeparse.parse("", now, tz, mode, as_of, as_known_at)
                 basis = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), spec.mode, spec.as_of,
-                                      schedule.time_zone, now)
+                                      tz, now)
             except ValueError as e:
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
             return briefing.serve(conn, tenant_id, principal, basis, now)
 
-    def _scenario_basis(conn, as_known_at):
+    def _scenario_basis(conn, as_known_at, tenant_id, tz):
         now = now_fn()
-        spec = timeparse.parse("", now, schedule.time_zone, None, None, as_known_at)
+        spec = timeparse.parse("", now, tz, None, None, as_known_at)
         return resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), spec.mode, spec.as_of,
-                             schedule.time_zone, now)
+                             tz, now)
 
     @app.get("/v1/scenarios/commitments")
     def scenario_commitments(as_known_at: str | None = None, authorization: str | None = Header(default=None)):
@@ -287,11 +347,12 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now_fn())
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
             try:
-                basis = _scenario_basis(conn, as_known_at)
+                basis = _scenario_basis(conn, as_known_at, tenant_id, tz)
             except ValueError as e:
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
-            names = scenarios.commitments(conn, basis, schedule.time_zone) if basis.batch_seq else []
+            names = scenarios.commitments(conn, basis, tz) if basis.batch_seq else []
         return {"read_basis": {"batch_seq": basis.batch_seq, "banner": basis.banner()}, "commitments": names}
 
     @app.get("/v1/dependencies")
@@ -304,11 +365,12 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now_fn())
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
             try:
-                basis = _scenario_basis(conn, as_known_at)
+                basis = _scenario_basis(conn, as_known_at, tenant_id, tz)
             except ValueError as e:
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
-            return graph.build(conn, basis, schedule.time_zone)
+            return graph.build(conn, basis, tz)
 
     @app.post("/v1/scenarios/commitment-shift")
     def scenario_shift(body: ShiftRequest, authorization: str | None = Header(default=None)):
@@ -320,9 +382,10 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now_fn())
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
             try:
-                basis = _scenario_basis(conn, body.as_known_at)
-                return scenarios.commitment_shift(conn, basis, schedule.time_zone, body.business_object,
+                basis = _scenario_basis(conn, body.as_known_at, tenant_id, tz)
+                return scenarios.commitment_shift(conn, basis, tz, body.business_object,
                                                   body.shift_days)
             except scenarios.ScenarioError as e:
                 return JSONResponse(status_code=422, content={"error": "invalid_scenario", "detail": str(e)})
@@ -339,6 +402,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now_fn())
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id = principal.tenant_id
             return lifecycle.compute(conn, tenant_id, principal)
 
     @app.get("/v1/conflicts")
@@ -353,17 +417,18 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now)
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
             try:
-                spec = timeparse.parse("", now, schedule.time_zone, mode, as_of, as_known_at)
+                spec = timeparse.parse("", now, tz, mode, as_of, as_known_at)
                 basis = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), spec.mode, spec.as_of,
-                                      schedule.time_zone, now)
+                                      tz, now)
             except ValueError as e:
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
             if basis.batch_seq == 0:
                 return {"register_version": conflicts.REGISTER_VERSION, "read_basis": pipeline._basis_json(basis),
                         "conflicts": [], "unknowns": ["nothing had been admitted at this knowledge point"]}
             try:
-                found = conflicts.register(conn, basis, schedule.time_zone)
+                found = conflicts.register(conn, basis, tz)
             except ValueError as e:      # a time axis the sources do not record: unanswerable, never an error
                 return {"register_version": conflicts.REGISTER_VERSION, "read_basis": pipeline._basis_json(basis),
                         "conflicts": [], "unknowns": [str(e)]}
@@ -379,8 +444,9 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now)
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
             basis = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), Mode.CURRENT, None,
-                                  schedule.time_zone, now)
+                                  tz, now)
             b = briefing.serve(conn, tenant_id, principal, basis, now)
         return {"today": b["today"], "top_three": b["top_three"], "ranking_mode": b["ranking_mode"],
                 "owner_decision_status": b["owner_decision_status"], "read_basis": b["read_basis"],
@@ -392,6 +458,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
         principal = _principal(conn, authorization, now_fn())
         if isinstance(principal, JSONResponse):
             return principal
+        tenant_id = principal.tenant_id
         try:
             granted, _ = RelationshipStore(conn).check(tenant_id, principal.principal_id, "resolve",
                                                        "identity_queue", "default")
@@ -409,6 +476,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _resolver(conn, authorization)
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id = principal.tenant_id
             rows = resolution.queue(conn, tenant_id)
         return {"candidates": [{k: (str(v) if isinstance(v, uuid.UUID) else v) for k, v in r.items()}
                                for r in rows]}
@@ -420,6 +488,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _resolver(conn, authorization)
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id = principal.tenant_id
             try:
                 rid = resolution.request_decision(conn, tenant_id, principal.principal_id, body.candidate_id,
                                                   body.reason)
@@ -434,6 +503,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _resolver(conn, authorization)
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id = principal.tenant_id
             try:
                 return resolution.decide(conn, tenant_id, principal.principal_id, body.candidate_id, body.outcome,
                                          body.rationale, body.decision_record, body.evidence_refs, body.request_key)
@@ -449,16 +519,17 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now_fn())
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id = principal.tenant_id
             found = briefing.fetch(conn, tenant_id, principal, str(snapshot_id))
         if found is None:
             return JSONResponse(status_code=404, content={"error": "not_found"})
         return found
 
-    def _runtime(conn):
+    def _runtime(conn, tz):
         from .agents.runtime import AgentRuntime
         from .llm.config import agent_composer
 
-        return agent_runtime(conn) if agent_runtime else AgentRuntime(conn, schedule.time_zone,
+        return agent_runtime(conn) if agent_runtime else AgentRuntime(conn, tz,
                                                                       llm=agent_composer(conn))
 
     def _agent_error(e):
@@ -474,6 +545,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now_fn())
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id = principal.tenant_id
             agents = registry.listing(conn, tenant_id)
         return {"runtime_version": registry.RUNTIME_VERSION,
                 "agents": [{"agent_id": a.agent_id, "category": a.category, "activation": a.activation,
@@ -489,14 +561,15 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now)
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
             try:
-                spec = timeparse.parse("", now, schedule.time_zone, None, None, body.as_known_at)
+                spec = timeparse.parse("", now, tz, None, None, body.as_known_at)
                 basis = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), spec.mode, spec.as_of,
-                                      schedule.time_zone, now)
+                                      tz, now)
             except ValueError as e:
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
             try:
-                return _runtime(conn).open_session(tenant_id, principal, agent_id, basis)
+                return _runtime(conn, tz).open_session(tenant_id, principal, agent_id, basis)
             except AgentError as e:
                 return _agent_error(e)
 
@@ -510,8 +583,9 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now_fn())
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
             try:
-                return _runtime(conn).execute(AgentRequest(tenant_id, principal, session_id, body.message,
+                return _runtime(conn, tz).execute(AgentRequest(tenant_id, principal, session_id, body.message,
                                                            body.idempotency_key))
             except AgentError as e:
                 return _agent_error(e)
@@ -524,8 +598,9 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now_fn())
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
             try:
-                closed = _runtime(conn).close_session(tenant_id, principal, session_id)
+                closed = _runtime(conn, tz).close_session(tenant_id, principal, session_id)
             except AgentError as e:
                 return _agent_error(e)
         return {"session_id": str(session_id), "working_memory_closed": closed}
@@ -542,12 +617,13 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now)
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
             try:
                 s = _date.fromisoformat(start) if start else None
                 e = _date.fromisoformat(end) if end else None
-                spec = timeparse.parse("", now, schedule.time_zone, None, None, as_known_at)
+                spec = timeparse.parse("", now, tz, None, None, as_known_at)
                 basis = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), spec.mode, spec.as_of,
-                                      schedule.time_zone, now)
+                                      tz, now)
             except ValueError as ex:
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(ex)})
             r = tools.timeline(conn, basis, principal, s, e) if basis.batch_seq else tools.ToolResult(
@@ -569,6 +645,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now_fn())
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id = principal.tenant_id
             with tenant_tx(conn, tenant_id, principal.principal_id):
                 rows = conn.execute(
                     "SELECT s.session_id, s.config_version, s.batch_seq, s.opened_at,"
@@ -589,6 +666,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now_fn())
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id = principal.tenant_id
             with tenant_tx(conn, tenant_id, principal.principal_id):
                 s = conn.execute("SELECT session_id, agent_id, config_version, batch_seq, opened_at FROM"
                                  " runtime.agent_session WHERE session_id = %s", (session_id,)).fetchone()
@@ -611,6 +689,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             principal = _principal(conn, authorization, now_fn())
             if isinstance(principal, JSONResponse):
                 return principal
+            tenant_id = principal.tenant_id
             k = ledger.sealed_watermark(conn, tenant_id)
             items, withheld = MemoryStore(conn, CurrentAuthorization(conn)).recall(
                 MemoryScope(tenant_id, agent_id, principal.principal_id), k)
@@ -620,4 +699,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
                            "source_records": i["source_records"], "batch_seq": i["batch_seq"],
                            "created_at": i["created_at"].isoformat()} for i in items]}
 
+    from . import api_workspace
+
+    api_workspace.register(app, state=state, principal_of=_principal, now_fn=now_fn, oidc_auth=oidc_auth)
     return app

@@ -82,7 +82,9 @@ def validate(conn: psycopg.Connection, token: str | None, tenant_id: uuid.UUID, 
     return result
 
 
-def _validate(conn, token, tenant_id, keys, now) -> Identity | Rejected:
+def verify_signed_claims(token: str | None, keys: KeySource, now: datetime) -> dict | Rejected:
+    """The provider-neutral part of validation: compact JWS, allowed algorithm, signature, issuer, audience,
+    expiry, not-before and issued-at (bounded skew). Returns the verified claims, or a rejection reason."""
     if not token or token.count(".") != 2:
         return Rejected("malformed")
     head_b64, body_b64, sig_b64 = token.split(".")
@@ -112,6 +114,14 @@ def _validate(conn, token, tenant_id, keys, now) -> Identity | Rejected:
         return Rejected("expired")
     if (nbf and now + MAX_SKEW < nbf) or (iat and now + MAX_SKEW < iat):
         return Rejected("not_yet_valid")
+    return claims | {"_exp": exp}
+
+
+def _validate(conn, token, tenant_id, keys, now) -> Identity | Rejected:
+    claims = verify_signed_claims(token, keys, now)
+    if isinstance(claims, Rejected):
+        return claims
+    exp = claims["_exp"]
     if claims.get("tenant") != str(tenant_id):
         return Rejected("wrong_tenant")
     sub, jti = claims.get("sub"), claims.get("jti")

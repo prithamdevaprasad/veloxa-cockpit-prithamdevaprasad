@@ -212,7 +212,7 @@ def test_existing_database_serves_d1_and_reports_d2_as_awaiting_authorisation(db
         monkeypatch.delenv(name, raising=False)
     with TestClient(create_app(dsn=app_dsn)) as client:
         assert client.get("/health").json() == {"status": "degraded", "selfcheck": "pass", "pending_admission": [],
-                                                "awaiting_authorisation": ["D2"], "auth": "none",
+                                                "awaiting_authorisation": ["D2"], "auth": "none", "oidc": "off",
             "model": {"model": "disabled", "reason": "no provider configured (DENY_ALL); facts-only composition"}}
         assert client.get("/v1/meta/clock").json()["sealed_watermark"] == 1
         packs = {p["pack"]: p for p in client.get("/v1/meta/releases").json()["packs"]}
