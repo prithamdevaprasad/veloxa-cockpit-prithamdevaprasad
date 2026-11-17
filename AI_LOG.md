@@ -900,3 +900,46 @@ Turn the C19 core into a complete, testable subsystem without releasing payroll 
 
 - No payroll aggregate was released and no release was enabled. No D-15 decision, mapping, anchor, guardrail or probability was activated.
 - `ARCHITECTURE.md` is unchanged. D2 was not inspected, and no agents were started.
+
+## Tue 17 Nov 2026 — Sprint 4: current authorization contracts (C02, C20, C21) and C19 background sources
+
+### Task given to AI
+
+Master execution prompt, Sprint 4: production identity, current ReBAC and ABAC, completing C19's background sources, the sdcTable oracle and a privacy review. Payroll release stays off, and T6a takes priority on its release.
+
+### What AI produced
+
+- **`authz/identity.py` (C02).** A provider-neutral token validation contract that fails closed and is audited with the principal or reason only. A deterministic HS256 key source for tests.
+- **`authz/current.py`.**
+  - **ReBAC (C20):** PostgreSQL relationship tuples (migration `0010`), with groups expanded over unrevoked tuples only. The application role cannot grant.
+  - **ABAC (C21):** policy `abac/1`; protected pay is readable only as disclosure background with an explicit grant.
+  - **`authorize`:** current ReBAC AND ABAC, and never C32.
+- **C19 background.**
+  - Individually authorised values: unit rows, which are also allowed variables.
+  - Readable payroll postings: a row over that month's register cells, under assumption A-C19-01 (owner review).
+  - Public values: none approved.
+
+### Points for owner attention (not decided by AI)
+
+- **The identity provider** is not selected. The validator is not wired into the API, which keeps its fail-closed fixture.
+- **Party relations as ACL stand-in.** §25.1 allows deriving party relations (e-mail participants) as a stand-in for source ACLs, but the standing rule forbids inferring identity from an e-mail address. No tuples are derived automatically; the owner decides.
+- **sdcTable oracle:** BLOCKED_BY_ENVIRONMENT. There is no R runtime, and installing R and CRAN packages needs owner go-ahead. sdcTable also needs a mapping design, because it does cell suppression rather than exact row-space auditing.
+- **The pro-rata privacy review** is recorded privately and needs owner sign-off before any release.
+
+### Where AI was wrong, and what changed
+
+| # | AI error or weakness | Who caught it | Correction |
+|---|---|---|---|
+| E63 | The relationship store opened its own transaction context. Called from the C19 gate, it would have reset the gate's principal setting (the E62 pattern again) | AI, in review before running | It reuses the caller's transaction when one is open |
+| E64 | New identity tests read `audit.event` as the application role, which can only append (by design) | AI, from the test run | The tests read the audit as the administrator |
+
+### Verification actually run (17 Nov 2026)
+
+- `ruff check .`: passed. Public and private scans: CLEAN.
+- `pytest`: **395 passed**, including 8 real-data tests.
+- **Real Day 1 database:** `0010` applied with `veloxa migrate`; the history fingerprints are unchanged; health ok.
+
+### Confirmations
+
+- Payroll release stays off. No D-15 decision, mapping, anchor, guardrail or probability was activated.
+- D-14a and D-22 are unchanged. `ARCHITECTURE.md` is unchanged. No D2 material had been opened when this entry was written.
