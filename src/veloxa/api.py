@@ -202,6 +202,35 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
             return briefing.serve(conn, tenant_id, principal, basis, now)
 
+    @app.get("/v1/conflicts")
+    def get_conflicts(mode: str | None = None, as_of: str | None = None, as_known_at: str | None = None,
+                      authorization: str | None = Header(default=None)):
+        """The conflict register at a read basis: every source disagreement with provenance and time for each
+        side. Derived, never stored; an earlier basis reproduces the earlier register. No value is chosen."""
+        from .ask import conflicts
+
+        now = now_fn()
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now)
+            if isinstance(principal, JSONResponse):
+                return principal
+            try:
+                spec = timeparse.parse("", now, schedule.time_zone, mode, as_of, as_known_at)
+                basis = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), spec.mode, spec.as_of,
+                                      schedule.time_zone, now)
+            except ValueError as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
+            if basis.batch_seq == 0:
+                return {"register_version": conflicts.REGISTER_VERSION, "read_basis": pipeline._basis_json(basis),
+                        "conflicts": [], "unknowns": ["nothing had been admitted at this knowledge point"]}
+            try:
+                found = conflicts.register(conn, basis, schedule.time_zone)
+            except ValueError as e:      # a time axis the sources do not record: unanswerable, never an error
+                return {"register_version": conflicts.REGISTER_VERSION, "read_basis": pipeline._basis_json(basis),
+                        "conflicts": [], "unknowns": [str(e)]}
+        return {"register_version": conflicts.REGISTER_VERSION, "read_basis": pipeline._basis_json(basis),
+                "conflicts": found, "unknowns": []}
+
     @app.get("/v1/today")
     def get_today(authorization: str | None = Header(default=None)):
         """What the cockpit shows when it opens (voice note T6a): at most three evidence-backed attention items,

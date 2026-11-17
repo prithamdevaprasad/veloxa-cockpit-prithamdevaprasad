@@ -33,3 +33,7 @@ token = "Rs. 4 bn"
 [[allow]]
 file = "tests/test_ask_conflicts.py"
 token = "Rs. 3.7 Cr"
+
+[[allow]]
+file = "tests/test_conflict_register.py"
+token = "Rs. 3.7 Cr"
