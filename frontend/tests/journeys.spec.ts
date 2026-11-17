@@ -109,6 +109,9 @@ test("Scenarios never predict and say when the evidence names nothing", async ({
   await page.goto("/#/scenarios");
   await expect(page.getByRole("heading", { name: "Scenarios" })).toBeVisible();
   await expect(page.getByText("No named commitments")).toBeVisible();          // the synthetic D1 states none
+  const deps = page.getByRole("region", { name: "Dependencies" });
+  await expect(deps.getByRole("heading", { name: "Dependencies and early warnings" })).toBeVisible();
+  await expect(deps.getByText("No dependencies")).toBeVisible();                 // nothing invented
   await expect(page.locator("body")).not.toContainText("%");                     // no probability anywhere
 });
 

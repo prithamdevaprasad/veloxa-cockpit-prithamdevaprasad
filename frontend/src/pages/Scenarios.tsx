@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, ApiError } from "../api/client";
 import type { Scenario, ScenarioStatement as Statement } from "../api/types";
 import { useApi } from "../api/useApi";
-import { Button, EmptyState, ErrorState, Loading, PageHead, Section } from "../ui";
+import { Badge, Button, EmptyState, ErrorState, Loading, PageHead, Section } from "../ui";
 
 function List({ title, items, tone }: { title: string; items: Statement[] | string[]; tone: string }) {
   return (
@@ -68,6 +68,55 @@ export function ScenariosPage() {
           <List title="Unknown" items={result.unknowns} tone="bad" />
         </Section>
       )}
+      <Dependencies />
     </>
+  );
+}
+
+const WARNING_LABEL: Record<string, string> = {
+  no_stated_date: "No stated date", moved_without_replacement_date: "Moved, no new date",
+  single_source: "Single source", shared_evidence: "Shared evidence", conflicted_evidence: "Conflicted evidence",
+};
+
+/** What each commitment rests on, and the early warnings those facts give. Not ranked and not scored. */
+function Dependencies() {
+  const [g, reload] = useApi((s) => api.dependencies(s), []);
+  return (
+    <Section title="Dependencies and early warnings" aria-label="Dependencies"
+             subtitle={g.state === "ready" ? g.data.read_basis.banner : undefined}>
+      {g.state === "loading" && <Loading lines={2} />}
+      {g.state === "error" && <ErrorState error={g.error} onRetry={reload} />}
+      {g.state === "ready" && (() => {
+        const commitments = g.data.nodes.filter((n) => n.type === "commitment");
+        if (commitments.length === 0) {
+          return <EmptyState title="No dependencies">{g.data.notes[0] ?? "The admitted evidence names no commitment."}</EmptyState>;
+        }
+        const edges = g.data.edges.filter((e) => e.relation === "stated_in");
+        return (
+          <div className="stack">
+            <p className="small muted">Listed alphabetically. Warnings are facts about the evidence, not a priority
+              order; nothing here is scored or given a probability.</p>
+            <div className="table-wrap"><table>
+              <thead><tr><th>Commitment</th><th>Rests on</th><th>Warnings</th></tr></thead>
+              <tbody>{commitments.map((c) => {
+                const recs = [...new Set(edges.filter((e) => e.from === c.id).map((e) => e.to))];
+                const ws = g.data.warnings.filter((w) => `commitment:${w.commitment}` === c.id);
+                return (
+                  <tr key={c.id}>
+                    <td>{c.label}</td>
+                    <td className="small">{recs.length} record(s)</td>
+                    <td>{ws.length === 0 ? <span className="small muted">None</span> : ws.map((w) => (
+                      <div key={w.kind} className="small"><Badge value="open" label={WARNING_LABEL[w.kind] ?? w.kind} />{" "}
+                        {w.statement} <span className="muted">· {w.evidence.length} source(s)</span></div>
+                    ))}</td>
+                  </tr>
+                );
+              })}</tbody>
+            </table></div>
+            <ul className="bullets small muted">{g.data.unknowns.map((u) => <li key={u}>{u}</li>)}</ul>
+          </div>
+        );
+      })()}
+    </Section>
   );
 }

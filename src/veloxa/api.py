@@ -294,6 +294,22 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             names = scenarios.commitments(conn, basis, schedule.time_zone) if basis.batch_seq else []
         return {"read_basis": {"batch_seq": basis.batch_seq, "banner": basis.banner()}, "commitments": names}
 
+    @app.get("/v1/dependencies")
+    def dependencies(as_known_at: str | None = None, authorization: str | None = Header(default=None)):
+        """The evidence dependency graph and its early warnings at a knowledge point. Derived from visible evidence
+        only; never ranked, scored or given a probability."""
+        from .risk import graph
+
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            try:
+                basis = _scenario_basis(conn, as_known_at)
+            except ValueError as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
+            return graph.build(conn, basis, schedule.time_zone)
+
     @app.post("/v1/scenarios/commitment-shift")
     def scenario_shift(body: ShiftRequest, authorization: str | None = Header(default=None)):
         """Observed facts, derived implications, the assumption and the unknowns of moving one commitment.

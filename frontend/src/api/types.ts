@@ -235,3 +235,14 @@ export interface TimelineResult {
 export interface SessionSummary { session_id: string; config_version: number; batch_seq: number; opened_at: string; turns: number }
 export interface SessionList { agent_id: string; offset: number; limit: number; has_more: boolean; sessions: SessionSummary[] }
 export interface SessionDetail { session_id: string; agent_id: string; config_version: number; batch_seq: number; opened_at: string; turns: (AgentTurn & { message?: string })[] }
+
+export interface GraphNode { id: string; type: "commitment" | "record"; label?: string; kind?: string; system?: string;
+  data_class?: string; batch_seq?: number; source_path?: string }
+export interface GraphEdge { from: string; to: string; relation: "stated_in" | "conflict"; signal_type?: string;
+  status?: string; stated_date?: string | null; subject?: string }
+export interface GraphWarning { kind: string; commitment: string; statement: string; evidence: string[] }
+export interface DependencyGraph {
+  graph_version: string; nodes: GraphNode[]; edges: GraphEdge[]; warnings: GraphWarning[]; ranked: false;
+  probability: null; notes: string[]; unknowns: string[];
+  read_basis: { batch_seq: number; mode: string; as_of: string | null; banner: string };
+}

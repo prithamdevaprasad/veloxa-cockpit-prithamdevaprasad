@@ -1,7 +1,7 @@
 // Typed client for the Veloxa API. One place for authentication, cancellation and error handling.
 // The bearer token is the caller's: it is kept for this browser tab only (sessionStorage) and never logged.
 import type {
-  AgentRegistry, AgentSession, AgentTurn, Answer, ConflictRegister, Memories, Releases, RiskHistory, Scenario, ScenarioSubjects, SessionDetail, SessionList, TimelineResult, Today,
+  AgentRegistry, AgentSession, AgentTurn, Answer, ConflictRegister, DependencyGraph, Memories, Releases, RiskHistory, Scenario, ScenarioSubjects, SessionDetail, SessionList, TimelineResult, Today,
 } from "./types";
 
 const TOKEN_KEY = "veloxa.token";
@@ -81,6 +81,7 @@ export const api = {
   today: (s?: AbortSignal) => get<Today>("/v1/today", s),
   riskHistory: (s?: AbortSignal) => get<RiskHistory>("/v1/risks/history", s),
   scenarioSubjects: (s?: AbortSignal) => get<ScenarioSubjects>("/v1/scenarios/commitments", s),
+  dependencies: (s?: AbortSignal) => get<DependencyGraph>("/v1/dependencies", s),
   commitmentShift: (businessObject: string, shiftDays: number) =>
     request<Scenario>("POST", "/v1/scenarios/commitment-shift", { business_object: businessObject, shift_days: shiftDays }),
   ask: (question: string, asKnownAt?: string, s?: AbortSignal) =>
