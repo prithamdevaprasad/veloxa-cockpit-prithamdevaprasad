@@ -151,6 +151,9 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
         yield
 
     app = FastAPI(title="Veloxa CXO Cockpit", version="0.1.0", lifespan=lifespan)
+    from . import gateway
+
+    gateway.install(app)        # C01 controls; installed first so the observability middleware wraps them
 
     @app.middleware("http")
     async def observe(request: Request, call_next):

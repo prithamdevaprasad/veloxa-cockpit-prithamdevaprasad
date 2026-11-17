@@ -117,6 +117,7 @@ def main() -> int:
     for k in PRIVILEGED_ENV:                         # the API process never holds privileged credentials
         os.environ.pop(k, None)
     os.environ.update({"VELOXA_DEV_AUTH": "1", "VELOXA_DEV_TOKEN": DEMO_TOKEN, "VELOXA_DEV_PRINCIPAL": "T001"})
+    os.environ.setdefault("VELOXA_RATE_LIMIT_PER_MIN", "6000")   # one local demo token drives every browser test
     app = create_app(dsn=dsn(admin, name, "app"),
                      agent_runtime=lambda conn: AgentRuntime(conn, "Asia/Kolkata", kb=SyntheticTestKnowledgeBoundary()))
     try:
