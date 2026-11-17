@@ -155,6 +155,41 @@ def cmd_workflow_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_backup(args: argparse.Namespace) -> int:
+    """C31: a verified logical backup of the configured database (read-only on the source)."""
+    from pathlib import Path
+
+    from .ops import backup as ops
+
+    tools = ops.PgTools.from_env()
+    if tools is None:
+        print("PostgreSQL client tools (>= 18) not found: set VELOXA_PG_TOOLS (a bin directory or docker:<container>)")
+        return 2
+    m = ops.backup(tools, _admin_dsn(), config.db_settings().database, Path(args.out))
+    print(f"backup {m['file']}: {m['bytes']} bytes, sha256 {m['sha256'][:16]}..., audit chains valid "
+          f"{m['fingerprint']['audit_chains_valid']}")
+    return 0
+
+
+def cmd_restore_drill(args: argparse.Namespace) -> int:
+    """C31: restore a backup into a NEW disposable database, compare fingerprints, drop the copy."""
+    import json
+    from pathlib import Path
+
+    from .ops import backup as ops
+
+    tools = ops.PgTools.from_env()
+    if tools is None:
+        print("PostgreSQL client tools (>= 18) not found: set VELOXA_PG_TOOLS")
+        return 2
+    dump = Path(args.dump)
+    manifest = json.loads(dump.with_name(dump.name.replace(".dump", ".manifest.json")).read_text(encoding="utf-8"))
+    r = ops.restore_drill(tools, _admin_dsn(), dump, manifest)
+    print(f"restore drill: {'PASSED' if r['ok'] else 'FAILED'} in {r['seconds']:.1f}s"
+          + ("" if r["ok"] else f" ({'; '.join(r['differences'])})"))
+    return 0 if r["ok"] else 1
+
+
 def cmd_agents_seed(_: argparse.Namespace) -> int:
     """Publish the 14 proposed agent slots, unassigned and blocked (configuration role). Idempotent."""
     from .agents import registry
@@ -328,6 +363,12 @@ def main(argv: list[str] | None = None) -> int:
     p_ws = sub.add_parser("workflow-status", help="C26: show a workflow's status")
     p_ws.add_argument("workflow_id")
     p_ws.set_defaults(func=cmd_workflow_status)
+    p_bk = sub.add_parser("backup", help="C31: verified logical backup of the configured database (privileged)")
+    p_bk.add_argument("--out", required=True)
+    p_bk.set_defaults(func=cmd_backup)
+    p_rd = sub.add_parser("restore-drill", help="C31: restore a backup into a disposable database and compare")
+    p_rd.add_argument("--dump", required=True)
+    p_rd.set_defaults(func=cmd_restore_drill)
     sub.add_parser("agents-seed", help="publish the 14 proposed agent slots (unassigned, blocked)"
                    ).set_defaults(func=cmd_agents_seed)
     sub.add_parser("identity-sync", help="C12: register identities and candidates from sealed batches (counts only)"

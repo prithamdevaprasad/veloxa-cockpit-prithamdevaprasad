@@ -9,7 +9,8 @@
 3. Grants the demo interviewer (synthetic employee T001) current ReBAC read on the synthetic evidence sources.
 4. Serves the real API with the local development fixture. Agents use the explicit TEST knowledge-boundary adapter
    (it answers only for `syn-` agents); every other control is production code.
-5. Drops the database on exit unless --keep is given. Reset = restart.
+5. Drops the database on exit unless --keep is given, and drops demo databases left by runs that were killed
+   abruptly. Reset = restart.
 
 The demo token is printed; it is a local fixture value, not a secret.
 """
@@ -99,6 +100,7 @@ def main() -> int:
     if not admin:
         print("VELOXA_TEST_ADMIN_DSN is required (a PostgreSQL 18 administrator DSN for a disposable database)")
         return 2
+    drop_leftovers(admin)       # a previous run killed abruptly (e.g. by a test runner) could not drop its database
     try:
         name, _ = build(admin)
     except Exception:
