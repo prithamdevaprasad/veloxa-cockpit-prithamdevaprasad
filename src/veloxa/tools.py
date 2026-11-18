@@ -246,7 +246,7 @@ def text_search(conn: psycopg.Connection, basis: ReadBasis, principal: Principal
     p = predicate(basis, "d")
     sql = psql.SQL(
         'SELECT "d"."source_record_id", "d"."title", "d"."chunk_locator", "d"."unit",'
-        " ts_headline('english', \"d\".\"body\", q, 'StartSel=[,StopSel=],MaxWords=35,MinWords=12') AS excerpt,"
+        " ts_headline('english', \"d\".\"body\", q, 'StartSel=⟦,StopSel=⟧,MaxWords=35,MinWords=12') AS excerpt,"
         ' ts_rank_cd("d"."tsv", q, 32) AS rank'
         ' FROM projection.text_chunk "d", websearch_to_tsquery(\'english\', %(q)s) q'
         ' WHERE {} AND "d"."tsv" @@ q'

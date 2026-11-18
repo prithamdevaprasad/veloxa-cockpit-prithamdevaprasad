@@ -3,6 +3,9 @@
 :root { --bg: #f6f4ef; --accent: #3a4a8f; --accent-soft: #eceffa; --charcoal: #22232a; --charcoal-2: #2e3038;
         --s0: var(--accent); --s1: #b08a3e; }
 @media (prefers-color-scheme: dark) { :root { --bg: #141413; --accent: #9fb2f0; --accent-soft: #252c47; } }
+.drawer-backdrop { z-index: 40 !important; }
+.drawer { z-index: 41 !important; }
+mark.hl { background: var(--warn-soft); color: inherit; padding: 0 1px; border-radius: 2px; }
 .workspace { display: flex; flex-direction: column; min-width: 0; }
 .topbar { display: flex; align-items: center; gap: 16px; padding: 14px 36px; border-bottom: 1px solid var(--border);
   background: var(--surface); position: sticky; top: 0; z-index: 5; }

@@ -134,7 +134,7 @@ export function EvidenceList({ items, focus }: { items: Evidence[]; focus?: stri
             <span className="small muted">batch K={e.batch_seq}</span>
           </div>
           <div className="mono small" style={{ marginTop: 6, wordBreak: "break-all" }}>{e.record_id}</div>
-          {e.excerpt && <div className="excerpt small">{e.excerpt}</div>}
+          {e.excerpt && <div className="excerpt small">{e.excerpt.replace(/[⟦⟧]/g, "")}</div>}
         </li>
       ))}
     </ul>

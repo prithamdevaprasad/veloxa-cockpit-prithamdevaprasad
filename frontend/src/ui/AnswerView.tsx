@@ -36,7 +36,7 @@ export function AnswerView({ answer }: { answer: Answer }) {
         <ul className="plain" aria-label="Claims">
           {answer.claims.map((c, i) => (
             <li key={i} className="claim">
-              {c.text}
+              <Highlighted text={c.text} />
               {c.evidence.filter((id) => answer.evidence.some((e) => e.record_id === id)).map((id, j) => (
                 <button key={id} className="cite" onClick={() => evidence.open(id, c.text)}
                         aria-label={`Show source ${j + 1}`}>
@@ -86,4 +86,11 @@ export function AnswerView({ answer }: { answer: Answer }) {
       )}
     </article>
   );
+}
+
+/** Search highlights arrive as ⟦word⟧ (verbatim from the evidence excerpt); show them as marks. */
+export function Highlighted({ text }: { text: string }) {
+  const parts = text.split(/(⟦[^⟧]*⟧)/g);
+  return <>{parts.map((p, i) => p.startsWith("⟦")
+    ? <mark key={i} className="hl">{p.slice(1, -1)}</mark> : <span key={i}>{p}</span>)}</>;
 }

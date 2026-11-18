@@ -202,7 +202,7 @@ def main() -> int:
 
         from veloxa import intake
         from veloxa.agents.runtime import AgentRuntime
-        from veloxa.api import create_app
+        from veloxa.api import PRIVILEGED_ENV, create_app
         from veloxa.db import connect
 
         os.environ.update({"VELOXA_DEV_AUTH": "1", "VELOXA_DEV_TOKEN": DEMO_TOKEN, "VELOXA_DEV_PRINCIPAL": CEO,
@@ -210,10 +210,12 @@ def main() -> int:
         os.environ.setdefault("VELOXA_RATE_LIMIT_PER_MIN", "6000")
         os.environ.setdefault("VELOXA_RATE_LIMIT_EXPENSIVE_PER_MIN", "600")
 
+        ingest_dsn, projection_dsn = _dsn(admin, args.db, "ingest"), _dsn(admin, args.db, "projection")
+
         def worker():                                   # the data-room worker for uploads made in the demo UI
             while True:
                 try:
-                    with connect(_dsn(admin, args.db, "ingest")) as i, connect(_dsn(admin, args.db, "projection")) as p:
+                    with connect(ingest_dsn) as i, connect(projection_dsn) as p:
                         intake.work_once(i, p, store)
                 except Exception:  # noqa: BLE001, S110 - demo worker: keep polling
                     pass
@@ -222,7 +224,10 @@ def main() -> int:
         threading.Thread(target=worker, daemon=True).start()
         from agent_fixtures import SyntheticTestKnowledgeBoundary
 
-        app = create_app(dsn=_dsn(admin, args.db, "app"),
+        app_dsn = _dsn(admin, args.db, "app")
+        for k in PRIVILEGED_ENV:                        # the API process never holds privileged credentials
+            os.environ.pop(k, None)
+        app = create_app(dsn=app_dsn, store_factory=lambda: store,
                          agent_runtime=lambda conn: AgentRuntime(conn, "Asia/Kolkata",
                                                                  kb=SyntheticTestKnowledgeBoundary()))
         print(f"Demo Lab API on http://127.0.0.1:{args.port}; token {DEMO_TOKEN} (demo CEO)", flush=True)

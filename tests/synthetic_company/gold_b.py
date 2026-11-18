@@ -162,7 +162,7 @@ def run(lab: dict) -> dict:
             ans = pipeline.answer(c, tid, "Asia/Kolkata", p, case["question"], current_time(), **kw)
             text = " ".join([ans.get("answer", "")] + [cl["text"] for cl in ans["claims"]]
                             + [e.get("excerpt") or "" for e in ans["evidence"]]).lower()
-            text = text.replace("[", "").replace("]", "")        # search highlights wrap matched words in brackets
+            text = text.replace("⟦", "").replace("⟧", "")      # search highlights wrap matched words
             systems = {e["system"] for e in ans["evidence"]}
             ok_status = ans["status"] in case["status"]
             ok_system = case["system"] is None or case["system"] in systems
