@@ -42,7 +42,8 @@ ROLE_PW = {"migrator": "local-dev-migrator", "app": "local-dev-app", "ingest": "
 
 def _dsn(admin: str, db: str, role: str | None = None) -> str:
     p = urlsplit(admin)
-    netloc = p.netloc if role is None else f"veloxa_{role}:{ROLE_PW[role]}@{p.netloc.rsplit('@', 1)[-1]}"
+    pw = os.environ.get(f"VELOXA_{role.upper()}_PASSWORD", ROLE_PW[role]) if role else None
+    netloc = p.netloc if role is None else f"veloxa_{role}:{pw}@{p.netloc.rsplit('@', 1)[-1]}"
     return urlunsplit((p.scheme, netloc, f"/{db}", p.query, p.fragment))
 
 
