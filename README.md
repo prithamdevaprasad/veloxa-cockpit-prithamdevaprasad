@@ -128,6 +128,28 @@ Docker Compose also reads `.env` automatically.
 | Sign-in | A fixed synthetic fixture token, printed at start | The fixture you configure in `.env` |
 | API | `http://127.0.0.1:8765` | `http://127.0.0.1:8000` |
 
+### Sign-in (single sign-on)
+
+Browser sign-in is an OpenID Connect authorization code flow with PKCE, run by the API (the browser never holds an
+ID token). The returned ID token is verified against the **tenant's registered issuer** (`veloxa tenant add-issuer`:
+signature via JWKS, issuer, audience, expiry) plus `state` and `nonce`, and mapped to an invited member by
+`(issuer, subject)`. The tenant and role are never taken from the browser or from token claims.
+
+| Setting | Meaning |
+|---|---|
+| `VELOXA_OIDC=1` | Per-tenant ID-token verification (required for any provider) |
+| `VELOXA_PUBLIC_URL` | The cockpit's public origin; the redirect URI is `<origin>/v1/auth/callback/<provider>` |
+| `VELOXA_SSO_ENTRA_TENANT`, `VELOXA_SSO_ENTRA_CLIENT_ID`, optional `VELOXA_SSO_ENTRA_CLIENT_SECRET` | Microsoft Entra ID (issuer `https://login.microsoftonline.com/<tenant>/v2.0`; register it for the workspace with the client ID as audience) |
+| `VELOXA_SSO_GOOGLE_CLIENT_ID`, `VELOXA_SSO_GOOGLE_CLIENT_SECRET`, optional `VELOXA_SSO_GOOGLE_HD` | Google Workspace (optional; shown only when both are set) |
+| `VELOXA_SSO_REQUIRE_MFA=1` | Refuse sign-ins whose ID token does not report MFA (`amr`); enforce MFA in the identity provider |
+| `VELOXA_DEMO_LOGIN=1` | Local demo entry (with the development fixture only; never on a shared deployment) |
+
+New members sign in through their invitation link (`#/signin?invite=<token>`). Sessions are server-side: 8 hours
+absolute, 30 minutes idle, `HttpOnly; SameSite=Lax` cookies (`Secure` behind HTTPS); cookie-authenticated writes need
+the `X-Veloxa-Request` header. Sessions are held in the API process, so restarting it signs everyone out.
+**Not yet verified against a live Entra or Google tenant:** no client ID exists for this project, so the flow is tested
+end to end against a fake identity provider with synthetic keys (`tests/test_login.py`).
+
 ## 5. Database setup
 
 **Start PostgreSQL** (the Compose `db` service, published on `127.0.0.1:55432`):
@@ -146,7 +168,7 @@ docker compose up --detach --wait db
 | `docker compose up` (`init` then `api`) | `veloxa` in the Compose volume `pgdata` |
 | `veloxa <command>` | `VELOXA_DB_NAME` on `VELOXA_DB_HOST:VELOXA_DB_PORT` |
 
-> **Warning: this branch adds migrations 0013–0020** (0017 workspace, 0018 data room, 0019 text chunks, 0020 threads and agent updates). `docker compose up` and `veloxa migrate` apply them to the database they point at. If your Compose volume holds a database you want to keep at an earlier migration, **do not** run them against it. Use a separate Compose project with its own volume and ports instead. Example (tested):
+> **Warning: this branch adds migrations 0013–0021** (0017 workspace, 0018 data room, 0019 text chunks, 0020 threads and agent updates, 0021 company intelligence). `docker compose up` and `veloxa migrate` apply them to the database they point at. If your Compose volume holds a database you want to keep at an earlier migration, **do not** run them against it. Use a separate Compose project with its own volume and ports instead. Example (tested):
 > ```powershell
 > $env:VELOXA_DB_PUBLISH_PORT = "55433"; $env:VELOXA_API_PORT = "8001"
 > docker compose -p veloxa-trial up --build --detach --wait
@@ -269,7 +291,8 @@ python scripts\company_lab.py --inventory inventory.json        # hash, rule and
   - connector status: `/v1/admin/connectors`.
 - **D-15 file:** the D-15 v1 decision file is private (`VELOXA_D15_POLICY`). Record it in a lab database only.
 
-**Acceptance suite (one command, synthetic, CI-safe):** `python scripts\run_acceptance.py`. 34 cases; a non-zero
+**Acceptance suite (one command, synthetic, CI-safe):** `python scripts\run_acceptance.py`. 40 cases (13 on
+uncertainty, refusal or conflict); a non-zero
 exit code on any failure; JSON and Markdown reports.
 
 **Gemini wording experiment** (synthetic Lumora data only; the result was *do not adopt*):
@@ -281,12 +304,14 @@ on the backend; the supplied company's tenant is refused by name.
 Use the Demo Lab (section 6) for the fullest tour; the hackathon demo (`demo_env.py`, token `synthetic-demo-fixture-token-0123456789abcdef`) works the same way with less data.
 
 1. Open `http://127.0.0.1:5173`.
-2. **Sign in:**
-   - go to **Administration** (sidebar);
-   - paste the token printed by the API into *Bearer token*;
-   - choose *Use token*.
-
-   The token is a fixed synthetic fixture, valid only for the local demo database, and is kept only for this browser tab.
+2. **Sign in:** the sign-in screen opens first.
+   - **Demo Lab:** choose **Enter Demo Workspace**. It appears only when the API runs locally with the development
+     fixture and `VELOXA_DEMO_LOGIN=1` (the Demo Lab launcher sets it), only from this machine, and only for the
+     synthetic Demo Lab workspace. No token is shown; the session is an HttpOnly cookie.
+   - **Hackathon demo and company lab:** open **Developer access (local only)** and paste the fixture token printed
+     by the API. It is kept for this tab only.
+   - **Single sign-on** (Microsoft Entra ID; Google Workspace optional) appears only when configured: see
+     *Sign-in* in section 4. Sign out from the top bar or **Admin > Account**.
 3. **Overview:**
    - KPI cards and charts computed only from admitted rows you may read (each says what it was computed from);
    - **Recent Agent Updates**, labelled DEMO.

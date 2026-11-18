@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ApiError, getToken, setToken } from "../api/client";
+import { ApiError, getToken } from "../api/client";
 import { product } from "../api/product";
 import { useApi } from "../api/useApi";
 import { Guidance } from "../ui/kit";
@@ -7,30 +7,29 @@ import { Badge, Button, ErrorState, Loading, PageHead, Section } from "../ui";
 
 /** Sign-in (local fixture until the workspace's own identity provider is configured), who you are, and workspace
  * administration. Every write is checked by the database (active admin, no self-escalation). */
-export function AdminPage({ onAuthChange }: { onAuthChange: () => void }) {
-  const signedIn = Boolean(getToken());
+export function AdminPage({ onSignOut }: { onSignOut: () => void }) {
   return (
     <>
-      <PageHead title="Administration & Access" intro="Sign-in, your access, and workspace administration." />
-      <SignIn signedIn={signedIn} onChange={onAuthChange} />
-      {signedIn && <WhoAmI />}
-      {signedIn && <Workspace />}
-      {signedIn && <Connectors />}
+      <PageHead title="Administration & Access" intro="Your account and access, and workspace administration." />
+      <Account onSignOut={onSignOut} />
+      <WhoAmI />
+      <Workspace />
+      <Connectors />
     </>
   );
 }
 
-function SignIn({ signedIn, onChange }: { signedIn: boolean; onChange: () => void }) {
-  const [value, setValue] = useState("");
+function Account({ onSignOut }: { onSignOut: () => void }) {
+  const [s] = useApi((sig) => product.session(sig).catch(() => null), []);
+  const info = s.state === "ready" ? s.data : null;
+  const how = info?.method === "oidc" ? `single sign-on (${info.provider === "entra" ? "Microsoft Entra ID"
+    : info.provider === "google" ? "Google Workspace" : info.provider})`
+    : info?.method === "demo" ? "the local demo workspace" : getToken() ? "a developer token (this tab only)" : "—";
   return (
-    <Section title={signedIn ? "Signed in" : "Not signed in"} subtitle="Workspaces with their own identity provider sign
-      in with it. Locally and in the synthetic Demo Lab, paste the development fixture token (kept for this tab only).">
-      <form className="row" onSubmit={(e) => { e.preventDefault(); setToken(value.trim() || null); setValue(""); onChange(); }}>
-        <input className="input" type="password" autoComplete="off" value={value} style={{ flex: 1, minWidth: 220 }}
-               onChange={(e) => setValue(e.target.value)} aria-label="Bearer token" placeholder="Bearer token" />
-        <Button variant="primary" type="submit" disabled={!value.trim()}>Use token</Button>
-        {signedIn && <Button type="button" onClick={() => { setToken(null); onChange(); }}>Sign out</Button>}
-      </form>
+    <Section title="Signed in" aria-label="Account">
+      <p className="small">Signed in with {how}.{info && ` Session ends ${new Date(info.expires_at).toLocaleString()}`
+        + " or after 30 minutes without activity."}</p>
+      <p style={{ marginTop: 8 }}><Button onClick={onSignOut}>Sign out</Button></p>
     </Section>
   );
 }

@@ -45,6 +45,7 @@ class VerifiedSubject:
     issuer: str
     subject: str
     email: str | None
+    claims: dict | None = None            # the verified claims (nonce, amr) for the sign-in flow
 
 
 def _unverified_issuer(token: str) -> str | None:
@@ -91,7 +92,7 @@ class OidcAuthenticator:
         if not isinstance(sub, str) or not 1 <= len(sub) <= 255:
             return Rejected("no_subject")
         email = claims.get("email") if isinstance(claims.get("email"), str) else None
-        return VerifiedSubject(cfg["tenant_id"], iss, sub, email)
+        return VerifiedSubject(cfg["tenant_id"], iss, sub, email, claims)
 
     def authenticate(self, conn: psycopg.Connection, token: str | None, now: datetime) -> SignIn | Rejected:
         v = self.verify_subject(conn, token, now)

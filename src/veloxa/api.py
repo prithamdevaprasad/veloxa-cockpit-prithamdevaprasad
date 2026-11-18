@@ -174,6 +174,20 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
     gateway.install(app)        # C01 controls; installed first so the observability middleware wraps them
 
     @app.middleware("http")
+    async def session_cookie(request: Request, call_next):
+        """A browser session (HttpOnly cookie) becomes the request's credential. An explicit Authorization header
+        wins. Writes authenticated by the cookie must carry X-Veloxa-Request (CSRF: a cross-site form cannot)."""
+        from . import login
+
+        sid = request.cookies.get(login.SESSION_COOKIE)
+        if sid and not request.headers.get("authorization"):
+            if request.method not in ("GET", "HEAD", "OPTIONS") and not request.url.path.startswith("/v1/auth/") \
+                    and request.headers.get(login.CSRF_HEADER) != "1":
+                return JSONResponse(status_code=403, content={"error": "csrf_header_required"})
+            request.scope["headers"] = [*request.scope["headers"], (b"authorization", f"Session {sid}".encode())]
+        return await call_next(request)
+
+    @app.middleware("http")
     async def observe(request: Request, call_next):
         """C29: correlation ID, request metrics, one structured log line and error tracking per request. Only the
         route TEMPLATE is recorded (never paths with IDs, query strings, headers or bodies)."""
@@ -280,8 +294,22 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
         def _403(detail):
             return JSONResponse(status_code=403, content={"error": "not_authorised", "detail": detail})
 
-        presented = (authorization or "").partition(" ")[2].strip()
-        if oidc_auth is not None and presented.count(".") == 2:
+        scheme, _, presented = (authorization or "").partition(" ")
+        presented = presented.strip()
+        session_emp = None
+        if scheme.lower() == "session":
+            s = state["sessions"].get(presented)
+            if s is None:
+                return _401("your session has expired; sign in again")
+            if s.kind == "oidc":
+                p = _directory_principal(conn, uuid.UUID(s.tenant_id), s.principal)
+                if p is None:
+                    return _403("the workspace member is not active")
+                return _with_access(conn, p, uuid.UUID(s.tenant_id))
+            if s.kind != "demo" or auth_settings.mode != "development_fixture":
+                return _401("your session has expired; sign in again")
+            session_emp = s.principal
+        if session_emp is None and oidc_auth is not None and presented.count(".") == 2:
             signin = oidc_auth.authenticate(conn, presented, now)
             if isinstance(signin, Rejected):
                 return _401(f"sign-in rejected ({signin.reason})")
@@ -289,7 +317,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             if p is None:
                 return _403("the workspace member is not active")
             return _with_access(conn, p, signin.tenant_id)
-        emp_id = auth_settings.authenticate(authorization)
+        emp_id = session_emp or auth_settings.authenticate(authorization)
         if emp_id is None:
             return _401("an authenticated principal is required; no identity provider is configured, so "
                         "requester-facing endpoints are closed" if auth_settings.mode == "none" and oidc_auth is None
@@ -740,6 +768,11 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
     from . import api_workspace
 
     api_workspace.register(app, state=state, principal_of=_principal, now_fn=now_fn, oidc_auth=oidc_auth)
+    from . import api_auth, login
+
+    state.setdefault("sessions", login.Store())
+    api_auth.register(app, state=state, oidc_auth=oidc_auth, auth_settings=auth_settings,
+                      dev_tenant_id=dev_tenant_id, now_fn=now_fn)
     from . import api_intel
 
     api_intel.register(app, state=state, principal_of=_principal, now_fn=now_fn, tz_of=_tz)

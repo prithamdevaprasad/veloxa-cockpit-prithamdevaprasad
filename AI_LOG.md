@@ -1028,3 +1028,51 @@ The owner asked for the following, local-first, with no push, merge or deploymen
 - No later pack was admitted. No real identity was approved.
 - `ARCHITECTURE.md` is unchanged.
 - Every operational value (retention, budgets, limits, provider) is a proposal in the owner's register, not a policy.
+
+## 18–19 Nov 2026: company intelligence, explanations, reliability and sign-in (branch `feat/veloxa-sprints-7-10`)
+
+### Task given to AI
+
+- Per-source admission of D2 and D3 (K-13), claim-level knowledge and a Conflict Registry, the 14 agents mapped to HR
+  records by exact employee ID or e-mail only, D-15 v1 weighted ranking under the owner's delegation (hackathon scope),
+  findings, a mocked Jira connector, and a Gemini wording experiment restricted to synthetic data.
+- A light enterprise redesign of the cockpit; an application-wide reliability audit of HTTP 500s; plain-English
+  explanations of verified results (Ask, What-if, worries, conflicts, abstentions, the brief); and a real sign-in
+  (OIDC code flow with PKCE, server-side sessions, a local demo entry).
+
+### What AI produced
+
+- `knowledge.py`, `risk/ranking.py`, `findings.py`, `connectors.py`, `explain.py`, `schema.py`, `login.py`,
+  `api_auth.py`, migration 0021, and the tests `test_knowledge`, `test_ranking`, `test_k13_sources`, `test_explain`,
+  `test_schema_drift`, `test_login`, plus 8 acceptance cases (40 in total) and Playwright journeys (26 x 3 viewports).
+
+### Where AI was wrong, and what changed
+
+| # | AI error or weakness | Who caught it | Correction |
+|---|---|---|---|
+| E72 | A pipe to `tail` hid a failing test run, and a commit was pushed with one failing test | AI, on the next run | Every push is now conditioned on the real exit code and the scan gate |
+| E73 | A masking script meant to show `.env` key names printed a value | AI, immediately | The owner was told to rotate the key; scripts now print key names only |
+| E74 | The CSV parser read integers as text, so a contract check failed; duplicate record IDs came from rows without a locator | Tests | `integer_text` contract and row locators; the dry run now checks uniqueness |
+| E75 | Conflict detection grouped different quarters together and produced false conflicts | AI review of the registry | Period-aware grouping |
+| E76 | The Demo Lab database was one migration behind the code, so six pages and every Ask question failed with an anonymous HTTP 500, and the lab servers never logged the tracebacks | Owner, from screenshots | A schema capability check answers 503 naming the migration; Ask no longer fails on an optional lookup; lab servers log errors with request IDs |
+| E77 | An optional enrichment (which specialists to consult) ran inside the answer transaction and turned a valid answer into a 500 | Reliability audit | It is skipped, and recorded in diagnostics, when its tables are absent |
+| E78 | The first wording guard rejected faithful rewordings ("Apr" to "April", an ISO date written out) and missed dropped numbers | Live synthetic runs | Dates compared as calendar days; every number of an item must be kept |
+| E79 | An abstention's explanation reached the model with no facts: the governed client correctly redacted text of unknown class | Tracing the server path | Explanations citing no record are labelled `internal`; the redaction rule was not weakened |
+| E80 | Explain endpoints called the model twice per request | Latency investigation | One call per explanation |
+| E81 | A sign-in test appeared to pass a login-CSRF case because the test client sent two cookies | AI | The test clears the cookie jar first, as a browser would |
+| E82 | The sign-out link widened the phone top bar by 12 px | Playwright layout journey | On phones sign-out lives in Admin > Account |
+
+### Verification actually run
+
+- **pytest** (full suite), **acceptance** 40/40, **Playwright** 78/78, frontend build, ruff, public scan, private
+  safety scan and dependency audit. Final counts are in the commit message and the final report.
+- **Live:** every page's API calls against the running Demo Lab and company lab; the demo sign-in through the
+  preview with a cookie jar; Gemini wording on synthetic Demo Lab data only.
+
+### Confirmations
+
+- The real database stays at migration 0012; `veloxa_demolab` was not migrated (a new `veloxa_demolab_v2` was built).
+- D4 is not admitted before its release. No identity mapping was invented: unmatched Jira initials and rota names
+  stay unknown.
+- No company data, transcript or HR record was sent to Gemini; the supplied company is refused by name.
+- No OAuth client ID or secret was invented; single sign-on stays hidden until an administrator configures it.

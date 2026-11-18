@@ -3,15 +3,20 @@ import { expect, test, type Page } from "@playwright/test";
 const TOKEN = "synthetic-demo-fixture-token-0123456789abcdef";   // local demo fixture, not a secret
 
 async function signIn(page: Page) {
-  await page.goto("/#/access");
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Sign in to your workspace" })).toBeVisible();
+  await page.getByText("Developer access (local only)").click();
   await page.getByLabel("Bearer token").fill(TOKEN);
   await page.getByRole("button", { name: "Use token" }).click();
-  await expect(page.getByRole("heading", { name: "Signed in" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ask Veloxa (Ctrl+K)" })).toBeVisible();      // inside the workspace
 }
 
 test("requester-facing views fail closed without a principal", async ({ page }) => {
   await page.goto("/#/today");
-  await expect(page.getByRole("alert").first()).toContainText("Sign in required");
+  await expect(page.getByRole("heading", { name: "Sign in to your workspace" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Continue with/ })).toHaveCount(0);    // no SSO configured: no buttons
+  await expect(page.getByRole("button", { name: "Enter Demo Workspace" })).toHaveCount(0); // not a Demo Lab tenant
+  await expect(page.locator("body")).not.toContainText("synthetic-demo-fixture-token");
 });
 
 test("Journey A: Today, evidence packs and a follow-up question", async ({ page }) => {
@@ -375,4 +380,22 @@ test("Admin states the AI-wording model and workspace scope accurately", async (
   await expect(panel).toContainText("off for this workspace");                      // this test API has no model
   await expect(panel).toContainText("none configured");
   await expect(panel).toContainText("DENY_ALL");                                     // diagnostics live here only
+});
+
+test("sign out ends the session and returns to the sign-in screen", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/admin");
+  await expect(page.getByRole("region", { name: "Account" })).toContainText("a developer token");
+  await page.getByRole("region", { name: "Account" }).getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByRole("heading", { name: "Sign in to your workspace" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Sign in to your workspace" })).toBeVisible();
+});
+
+test("sign-in errors are explained", async ({ page }) => {
+  await page.goto("/#/signin?error=invalid_invitation");
+  await expect(page.getByRole("alert")).toContainText("invitation is invalid, expired or already used");
+  await page.goto("/#/signin?error=sso_not_configured");
+  await page.reload();
+  await expect(page.getByRole("alert")).toContainText("Single sign-on isn't configured");
 });

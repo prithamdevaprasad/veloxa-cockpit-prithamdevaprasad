@@ -207,6 +207,7 @@ def main() -> int:
 
         os.environ.update({"VELOXA_DEV_AUTH": "1", "VELOXA_DEV_TOKEN": DEMO_TOKEN, "VELOXA_DEV_PRINCIPAL": CEO,
                            "VELOXA_DEV_TENANT": "demo"})
+        os.environ.setdefault("VELOXA_DEMO_LOGIN", "1")   # "Enter Demo Workspace": loopback + synthetic tenant only
         os.environ.setdefault("VELOXA_RATE_LIMIT_PER_MIN", "6000")
         os.environ.setdefault("VELOXA_RATE_LIMIT_EXPENSIVE_PER_MIN", "600")
 

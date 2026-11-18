@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { getToken } from "./api/client";
+import { ApiError, setToken } from "./api/client";
 import { product } from "./api/product";
 import type { Me } from "./api/product-types";
 import { AdminPage } from "./pages/Admin";
@@ -10,13 +10,13 @@ import { EvidenceDataPage } from "./pages/EvidenceData";
 import { IntelligencePage } from "./pages/Intelligence";
 import { OverviewPage } from "./pages/Overview";
 import { ScenariosPage } from "./pages/Scenarios";
+import { SignInPage } from "./pages/SignIn";
 import { TimelinePage } from "./pages/Timeline";
 import { TodayPage } from "./pages/Today";
 import { WorryPage } from "./pages/Worry";
 import { AskProvider, useAsk } from "./ui/Ask";
 import { EvidenceProvider } from "./ui/EvidenceDrawer";
 import { Avatar, BrandMark, DemoBadge, Icon } from "./ui/kit";
-import { EmptyState } from "./ui";
 
 // Sidebar = groups (icon above a short label); the sub-navigation shows the pages of the active group.
 const GROUPS = [
@@ -32,7 +32,7 @@ const ADMIN = { id: "admin", label: "Admin", icon: "admin", pages: [["admin", "A
 // Earlier routes stay reachable (bookmarks and tests): today, conflicts, scenarios, access.
 const ALIASES: Record<string, string> = { scenarios: "whatif", access: "admin", today: "overview", conflicts: "intelligence" };
 const KNOWN = new Set<string>([...GROUPS.flatMap((g) => g.pages.map((p) => p[0])), "admin", "today", "conflicts",
-                               "scenarios", "access"]);
+                               "scenarios", "access", "signin"]);
 const groupOf = (route: string) => [...GROUPS, ADMIN].find((g) => g.pages.some((p) => p[0] === (ALIASES[route] ?? route)))
   ?? GROUPS[0];
 
@@ -41,7 +41,7 @@ function current(): string {
   return KNOWN.has(r) ? r : "overview";
 }
 
-function TopBar({ me, onMenu }: { me: Me | null; onMenu: () => void }) {
+function TopBar({ me, onMenu, onSignOut }: { me: Me | null; onMenu: () => void; onSignOut: () => void }) {
   const ask = useAsk();
   return (
     <header className="topbar">
@@ -57,6 +57,7 @@ function TopBar({ me, onMenu }: { me: Me | null; onMenu: () => void }) {
         <Avatar name={me.principal.display_name ?? me.principal.principal_id} size={30} />
         <span className="small">{me.principal.display_name ?? me.principal.principal_id.replace("person:", "")}</span>
       </span>}
+      {me && <button className="link small signout" onClick={onSignOut}>Sign out</button>}
     </header>
   );
 }
@@ -72,10 +73,21 @@ function Shell() {
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
+  const [auth, setAuth] = useState<"checking" | "in" | "out">("checking");
+  const [reason, setReason] = useState<string | undefined>();
   useEffect(() => {
-    if (!getToken()) { setMe(null); return; }
-    product.me().then(setMe, () => setMe(null));
+    product.me().then((m) => { setMe(m); setAuth("in"); }, (e) => {
+      setMe(null);
+      if (e instanceof ApiError && e.status === 401) {
+        setReason(/expired/.test(e.message) ? "session_expired" : undefined);
+        setAuth("out");
+      } else setAuth("in");            // other failures (403, offline) are shown by each page, not hidden
+    });
   }, [authTick]);
+  const signOut = useCallback(async () => {
+    try { await product.logout(); } catch { /* the session is cleared locally either way */ }
+    setToken(null); setReason(undefined); setAuthTick((t) => t + 1);
+  }, []);
   const go = useCallback((r: string) => { window.location.hash = `/${r}`; }, []);
   const shown = ALIASES[route] ?? route;
   const group = ask.full ? GROUPS[1] : groupOf(route);
@@ -85,6 +97,10 @@ function Shell() {
       <Icon name={g.icon} size={20} /> <span>{label}</span>
     </button>
   );
+  if (auth === "checking") return <div className="signin" aria-busy="true" />;
+  if (auth === "out") {
+    return <SignInPage reason={reason} onSignedIn={() => { window.location.hash = "/overview"; setAuthTick((t) => t + 1); }} />;
+  }
   return (
     <div className={`shell${navOpen ? " nav-open" : ""}`}>
       <nav className="nav" aria-label="Main">
@@ -92,11 +108,11 @@ function Shell() {
           <span className="brand-text"><span className="brand-name">Veloxa</span><small>Executive intelligence</small></span></div>
         {GROUPS.map((g) => navButton(g, g.label, g.label))}
         <div className="spacer" />
-        {navButton(ADMIN, getToken() ? "Admin" : "Sign in", getToken() ? "Administration & Access" : "Sign in")}
+        {navButton(ADMIN, "Admin", "Administration & Access")}
       </nav>
       {navOpen && <div className="nav-scrim" onClick={() => setNavOpen(false)} />}
       <div className="workspace">
-        <TopBar me={me} onMenu={() => setNavOpen(true)} />
+        <TopBar me={me} onMenu={() => setNavOpen(true)} onSignOut={signOut} />
         {group.pages.length > 1 && (
           <nav className="subnav" aria-label={`${group.label} pages`}>
             {group.pages.map(([r, label]) => (
@@ -105,8 +121,6 @@ function Shell() {
         <main className="main" key={authTick}>
           {route === "overview" && <OverviewPage go={go} />}
           {route === "today" && <TodayPage onAsk={(q) => ask.ask(q)} />}
-          {route === "ask" && !getToken() && (
-            <EmptyState title="Sign in to ask Veloxa">Open Administration &amp; Access and use your token.</EmptyState>)}
           {route === "conflicts" && <ConflictsPage />}
           {route === "worry" && <WorryPage />}
           {route === "agents" && <AgentsPage />}
@@ -115,7 +129,7 @@ function Shell() {
           {route === "intelligence" && <IntelligencePage />}
           {shown === "whatif" && <ScenariosPage />}
           {route === "timeline" && <TimelinePage synthetic={Boolean(me?.tenant.synthetic)} />}
-          {shown === "admin" && <AdminPage onAuthChange={() => setAuthTick((t) => t + 1)} />}
+          {shown === "admin" && <AdminPage onSignOut={signOut} />}
         </main>
       </div>
     </div>

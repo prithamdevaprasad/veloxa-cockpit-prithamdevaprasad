@@ -6,6 +6,9 @@ export const enc = (id: string) => encodeURIComponent(id);
 
 export const product = {
   me: (s?: AbortSignal) => get<P.Me>("/v1/me", s),
+  session: (s?: AbortSignal) => get<{ method: string; provider: string | null; expires_at: string }>(
+    "/v1/auth/session", s),
+  logout: () => request<{ signed_out: boolean }>("POST", "/v1/auth/logout"),
   overview: (s?: AbortSignal) => get<P.Overview>("/v1/overview", s),
   chartSources: (s?: AbortSignal) => get<{ sources: P.ChartSource[] }>("/v1/analytics/sources", s),
   series: (q: { system: string; x: string; agg?: "count" | "sum"; y?: string; split?: string }, s?: AbortSignal) =>
