@@ -311,6 +311,75 @@ A-023 is held for later release.
 | Would change my mind | A template that turns out to contain company data |
 | Status | **Approved by the owner (16 Nov 2026)** |
 
+## 4b. Released with D2 and D3 (owner decisions recorded 19 Nov 2026)
+
+### A-018 · Default small-group threshold k = 5 (policy default, not a fact)
+| | |
+|---|---|
+| Date | 16 Nov 2026 |
+| Assumption | The disclosure auditor's small-group threshold defaults to k = 5 until deferred decision D-14a (§26.1) is closed. **Note:** the survey export applies a stricter comment-suppression threshold of its own |
+| Source | §26.1 D-14a; [EV-113 · Pulse survey · D2], Comments column |
+| Pack | D2 |
+| Confidence (proposed) | Low. This is a value judgement for the owner |
+| Would change my mind | The owner's decision on D-14a |
+| Status | Owner decision (19 Nov 2026): keep k = 5 as a provisional policy default only. It is an owner judgement, not a discovered fact. D-14a remains open until formally decided. |
+
+### A-023 · Diwali 2026 date, used only to read one transcript phrase
+| | |
+|---|---|
+| Date | 16 Nov 2026 |
+| Assumption | Diwali 2026 falls in early November 2026 (Sun 8 Nov). This is used only to set out the candidate readings in C-16; it does not resolve C-16 |
+| Source | [EV-079 · T3 · D2]; external calendar sources (accessed 16 Nov 2026; one outlier source noted) |
+| Pack | D2 |
+| Confidence (proposed) | Medium–High |
+| Would change my mind | An authoritative calendar giving a different date |
+| Status | Owner decision (19 Nov 2026): retained as context only. Verified on 19 Nov 2026 against external calendar sources (Sun 8 Nov 2026; one outlier source again noted). It must not be used to resolve C-16, since the call date and training record are still missing. |
+
+## Held for D3
+
+### GR-06 · The email printout duplicates the .eml threads (was A-015)
+| | |
+|---|---|
+| Kind | Observed fact |
+| Date | 16 Nov 2026 |
+| Statement | The printable email PDF reproduces the same threads as the individual `.eml` files. Its copies are the same records, not independent corroboration. The earliest-admitted copy is canonical (§7.3) |
+| Source | [EV-109 · Email printouts · D3] p. 1 and threads 01–11, against [EV-101 · Email · D1] to [EV-059 · Email · D2]. On 16 Nov 2026 the sender, recipients, date to the minute and body of each thread were compared, using text extracted from the original files |
+| Pack | D3 |
+| Would change my mind | A thread whose printout and `.eml` versions differ in content |
+| Status | Owner decision (19 Nov 2026): approved as an observed fact. Verified on 19 Nov 2026: every .eml body in the D1-D3 packs appears in the printout with the same sender, recipients and date. The PDF copies must not count as independent corroboration of the .eml records. |
+
+### GR-07 · Further sources referred to in D3 but not supplied (from A-013, D3 part)
+| | |
+|---|---|
+| Kind | Observed fact |
+| Date | 16 Nov 2026 |
+| Statement | Some D3 transcripts refer to a campaign sheet, a delivery burndown and incident postmortems. None of these is supplied, and GR-04 applies to them |
+| Source | [EV-086 · T4 · D3]; [EV-091 · T5 · D3]; [EV-093 · T5 · D3] |
+| Pack | D3 |
+| Status | Owner decision (19 Nov 2026): approved. The campaign sheet, delivery burndown and incident postmortems are referred to but absent from the supplied snapshot. Their contents are not inferred. |
+
+### A-007 · The contractor invoice date is day/month
+| | |
+|---|---|
+| Date | 16 Nov 2026 |
+| Assumption | The numeric date on the contractor invoice is day/month order. That gives a date just after the service month the invoice bills, not a date early in the year |
+| Source | The invoice PDF in `data_room/documents/`: the invoice-date field, the service-period line, and the Indian GST format |
+| Pack | D3 |
+| Confidence (proposed) | High |
+| Would change my mind | Another document from the same vendor using month/day order |
+| Status | Owner decision (19 Nov 2026): retain the day/month reading with high confidence. The invoice date, its service period and the Indian GST context support it. It is an interpretation, not an independently verified date-format declaration. |
+
+### A-019 · The delivery bound assumes the issue tracker reflects completed work
+| | |
+|---|---|
+| Date | 16 Nov 2026 |
+| Assumption | The delivery bound (§16.4) assumes that resolved story points track completed scope and that scope is fixed at the 31 Oct export. **Evidence against:** no story points were resolved in the last month of the export, while commits continued throughout that month |
+| Source | [EV-110 · Jira · D3], Issues sheet (Status, Resolved, Story Points columns); [EV-111 · Git log · D3] (`committed_at` column) |
+| Pack | D3 |
+| Confidence (proposed) | Low–Medium |
+| Would change my mind | The delivery burndown (GR-07) or the issue tracker's change history |
+| Status | Owner decision (19 Nov 2026): keep as a low-to-medium-confidence limitation. The delivery bound depends on Jira's resolved story points representing completed work and a fixed scope. Continued commits alongside no resolved points in the final month weaken that assumption. It is not a delivery forecast. |
+
 ## 5. Assumptions considered and deliberately not made
 
 These are open conflict questions for the owner and are **not** assumed:
@@ -542,8 +611,8 @@ Common fields for every entry below:
 
 | Release pack | Entries |
 |---|---|
-| D2 (Tue 17 Nov) | A-018, A-023 |
-| D3 (Wed 18 Nov) | GR-06, GR-07; A-007, A-019 |
+| D2 (Tue 17 Nov) | Published 19 Nov 2026 (A-018, A-023; section 4b) |
+| D3 (Wed 18 Nov) | Published 19 Nov 2026 (GR-06, GR-07; A-007, A-019; section 4b) |
 | D4 (Thu 19 Nov) | A-020 |
 
 ## Revision log
@@ -555,3 +624,4 @@ Common fields for every entry below:
 | 16 Nov 2026 | A-025 r2 | Revised after owner review: extraction time is the actual read time of each file, distinct from release, admission and sealing times. Still a draft | AI (Claude Code), for owner review |
 | 16 Nov 2026 | A-024, A-025 r2, A-026 | Approved by the owner: A-024 with strict fail-closed handling; A-025 in its corrected r2 form (actual extraction timestamps); A-026 as written | Owner decision, recorded by AI (Claude Code) |
 | 19 Nov 2026 | A-101 to A-114 | Persona inventions for the 14 agent slots logged from the deterministic generator (9 categories each, 126 details); never evidence | AI (Claude Code), for owner review |
+| 19 Nov 2026 | A-018, A-023, GR-06, GR-07, A-007, A-019 | Published after release with the owner's decisions; evidence cited by new opaque references | Owner decisions; publication by AI (Claude Code) |
