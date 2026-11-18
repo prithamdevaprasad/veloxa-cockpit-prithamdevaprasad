@@ -32,7 +32,7 @@ export function setToken(token: string | null): void {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+export async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -60,7 +60,7 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
 }
 
 /** GET requests are safe to retry once on a network failure; writes are never retried automatically. */
-async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+export async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   try {
     return await request<T>("GET", path, undefined, signal);
   } catch (e) {
@@ -71,7 +71,7 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   }
 }
 
-function qs(params: Record<string, string | undefined>): string {
+export function qs(params: Record<string, string | undefined>): string {
   const p = Object.entries(params).filter(([, v]) => v);
   return p.length ? "?" + p.map(([k, v]) => `${k}=${encodeURIComponent(v as string)}`).join("&") : "";
 }

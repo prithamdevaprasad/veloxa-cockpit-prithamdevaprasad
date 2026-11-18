@@ -80,7 +80,44 @@ def build(admin_dsn: str) -> tuple[str, uuid.UUID]:
             a.execute("INSERT INTO policy.relationship_tuple (tenant_id, tuple_id, resource_type, resource_id,"
                       " relation, subject_type, subject_id, source) VALUES (%s,%s,'evidence_source',%s,'read',"
                       "'person','T001','synthetic demo')", (tenant, uuid.uuid4(), system))
+    workspace(admin_dsn, name, tenant)
     return name, tenant
+
+
+def workspace(admin_dsn: str, name: str, tenant) -> None:
+    """SYNTHETIC data-room and agent-update fixtures for the browser journeys (0017-0020), all through the guarded
+    functions: an active directory member T001 (contributor and reviewer of Operations), a separate synthetic data
+    owner who approves one source type, and one agent update published from a REAL synthetic interview."""
+    from agent_fixtures import SyntheticTestKnowledgeBoundary
+
+    from veloxa import intake as dr
+    from veloxa import ledger, product, tenancy
+    from veloxa.agents.runtime import AgentRequest, AgentRuntime
+    from veloxa.db import connect
+    from veloxa.releases import current_time
+    from veloxa.temporal import Mode, resolve_basis
+    from veloxa.tools import Principal
+
+    with connect(dsn(admin_dsn, name)) as a, connect(dsn(admin_dsn, name, "app")) as app:
+        tenancy.bootstrap_synthetic_admin(a, tenant, "person:demo-admin", "Demo Admin")
+        tenancy.add_synthetic_member(a, tenant, "person:T001", "Person Alpha")
+        tenancy.add_synthetic_member(a, tenant, "person:demo-owner", "Demo Data Owner")
+        tenancy.create_department(app, tenant, "person:demo-admin", "operations", "Operations")
+        for rel in ("contributor", "reviewer"):
+            tenancy.grant(app, tenant, "person:demo-admin", "department", "operations", rel, "person:T001", "demo")
+        tenancy.grant(app, tenant, "person:demo-admin", "tenant", str(tenant), "admission_authoriser",
+                      "person:demo-owner", "demo data owner")
+        dr.authorise_source_type(app, tenant, "person:demo-owner", source_type="ops_note", title="Operations notes",
+                                 department_id="operations", kind="document", system="ops_notes",
+                                 data_class="internal", records="document", file_glob="*.txt", contract=None,
+                                 key_columns=[], decision_record="DEMO-OPS-NOTE (synthetic)")
+        rt = AgentRuntime(app, "Asia/Kolkata", kb=SyntheticTestKnowledgeBoundary())
+        basis = resolve_basis(tenant, ledger.sealed_releases(app, tenant), Mode.CURRENT, None, "Asia/Kolkata",
+                              current_time())
+        alpha = Principal("person:T001", "executive", "alpha" + "@" + "example.test")
+        sid = rt.open_session(tenant, alpha, "syn-demo-ppl", basis)["session_id"]
+        rt.execute(AgentRequest(tenant, alpha, sid, "What is our headcount?", "demo-env-update-001"))
+        product.publish_update(app, tenant, "person:T001", sid, "Synthetic org")
 
 
 def drop_leftovers(admin: str) -> list[str]:
@@ -132,7 +169,26 @@ def main() -> int:
     os.environ.update({"VELOXA_DEV_AUTH": "1", "VELOXA_DEV_TOKEN": DEMO_TOKEN, "VELOXA_DEV_PRINCIPAL": "T001"})
     os.environ.setdefault("VELOXA_RATE_LIMIT_PER_MIN", "6000")   # one local demo token drives every browser test
     os.environ.setdefault("VELOXA_RATE_LIMIT_EXPENSIVE_PER_MIN", "600")
-    app = create_app(dsn=dsn(admin, name, "app"),
+    import threading
+    import time
+
+    from veloxa import intake
+    from veloxa.db import connect
+    from veloxa.storage import LocalContentStore
+
+    store = LocalContentStore(Path(mkdtemp(prefix="veloxa-demo-originals-")))
+
+    def worker():                                       # the data-room system worker (ingest and projection roles)
+        while True:
+            try:
+                with connect(dsn(admin, name, "ingest")) as i, connect(dsn(admin, name, "projection")) as p:
+                    intake.work_once(i, p, store)
+            except Exception:  # noqa: BLE001, S110 - demo worker: keep polling
+                pass
+            time.sleep(1)
+
+    threading.Thread(target=worker, daemon=True).start()
+    app = create_app(dsn=dsn(admin, name, "app"), store_factory=lambda: store,
                      agent_runtime=lambda conn: AgentRuntime(conn, "Asia/Kolkata", kb=SyntheticTestKnowledgeBoundary()))
     try:
         uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")

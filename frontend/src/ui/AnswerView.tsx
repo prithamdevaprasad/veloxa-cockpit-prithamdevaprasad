@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Answer } from "../api/types";
-import { Badge, Drawer, EvidenceList } from "./index";
+import { useEvidence } from "./EvidenceDrawer";
+import { Badge, Button, Drawer, EvidenceList } from "./index";
 
 const STATUS_TEXT: Record<string, string> = {
   answered: "Answered", qualified: "Qualified answer", conflict: "The sources disagree",
@@ -13,6 +14,7 @@ export function AnswerView({ answer }: { answer: Answer }) {
   const [focus, setFocus] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const show = (id: string | null) => { setFocus(id); setOpen(true); };
+  const evidence = useEvidence();
   return (
     <article className="stack" aria-label="Answer">
       <div className="row">
@@ -36,7 +38,8 @@ export function AnswerView({ answer }: { answer: Answer }) {
             <li key={i} className="claim">
               {c.text}
               {c.evidence.filter((id) => answer.evidence.some((e) => e.record_id === id)).map((id, j) => (
-                <button key={id} className="cite" onClick={() => show(id)} aria-label={`Show source ${j + 1}`}>
+                <button key={id} className="cite" onClick={() => evidence.open(id, c.text)}
+                        aria-label={`Show source ${j + 1}`}>
                   {j + 1}
                 </button>
               ))}
@@ -72,6 +75,13 @@ export function AnswerView({ answer }: { answer: Answer }) {
       {open && (
         <Drawer title="Evidence" onClose={() => setOpen(false)}>
           <EvidenceList items={answer.evidence} focus={focus} />
+          <div className="stack" style={{ marginTop: 10 }}>
+            {answer.evidence.map((e) => (
+              <Button key={e.record_id} onClick={() => evidence.open(e.record_id)}>
+                View source: {(e.source_path ?? e.record_id).split("/").pop()}
+              </Button>
+            ))}
+          </div>
         </Drawer>
       )}
     </article>

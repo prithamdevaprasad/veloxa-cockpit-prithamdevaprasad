@@ -36,7 +36,7 @@ export function ScenariosPage() {
 
   return (
     <>
-      <PageHead title="Scenarios" intro="What follows if a commitment moves. Facts, arithmetic, your assumption and the
+      <PageHead title="What-if Analysis" intro="What follows if a commitment moves. Facts, arithmetic, your assumption and the
         unknowns are kept apart. Veloxa does not predict and shows no probability." />
       <Section title="Move a commitment" subtitle={list.state === "ready" ? list.data.read_basis.banner : undefined}>
         {list.state === "loading" && <Loading lines={2} />}
@@ -68,7 +68,7 @@ export function ScenariosPage() {
           <List title="Unknown" items={result.unknowns} tone="bad" />
         </Section>
       )}
-      <Dependencies />
+
     </>
   );
 }
@@ -79,7 +79,7 @@ const WARNING_LABEL: Record<string, string> = {
 };
 
 /** What each commitment rests on, and the early warnings those facts give. Not ranked and not scored. */
-function Dependencies() {
+export function Dependencies() {
   const [g, reload] = useApi((s) => api.dependencies(s), []);
   return (
     <Section title="Dependencies and early warnings" aria-label="Dependencies"

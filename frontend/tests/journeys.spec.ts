@@ -91,7 +91,8 @@ test("Department views show governed figures only", async ({ page }) => {
 
 test("the layout has no horizontal page scroll", async ({ page }) => {
   await signIn(page);
-  for (const r of ["today", "ask", "conflicts", "agents", "departments", "scenarios", "timeline"]) {
+  for (const r of ["overview", "today", "ask", "conflicts", "agents", "departments", "evidence", "intelligence",
+                   "whatif", "timeline", "admin"]) {
     await page.goto(`/#/${r}`);
     await page.waitForLoadState("networkidle");
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -106,9 +107,11 @@ test("the layout has no horizontal page scroll", async ({ page }) => {
 
 test("Scenarios never predict and say when the evidence names nothing", async ({ page }) => {
   await signIn(page);
-  await page.goto("/#/scenarios");
-  await expect(page.getByRole("heading", { name: "Scenarios" })).toBeVisible();
+  await page.goto("/#/scenarios");                                               // the old route still works
+  await expect(page.getByRole("heading", { name: "What-if Analysis" })).toBeVisible();
   await expect(page.getByText("No named commitments")).toBeVisible();          // the synthetic D1 states none
+  await page.goto("/#/intelligence");
+  await page.getByRole("tab", { name: "Dependencies & warnings" }).click();
   const deps = page.getByRole("region", { name: "Dependencies" });
   await expect(deps.getByRole("heading", { name: "Dependencies and early warnings" })).toBeVisible();
   await expect(deps.getByText("No dependencies")).toBeVisible();                 // nothing invented
@@ -120,8 +123,10 @@ test("Timeline shows record events with their sources", async ({ page }) => {
   await page.goto("/#/timeline");
   const events = page.getByRole("list", { name: "Timeline events" });
   await expect(events).toContainText("joined");
-  await events.getByRole("button", { name: "Show sources" }).first().click();
-  await expect(page.getByRole("dialog", { name: "Sources" })).toContainText("keka_hrms:");
+  await events.getByRole("button", { name: "Show source 1" }).first().click();
+  const drawer = page.getByRole("dialog", { name: "Employee_Master.xlsx" });
+  await expect(drawer).toContainText("keka hrms");
+  await expect(drawer).toContainText("held by the operator");                   // no dead link for operator packs
 });
 
 test("Agent session history survives a page reload", async ({ page }) => {
@@ -140,4 +145,84 @@ test("Agent session history survives a page reload", async ({ page }) => {
   await page.getByRole("list", { name: "Your sessions" }).getByRole("button", { name: "Open" }).first().click();
   await expect(page.locator(".bubble.me").first()).toHaveText("What is our headcount?");
   await expect(page.getByText("People in the HR export: 2").first()).toBeVisible();
+});
+
+
+test("Overview shows governed figures, recent agent updates from a real session, and asks about one", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/overview");
+  await expect(page.getByRole("heading", { name: /Welcome/ })).toBeVisible();
+  await expect(page.getByText("Headcount", { exact: true })).toBeVisible();
+  await expect(page.getByText("governed metric (HR export)")).toBeVisible();
+  const updates = page.getByRole("region", { name: "Recent Agent Updates" });
+  await expect(updates).toContainText("demo-ppl");
+  await expect(updates.getByText("DEMO").first()).toBeVisible();                // synthetic sessions are labelled
+  await updates.getByRole("button", { name: /demo-ppl/ }).first().click();
+  await page.getByRole("button", { name: "Ask about this" }).click();
+  const ask = page.getByRole("dialog", { name: "Ask Veloxa" });
+  await expect(ask).toContainText("About an agent update");
+  await ask.getByLabel("Question").fill("Why did it change?");
+  await ask.getByRole("button", { name: "Send" }).click();
+  await expect(ask.getByText(/regarding Synthetic org|Why did it change/).first()).toBeVisible();
+});
+
+test("the global Ask pill saves and reopens conversations, and citations open the evidence drawer", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/timeline");
+  await page.keyboard.press("Control+k");
+  const ask = page.getByRole("dialog", { name: "Ask Veloxa" });
+  await ask.getByLabel("Question").fill("What is our headcount?");
+  await ask.getByRole("button", { name: "Send" }).click();
+  await expect(ask.getByRole("list", { name: "Claims" }).first()).toContainText("People in the HR export: 2",
+                                                                              { timeout: 15_000 });
+  await ask.getByRole("button", { name: "Show source 1" }).first().click();
+  await expect(page.getByRole("dialog", { name: "Employee_Master.xlsx" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.reload();
+  await page.getByRole("button", { name: "Ask Veloxa (Ctrl+K)" }).click();
+  const panel = page.getByRole("dialog", { name: "Ask Veloxa" });
+  const saved = panel.getByRole("button", { name: "Saved" });
+  if (await saved.isVisible()) await saved.click();                             // narrow screens: open the list
+  await panel.getByRole("button", { name: /What is our headcount\? \d+ answer/ }).first().click();
+  await expect(panel.getByRole("list", { name: "Claims" }).first()).toContainText("People in the HR export: 2",
+                                                                                { timeout: 15_000 });
+});
+
+test("Intelligence keeps conflicts, changes, dependencies and department questions apart", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/intelligence");
+  await expect(page.getByRole("heading", { name: "Intelligence" })).toBeVisible();
+  await page.getByRole("tab", { name: "Open questions" }).click();
+  await page.getByLabel("Department", { exact: true }).selectOption("operations");
+  await page.getByLabel("Clarification question").fill("Can Operations clarify the delivery date?");
+  await page.getByRole("button", { name: "Submit request" }).click();
+  await expect(page.getByText(/does not contact anyone/)).toBeVisible();
+  await expect(page.getByText("Can Operations clarify the delivery date?").first()).toBeVisible();
+});
+
+test("a contribution is uploaded, validated and waits for an independent reviewer", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/evidence");
+  await expect(page.getByText("Uploading is not admission", { exact: false })).toBeVisible();
+  await page.getByLabel("Source type").selectOption("ops_note");
+  await page.getByLabel("Files").setInputFiles({ name: "Ops_note.txt", mimeType: "text/plain",
+    buffer: Buffer.from("Synthetic operations note\nThe Orchid delivery moved to next week.") });
+  await page.getByRole("button", { name: "Submit for review" }).click();
+  await expect(page.getByText(/nothing is searchable/)).toBeVisible();
+  await expect.poll(async () => {
+    await page.reload();
+    return await page.getByRole("row", { name: /Ops_note|Ops note/ }).first().textContent();
+  }, { timeout: 20_000 }).toContain("Awaiting review");
+  await page.getByRole("row", { name: /Ops_note|Ops note/ }).first().click();
+  await expect(page.getByRole("region", { name: "Validation report" })).toContainText("1 record");
+  await page.getByRole("button", { name: "Accept for authorisation" }).click();
+  await expect(page.getByText("cannot review their own submission")).toBeVisible();   // separation of duties
+});
+
+test("Administration shows the signed-in access and refuses non-admin workspace administration", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/admin");
+  await expect(page.getByRole("heading", { name: "Your access" })).toBeVisible();
+  await expect(page.getByText("tenant-wide (pre-workspace tenant)")).toBeVisible();
+  await expect(page.getByText("Administrators only")).toBeVisible();
 });

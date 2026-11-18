@@ -1,76 +1,115 @@
 import { useCallback, useEffect, useState } from "react";
-import { getToken, setToken } from "./api/client";
+import { getToken } from "./api/client";
+import { product } from "./api/product";
+import type { Me } from "./api/product-types";
+import { AdminPage } from "./pages/Admin";
 import { AgentsPage } from "./pages/Agents";
 import { AskPage } from "./pages/Ask";
 import { ConflictsPage } from "./pages/Conflicts";
 import { DepartmentsPage } from "./pages/Departments";
+import { EvidenceDataPage } from "./pages/EvidenceData";
+import { IntelligencePage } from "./pages/Intelligence";
+import { OverviewPage } from "./pages/Overview";
 import { ScenariosPage } from "./pages/Scenarios";
 import { TimelinePage } from "./pages/Timeline";
 import { TodayPage } from "./pages/Today";
-import { Button, PageHead, Section } from "./ui";
+import { AskProvider, useAsk } from "./ui/AskPill";
+import { EvidenceProvider } from "./ui/EvidenceDrawer";
+import { Avatar, DemoBadge, Icon } from "./ui/kit";
 
-const ROUTES = { today: "Today", ask: "Ask", conflicts: "Conflicts", agents: "Agents", departments: "Departments",
-                 scenarios: "Scenarios", timeline: "Timeline", access: "Access" } as const;
-type Route = keyof typeof ROUTES;
+const NAV = [
+  { route: "overview", label: "Overview", icon: "overview" },
+  { route: "agents", label: "Agents", icon: "agents" },
+  { route: "departments", label: "Departments", icon: "departments" },
+  { route: "evidence", label: "Evidence & Data", icon: "evidence" },
+  { route: "intelligence", label: "Intelligence", icon: "intelligence" },
+  { route: "whatif", label: "What-if Analysis", icon: "whatif" },
+  { route: "timeline", label: "Timeline", icon: "timeline" },
+] as const;
+// Earlier routes stay reachable (bookmarks and tests): today, ask, conflicts, scenarios, access.
+const ALIASES: Record<string, string> = { scenarios: "whatif", access: "admin" };
+const KNOWN = new Set<string>([...NAV.map((n) => n.route), "admin", "today", "ask", "conflicts", "scenarios", "access"]);
 
-function current(): Route {
-  const r = window.location.hash.replace(/^#\/?/, "") as Route;
-  return r in ROUTES ? r : "today";
+function current(): string {
+  const r = window.location.hash.replace(/^#\/?/, "");
+  return KNOWN.has(r) ? r : "overview";
 }
 
-function AccessPage({ onChange }: { onChange: () => void }) {
-  const [value, setValue] = useState("");
-  const signedIn = Boolean(getToken());
+function TopBar({ me, onSearch }: { me: Me | null; onSearch: () => void }) {
   return (
-    <>
-      <PageHead title="Access" intro="Veloxa needs an authenticated principal. No identity provider is integrated yet,
-        so locally you paste the bearer token of the development fixture. It is kept for this tab only." />
-      <Section title={signedIn ? "Signed in" : "Not signed in"}>
-        <form className="row" onSubmit={(e) => { e.preventDefault(); setToken(value.trim() || null); setValue(""); onChange(); }}>
-          <input className="input" type="password" autoComplete="off" value={value} style={{ flex: 1, minWidth: 220 }}
-                 onChange={(e) => setValue(e.target.value)} aria-label="Bearer token" placeholder="Bearer token" />
-          <Button variant="primary" type="submit" disabled={!value.trim()}>Use token</Button>
-          {signedIn && <Button type="button" onClick={() => { setToken(null); onChange(); }}>Sign out</Button>}
-        </form>
-      </Section>
-    </>
+    <header className="topbar">
+      <div className="small muted">{me ? <>{me.tenant.display_name} <DemoBadge show={me.tenant.synthetic} /></> : "Veloxa"}</div>
+      <button className="search" onClick={onSearch} aria-label="Search and ask (Ctrl+K)">
+        <Icon name="search" size={16} /> <span>Search or ask…</span> <kbd>Ctrl K</kbd>
+      </button>
+      {me && <span className="profile" title={me.principal.principal_id}>
+        <Avatar name={me.principal.display_name ?? me.principal.principal_id} />
+        <span className="small">{me.principal.display_name ?? me.principal.principal_id.replace("person:", "")}</span>
+      </span>}
+    </header>
   );
 }
 
-export function App() {
-  const [route, setRoute] = useState<Route>(current());
+function Shell() {
+  const [route, setRoute] = useState<string>(current());
   const [askSeed, setAskSeed] = useState<string | undefined>();
   const [authTick, setAuthTick] = useState(0);
+  const [me, setMe] = useState<Me | null>(null);
+  const ask = useAsk();
   useEffect(() => {
     const on = () => setRoute(current());
     window.addEventListener("hashchange", on);
     return () => window.removeEventListener("hashchange", on);
   }, []);
-  const go = (r: Route) => { window.location.hash = `/${r}`; };
+  useEffect(() => {
+    if (!getToken()) { setMe(null); return; }
+    product.me().then(setMe, () => setMe(null));
+  }, [authTick]);
+  const go = useCallback((r: string) => { window.location.hash = `/${r}`; }, []);
   const consumed = useCallback(() => setAskSeed(undefined), []);
-
+  const shown = ALIASES[route] ?? route;
+  const active = (r: string) => shown === r || (r === "overview" && route === "today")
+                                || (r === "intelligence" && route === "conflicts");
   return (
     <div className="shell">
       <nav className="nav" aria-label="Main">
-        <div className="brand">Veloxa<small>CXO Cockpit</small></div>
-        {(Object.keys(ROUTES) as Route[]).filter((r) => r !== "access").map((r) => (
-          <button key={r} aria-current={route === r ? "page" : undefined} onClick={() => go(r)}>{ROUTES[r]}</button>
+        <div className="brand">Veloxa<small>CEO intelligence</small></div>
+        {NAV.map((n) => (
+          <button key={n.route} aria-current={active(n.route) ? "page" : undefined} onClick={() => go(n.route)}>
+            <Icon name={n.icon} /> <span>{n.label}</span>
+          </button>
         ))}
         <div className="spacer" />
-        <button aria-current={route === "access" ? "page" : undefined} onClick={() => go("access")}>
-          {getToken() ? "Access" : "Sign in"}
+        <button aria-current={shown === "admin" ? "page" : undefined} onClick={() => go("admin")}>
+          <Icon name="admin" /> <span>{getToken() ? "Administration & Access" : "Sign in"}</span>
         </button>
       </nav>
-      <main className="main" key={authTick}>
-        {route === "today" && <TodayPage onAsk={(q) => { setAskSeed(q); go("ask"); }} />}
-        {route === "ask" && <AskPage initial={askSeed} onConsumed={consumed} />}
-        {route === "conflicts" && <ConflictsPage />}
-        {route === "agents" && <AgentsPage />}
-        {route === "departments" && <DepartmentsPage />}
-        {route === "scenarios" && <ScenariosPage />}
-        {route === "timeline" && <TimelinePage />}
-        {route === "access" && <AccessPage onChange={() => setAuthTick((t) => t + 1)} />}
-      </main>
+      <div className="workspace">
+        <TopBar me={me} onSearch={() => ask.ask("")} />
+        <main className="main" key={authTick}>
+          {route === "overview" && <OverviewPage go={go} />}
+          {route === "today" && <TodayPage onAsk={(q) => { setAskSeed(q); go("ask"); }} />}
+          {route === "ask" && <AskPage initial={askSeed} onConsumed={consumed} />}
+          {route === "conflicts" && <ConflictsPage />}
+          {route === "agents" && <AgentsPage />}
+          {route === "departments" && <DepartmentsPage />}
+          {route === "evidence" && <EvidenceDataPage />}
+          {route === "intelligence" && <IntelligencePage />}
+          {shown === "whatif" && <ScenariosPage />}
+          {route === "timeline" && <TimelinePage synthetic={Boolean(me?.tenant.synthetic)} />}
+          {shown === "admin" && <AdminPage onAuthChange={() => setAuthTick((t) => t + 1)} />}
+        </main>
+      </div>
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <EvidenceProvider>
+      <AskProvider>
+        <Shell />
+      </AskProvider>
+    </EvidenceProvider>
   );
 }
