@@ -25,7 +25,7 @@ function Profile({ p, onClose }: { p: Person; onClose: () => void }) {
     <Drawer title={p.name ?? p.agent_id} onClose={onClose}>
       <div className="stack">
         <div className="row" style={{ flexWrap: "nowrap", gap: 12 }}>
-          <AgentAvatar id={p.person_record ?? p.agent_id} size={48} />
+          <AgentAvatar id={p.agent_id.startsWith("syn-") ? p.agent_id : (p.name ?? p.agent_id)} size={48} />
           <div><strong>{p.title}</strong><div className="small muted">{p.department}. AI representation of this
             person, grounded in company records; not the employee.</div></div>
         </div>
@@ -66,7 +66,7 @@ export function PeopleSection() {
             then the slots below stay unassigned.</Guidance>
         : <div className="person-grid">{ppl.data.people.map((p) => (
             <button key={p.agent_id} className="person-card" onClick={() => setOpen(p)}>
-              <AgentAvatar id={p.person_record ?? p.agent_id} size={40} />
+              <AgentAvatar id={p.agent_id.startsWith("syn-") ? p.agent_id : (p.name ?? p.agent_id)} size={40} />
               <span style={{ minWidth: 0 }}><strong>{p.name}</strong><div className="t">{p.title}, {p.department}</div>
                 <div className="w">{workloadLine(p)}</div></span>
             </button>))}</div>)}

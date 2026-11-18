@@ -23,6 +23,7 @@ const CHARTS: { system: string; title: string; short: string; x: string; agg: "s
   { system: "fp_and_a", title: "Spend variance by department (actual minus budget)", short: "Spend variance",
     x: "Department", agg: "sum", y: "Variance", kind: "bar" },
   { system: "incident_log", title: "Incidents by month", short: "Incidents", x: "Month", agg: "count", kind: "bar" },
+  { system: "incident_log", title: "Incidents by severity", short: "Incidents", x: "Severity", agg: "count", kind: "bar" },
   { system: "issue_tracker", title: "Issues by status", short: "Issues", x: "Status", agg: "count", kind: "bar" },
   { system: "zoho_books", title: "Ledger lines by cost centre", short: "Ledger", x: "Cost Centre", agg: "count", kind: "bar" },
 ];
@@ -69,8 +70,13 @@ export function OverviewPage({ go }: { go: (r: string) => void }) {
   const evidence = useEvidence();
   const name = me.state === "ready" ? (me.data.principal.display_name ?? "") : "";
   const sources = srcs.state === "ready" ? srcs.data.sources : [];
-  const available = new Set(sources.map((x: ChartSource) => x.system));
-  const charts = CHARTS.filter((c) => available.has(c.system));
+  // One chart per admitted source: the first definition whose columns that source actually has (exports differ).
+  const cols = new Map(sources.map((x: ChartSource) => [x.system, new Set(x.columns)]));
+  const charts = CHARTS.filter((c, i) => {
+    const have = cols.get(c.system);
+    const fits = (d: (typeof CHARTS)[number]) => !!have && have.has(d.x) && (!d.y || have.has(d.y));
+    return fits(c) && !CHARTS.slice(0, i).some((d) => d.system === c.system && fits(d));
+  });
   return (
     <>
       <header className="ov-head">
@@ -137,8 +143,8 @@ function HiringHealth({ sources, loading }: { sources: ChartSource[]; loading: b
   return (
     <Section title="Hiring health" aria-label="Hiring health" subtitle="Requisitions by recorded status.">
       {loading || s.state === "loading" ? <Loading lines={3} /> : !sys || !total
-        ? <Guidance title="No requisition source you may read">Hiring health appears when a recruiting export is
-            admitted and you are authorised to read it.</Guidance>
+        ? <Guidance title="Not charted">Requisition records are personal data, so they are never charted. Ask
+            Veloxa about hiring to get answers with their sources.</Guidance>
         : <>
             <div className="row" style={{ justifyContent: "space-between" }}>
               <span className="small muted">Filled / all requisitions</span>
@@ -171,7 +177,7 @@ function PeopleCard({ go }: { go: (r: string) => void }) {
               { value: "notice", label: "Notice period", count: notice.length }]} />
             {shown.length === 0 ? <p className="small muted">Nobody is in a notice period in the HR record.</p>
               : <ul className="plain people-list">{shown.map((p) => (
-                  <li key={p.agent_id}><Avatar name={p.person_record ?? p.agent_id} size={38} />
+                  <li key={p.agent_id}><Avatar name={p.name ?? p.agent_id} size={38} />
                     <span style={{ minWidth: 0 }}><span className="n">{p.name}</span>
                       <span className="s" style={{ display: "block" }}>{p.title}, {p.department}</span></span></li>))}</ul>}
           </>}
@@ -205,7 +211,8 @@ function WorrySummary({ go }: { go: (r: string) => void }) {
             : <ul className="plain attention-list">{w.data.ranked.slice(0, 4).map((x) => (
                 <li key={x.item_id}><span className="rank-n" style={{ fontSize: 16 }}>{x.rank}</span>
                   <span className="what">{x.title}<span className="small muted" style={{ display: "block" }}>
-                    Severity {x.severity.low.toFixed(2)}–{x.severity.high.toFixed(2)}{x.tied ? ", tied" : ""}</span></span>
+                    Exposure {x.severity.low.toFixed(2)}–{x.severity.high.toFixed(2)} (not a probability)
+                    {x.tied ? "; tied with others at this rank" : ""}</span></span>
                 </li>))}</ul>}
     </Section>
   );
@@ -286,8 +293,8 @@ function Attention() {
             {items.slice(0, 3).map((t, i) => (
               <li key={`t${i}`}>
                 <span className="sig info" aria-hidden="true" />
-                <span className="what">{t.title}</span>
-                <span className="acts small muted">{t.why_shown}</span>
+                <span className="what">{t.title.replace(/_/g, " ")}</span>
+                <span className="acts small muted">{t.why_shown.replace(/_/g, " ")}</span>
               </li>))}
           </ul>)}
     </Section>

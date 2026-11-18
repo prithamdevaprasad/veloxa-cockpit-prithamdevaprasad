@@ -20,7 +20,7 @@ export function AdminPage({ onSignOut }: { onSignOut: () => void }) {
 }
 
 function Account({ onSignOut }: { onSignOut: () => void }) {
-  const [s] = useApi((sig) => product.session(sig).catch(() => null), []);
+  const [s] = useApi((sig) => (getToken() ? Promise.resolve(null) : product.session(sig).catch(() => null)), []);
   const info = s.state === "ready" ? s.data : null;
   const how = info?.method === "oidc" ? `single sign-on (${info.provider === "entra" ? "Microsoft Entra ID"
     : info.provider === "google" ? "Google Workspace" : info.provider})`
