@@ -46,3 +46,17 @@ token = "Rs. 4 Cr"
 [[allow]]
 file = "tests/test_knowledge.py"
 token = "Rs. 2.5 L"
+
+# 18 Nov 2026: invented board and spoken figures of the synthetic four-day company (tests/synthetic_days.py),
+# verified absent from D1-D3.
+[[allow]]
+file = "tests/synthetic_days.py"
+token = "Rs. 7.3 Cr"
+
+[[allow]]
+file = "tests/synthetic_days.py"
+token = "Rs. 9 Cr"
+
+[[allow]]
+file = "tests/synthetic_days.py"
+token = "Rs. 30 Cr"

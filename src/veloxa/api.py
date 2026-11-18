@@ -702,6 +702,9 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
     from . import api_workspace
 
     api_workspace.register(app, state=state, principal_of=_principal, now_fn=now_fn, oidc_auth=oidc_auth)
+    from . import api_intel
+
+    api_intel.register(app, state=state, principal_of=_principal, now_fn=now_fn, tz_of=_tz)
     from . import api_product
 
     api_product.register(app, state=state, principal_of=_principal, now_fn=now_fn, tz_of=_tz)

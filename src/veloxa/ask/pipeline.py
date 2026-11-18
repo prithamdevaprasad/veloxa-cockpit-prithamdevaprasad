@@ -351,6 +351,16 @@ def _record(conn: psycopg.Connection, tenant_id: uuid.UUID, principal: tools.Pri
     """(11) Record the answer, its citations and audit events in ONE transaction. Audit details hold structure
     and counts only, never question text or values."""
     answer_id = base["answer_id"]
+    from . import confidence
+
+    result = confidence.assess(dict(result))                      # deterministic, never a model
+    result["follow_ups"] = confidence.follow_ups(result)
+    with tenant_tx(conn, tenant_id):
+        agents = [dict(r) for r in conn.execute(
+            "SELECT DISTINCT ON (p.agent_id) p.agent_id, p.display_name, c.category FROM runtime.agent_person p"
+            " JOIN runtime.agent_config c ON c.tenant_id = p.tenant_id AND c.agent_id = p.agent_id"
+            " AND c.config_version = p.version ORDER BY p.agent_id, p.version DESC").fetchall()]
+    result["specialists"] = confidence.specialists(result, agents) if result["status"] != "refused" else []
     diag = dict(base.get("diagnostics") or {"stage": "prescreen" if result.get("refusal") else "basis"})
     if result["status"] == "abstained":
         diag["abstention_reason"] = (result.get("unknowns") or ["no admitted evidence answers this question"])[0]

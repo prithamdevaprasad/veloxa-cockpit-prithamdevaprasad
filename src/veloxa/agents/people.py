@@ -15,7 +15,6 @@ A profile separates three things and never mixes them:
 from __future__ import annotations
 
 import uuid
-from collections import Counter
 
 import psycopg
 
@@ -145,13 +144,11 @@ def profile(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int, agent_id: st
         facts.append({"fact": "Exit date", "value": me["exit_date"].isoformat(), "record": me["source_record_id"]})
 
     issues = _claims(conn, tenant_id, k, "issue")
-    mine, unidentified = [], Counter()
+    mine = []
     for key, d in issues.items():
         who = d.get("assignee_source_id")
         p = link(who, people)
         if p is None:
-            if who:
-                unidentified[who] += 0          # counted below without exposing the source value
             continue
         if p["emp_id"] == me["emp_id"]:
             mine.append({"key": key.split(":", 1)[1], "summary": d.get("summary"), "status": d.get("status_at_export"),
@@ -169,6 +166,12 @@ def profile(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int, agent_id: st
     hiring = sorted(r.split(":", 1)[1] for r, d in reqs.items()
                     if (p := link(d.get("hiring_manager_source_id"), people)) and p["emp_id"] == me["emp_id"])
 
+    # Repository allocation from git (exact corporate e-mail only). Never counts, rates or timing (POL-PROD-01).
+    repos = [{"repo": r["repo"], "first": r["first"], "last": r["last"]} for r in conn.execute(
+        "SELECT payload->>'repo' AS repo, min(left(payload->>'committed_at', 10)) AS first,"
+        " max(left(payload->>'committed_at', 10)) AS last FROM ledger.source_record WHERE tenant_id = %s"
+        " AND system = 'git' AND batch_seq <= %s AND lower(payload->>'author_email') = lower(%s)"
+        " GROUP BY 1 ORDER BY 1", (tenant_id, k, me["work_email"] or "")).fetchall()] if me["work_email"] else []
     unknowns = []
     if not issues:
         unknowns.append("No task records are admitted at this knowledge point, so current workload is unknown.")
@@ -188,11 +191,13 @@ def profile(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int, agent_id: st
         "agent_id": agent_id, "grounded": True, "person_record": ap["person_record"], "name": me["full_name"],
         "title": me["title"], "department": me["department"], "status": me["status"],
         "verified_facts": facts,
-        "workload": {"open_tasks": len(open_), "open_points": sum(float(i["points"] or 0) for i in open_),
+        "workload": {"open_tasks": len(open_) if mine else None,          # None = unknown, never zero
+                     "open_points": sum(float(i["points"] or 0) for i in open_) if mine else None,
+                     "repositories": repos,
                      "tasks": sorted(mine, key=lambda i: i["key"]), "rota_weeks": rota_weeks,
                      "incidents_responded": responded, "requisitions_owned": hiring,
-                     "basis": "Admitted Jira, rota, incident and hiring records linked by HR employee ID or exact "
-                              "e-mail only"},
+                     "basis": "Admitted Jira, rota, incident, hiring and git records linked by HR employee ID or "
+                              "exact e-mail only; repositories show allocation, never activity counts"},
         "assumptions": [{"assumption_id": a["assumption_id"], "category": a["category"], "value": a["value"],
                          "label": "Assumption (invented persona detail, not a company record)"} for a in assumptions],
         "unknowns": unknowns,
