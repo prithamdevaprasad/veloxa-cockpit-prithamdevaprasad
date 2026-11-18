@@ -35,7 +35,13 @@ PROBES = (
 )
 
 
+UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
 def _leaks(text: str) -> list[str]:
+    # Random UUIDs (session/execution ids) are identifiers, not values: a segment such as "-900f-" must not read as
+    # a pay figure (that made this test flaky). Every pay value and pay identifier is still checked.
+    text = UUID.sub("<uuid>", text)
     return [m for m in PAY_IDS if m in text] + PAY_VALUES.findall(text)
 
 
