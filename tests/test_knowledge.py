@@ -96,3 +96,11 @@ def test_spoken_figure_matching_no_reported_period_is_a_conflict_needing_review(
 def test_a_unitless_spoken_figure_is_not_compared():
     cs = [_board("doc:q3", "46%", "Jul-Sep 2026"), _spoken("t1:doc", 40, 42, unit=None)]
     assert k.detect_conflicts(cs) == []
+
+
+def test_board_numbers_parse_currency_scale_percent_and_months():
+    assert k._board_number(chr(0x20B9) + " 4 crore") == ("INR", 40000000)
+    assert k._board_number("INR 2.5 lakh")[0] == "INR"
+    assert k._board_number("12%") == ("percent", 12)
+    assert k._board_number("13.5 months")[0] == "months"
+    assert k._board_number("not a number") == (None, None)

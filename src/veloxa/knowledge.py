@@ -194,7 +194,7 @@ def _interval(obj: dict) -> tuple[Decimal, Decimal] | None:
 def _board_number(value_text: str) -> tuple[str | None, Decimal | None]:
     """A board key number's unit and value as written (INR crore/lakh, %, months, plain count). None if unclear."""
     t = value_text.replace(",", "").strip()
-    m = re.match(r"^(?:Rs\.?|INR|20b9)?\s*([\d.]+)\s*(crore|cr|lakh|L)?\b", t, re.I)
+    m = re.match(r"^(?:Rs\.?|INR|\u20b9)?\s*([\d.]+)\s*(crore|cr|lakh|L)?\b", t, re.I)
     if not m:
         return None, None
     n = Decimal(m.group(1))
