@@ -41,8 +41,8 @@ token = "Rs. 3.7 Cr"
 # 18 Nov 2026: invented board-number parser test values (veloxa.knowledge), verified absent from D1-D3.
 [[allow]]
 file = "tests/test_knowledge.py"
-token = "4 crore"
+token = "Rs. 4 Cr"
 
 [[allow]]
 file = "tests/test_knowledge.py"
-token = "2.5 lakh"
+token = "Rs. 2.5 L"
