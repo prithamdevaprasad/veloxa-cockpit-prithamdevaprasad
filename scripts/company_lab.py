@@ -176,18 +176,15 @@ def admit(admin: str, name: str, args_review: bool = False) -> list:
             from veloxa.agents import people
 
             print("agents grounded in HR records:", people.ground(a, tid, k) or "already grounded")
-            from veloxa import tenancy
             from veloxa.db import tenant_tx as _tt
 
-            with _tt(a, tid):
-                ceo = a.execute("SELECT emp_id FROM projection.person WHERE title = 'CEO' ORDER BY batch_seq DESC"
-                                " LIMIT 1").fetchone()
-                has = ceo and a.execute("SELECT 1 FROM policy.live_tuple WHERE resource_type = 'tenant'"
-                                        " AND relation = 'company_reader' AND subject_id = %s",
-                                        (ceo["emp_id"],)).fetchone()
-                if ceo and not has:      # the pre-workspace tenant's CEO already reads tenant-wide; make it explicit
-                    tenancy.grant_as_operator(a, tid, "tenant", str(tid), "company_reader", f"person:{ceo['emp_id']}",
-                                              "CEO company-wide read (pre-workspace tenant; lab only)")
+            if os.environ.get("VELOXA_LAB_COMPANY_READER"):    # explicit: never inferred from an HR title
+                from veloxa import access_grants
+
+                access_grants.grant_company_reader(a, tid, os.environ["VELOXA_LAB_COMPANY_READER"],
+                                                   approved_by="Owner (lab)", decision_ref="company lab operator",
+                                                   purposes=["interview", "cockpit"])
+                print("company-wide read: granted explicitly for the lab principal (audited)")
             if args_review:
                 from veloxa import findings
                 from veloxa.risk import governance

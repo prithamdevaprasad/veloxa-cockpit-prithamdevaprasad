@@ -94,7 +94,7 @@ def test_bootstrap_admits_only_released_and_authorised_packs_in_order(env, capsy
     assert rc == 0 and packs == ["D1", "D2", "D3"]
     assert "D1: already admitted" in out and "D2: already admitted" in out
     assert "D4: refused, not released until 2099-01-01" in out and "no file was opened" in out
-    assert len(refused) == 1 and agents == 14 and ceo_reader == 1
+    assert len(refused) == 1 and agents == 14 and ceo_reader == 0          # no owner grant file: default deny
 
 
 def test_a_source_outside_the_authorised_list_refuses_the_whole_pack(env, capsys):
@@ -108,3 +108,68 @@ def test_a_source_outside_the_authorised_list_refuses_the_whole_pack(env, capsys
     assert main(["hackathon-bootstrap"]) == 1
     packs, refused, _, _ = _state(env["db"])
     assert packs == ["D1"] and refused == [{"pack": "D2", "reason": "source_not_authorised"}]   # K-13 per source
+
+
+def test_company_wide_read_needs_an_explicit_audited_grant_and_revocation_stops_it(env, tmp_path, monkeypatch):
+    """Section 6: an HR title never grants access; a grant needs a verified principal, approver, decision and
+    purpose; it is audited; ABAC still refuses protected classes; revocation stops it at once."""
+    from veloxa import access_grants, config
+    from veloxa.agents.authorization import CurrentAuthorization
+    from veloxa.cli import main
+    from veloxa.db import connect, tenant_tx
+    from veloxa.releases import load_schedule
+
+    env["authorise"](["D2", "D3"])
+    assert main(["hackathon-bootstrap"]) == 0
+    tid = config.tenant_uuid(load_schedule().tenant_slug)
+    db = env["db"]
+    assert _state(db)[3] == 0                                            # no file: nothing granted (default deny)
+    with connect(db.admin_dsn) as a, tenant_tx(a, tid):
+        ceo = a.execute("SELECT emp_id FROM projection.person WHERE title = 'CEO' ORDER BY batch_seq DESC LIMIT 1"
+                        ).fetchone()["emp_id"]
+        other = a.execute("SELECT emp_id FROM projection.person WHERE title <> 'CEO' AND exit_date IS NULL"
+                          " ORDER BY emp_id LIMIT 1").fetchone()["emp_id"]
+
+    def allowed(pid, system="keka_hrms", data_class="personal"):
+        with connect(db.dsn("app")) as c:
+            return CurrentAuthorization(c).allowed(tid, pid, system, data_class)[0]
+
+    assert not allowed(f"person:{ceo}")                                  # the HR title alone grants nothing
+    with connect(db.admin_dsn) as a:
+        for bad, kw in (("person:NOT-IN-HR", {}), (f"person:{ceo}", {"approved_by": " "}),
+                        (f"person:{ceo}", {"purposes": ["marketing"]})):
+            args = {"approved_by": "Owner", "decision_ref": "test decision", "purposes": ["interview"]} | kw
+            with pytest.raises(access_grants.GrantRefused):
+                access_grants.grant_company_reader(a, tid, bad, **args)
+        t = access_grants.grant_company_reader(a, tid, f"person:{ceo}", approved_by="Owner",
+                                               decision_ref="test decision", purposes=["interview", "cockpit"])
+        assert access_grants.grant_company_reader(a, tid, f"person:{ceo}", approved_by="Owner",
+                                                  decision_ref="again", purposes=["interview"]) == t   # idempotent
+        with tenant_tx(a, tid):
+            kinds = [r["kind"] for r in a.execute("SELECT kind FROM audit.event WHERE kind LIKE 'access.%'")]
+    assert kinds == ["access.company_reader_granted"]
+    assert allowed(f"person:{ceo}")                                      # explicit grant, within scope
+    assert not allowed(f"person:{ceo}", "zoho_payroll", "payroll_aggregate")      # protected classes are still
+    assert not allowed(f"person:{ceo}", "leave_register", "sensitive_personal")    # refused despite the grant
+    assert not allowed(f"person:{other}")                                # nobody else inherits it
+    with connect(db.admin_dsn) as a:
+        access_grants.revoke(a, tid, t, by="Owner", reason="test revocation")
+        with pytest.raises(access_grants.GrantRefused):
+            access_grants.revoke(a, tid, t, by="Owner", reason="twice")
+        with tenant_tx(a, tid):
+            assert a.execute("SELECT count(*) AS n FROM audit.event WHERE kind = 'access.company_reader_revoked'"
+                             ).fetchone()["n"] == 1
+    assert not allowed(f"person:{ceo}")                                  # revoked: stops at once
+
+
+def test_bootstrap_applies_only_grants_from_the_owner_file(env, tmp_path, monkeypatch, capsys):
+    from veloxa.cli import main
+
+    env["authorise"](["D2", "D3"])
+    f = tmp_path / "grants.toml"
+    f.write_text('[[company_reader]]\nprincipal = "person:NOT-IN-HR"\napproved_by = "Owner"\n'
+                 'decision = "test"\npurposes = ["interview"]\n', encoding="utf-8")
+    monkeypatch.setenv("VELOXA_ACCESS_GRANTS", str(f))
+    assert main(["hackathon-bootstrap"]) == 0
+    assert "refused (the principal does not resolve" in capsys.readouterr().err
+    assert _state(env["db"])[3] == 0

@@ -439,8 +439,9 @@ def cmd_hackathon_bootstrap(args: argparse.Namespace) -> int:
     source (config/admission_authorisations.toml; K-13 `check_sources` runs inside `admit_pack`). An unreleased pack
     is refused before any of its files is opened, and nothing after it is admitted (batches are sequential). An
     unauthorised or failing pack is refused and recorded as an audit event; nothing partial is committed. Then:
-    projections, the 14 agents grounded in the HR export (owner-approved mapping by exact employee ID), and the
-    self-check. Re-running it is safe: admitted packs are skipped."""
+    projections, the 14 agents grounded in the HR export (owner-approved mapping by exact employee ID), explicit
+    access grants from the owner's file (never from an HR title), and the self-check.
+    Re-running it is safe: admitted packs are skipped."""
     _wait_for_db()
     cmd_migrate(args)
     root = _data_root()
@@ -482,29 +483,59 @@ def cmd_hackathon_bootstrap(args: argparse.Namespace) -> int:
             registry.seed_slots(a, tenant_id)
             print("knowledge claims:", knowledge.backfill(a, tenant_id)[-1:] or "up to date")
             print("agents grounded:", len(people.ground(a, tenant_id, k)) or "already grounded")
-            _ceo_reader(a, tenant_id)
+            _apply_access_grants(a, tenant_id)
     sc = cmd_selfcheck(argparse.Namespace(role="ingest"))
     return rc or sc
 
 
-def _ceo_reader(conn, tenant_id) -> None:
-    """The documented evidence model's explicit company-wide read (authz/evidence.py, rule 3) for the person whose
-    title is exactly "CEO" in the latest sealed HR export. Server-side and audited; never from a browser or token."""
-    from . import tenancy
-    from .db import tenant_tx
+def _apply_access_grants(conn, tenant_id) -> None:
+    """Explicit company-wide read grants from an OWNER-PROVIDED file outside the repository (VELOXA_ACCESS_GRANTS;
+    TOML `[[company_reader]]` with principal, approved_by, decision, purposes). An HR title never grants access;
+    with no file, nothing is granted and the evidence model denies by default."""
+    import os
+    import tomllib
+    from pathlib import Path
 
-    with tenant_tx(conn, tenant_id):
-        ceo = conn.execute("SELECT emp_id FROM projection.person WHERE title = 'CEO' ORDER BY batch_seq DESC LIMIT 1"
-                           ).fetchone()
-        if ceo is None:
-            print("CEO company-wide read: no person titled CEO in the HR export; nothing granted")
-            return
-        has = conn.execute("SELECT 1 FROM policy.live_tuple WHERE resource_type = 'tenant' AND relation ="
-                           " 'company_reader' AND subject_id = %s", (ceo["emp_id"],)).fetchone()
-    if not has:
-        tenancy.grant_as_operator(conn, tenant_id, "tenant", str(tenant_id), "company_reader",
-                                  f"person:{ceo['emp_id']}", "CEO company-wide read (hackathon bootstrap)")
-    print("CEO company-wide read:", "already granted" if has else "granted (operator, audited)")
+    from . import access_grants
+
+    path = os.environ.get("VELOXA_ACCESS_GRANTS", "").strip()
+    if not path:
+        print("company-wide read: no VELOXA_ACCESS_GRANTS file; nothing granted (default deny)")
+        return
+    entries = tomllib.loads(Path(path).read_text(encoding="utf-8")).get("company_reader", [])
+    for e in entries:
+        try:
+            access_grants.grant_company_reader(conn, tenant_id, e["principal"], approved_by=e["approved_by"],
+                                               decision_ref=e["decision"], purposes=list(e["purposes"]))
+            print("company-wide read: granted from the owner authorisation file (audited)")
+        except (access_grants.GrantRefused, KeyError) as exc:
+            print(f"company-wide read: refused ({exc})", file=sys.stderr)
+
+
+def cmd_access(args: argparse.Namespace) -> int:
+    """Explicit company-wide read: grant (verified principal, approver, decision, purpose; audited), revoke, list."""
+    import uuid as _uuid
+
+    from . import access_grants
+
+    tenant_id = config.tenant_uuid(load_schedule().tenant_slug)
+    with connect(_admin_dsn()) as conn:
+        try:
+            if args.access_cmd == "grant-company-reader":
+                tid = access_grants.grant_company_reader(conn, tenant_id, args.principal, approved_by=args.approved_by,
+                                                         decision_ref=args.decision,
+                                                         purposes=args.purposes.split(","))
+                print(f"granted: tuple {tid}")
+            elif args.access_cmd == "revoke":
+                access_grants.revoke(conn, tenant_id, _uuid.UUID(args.tuple), by=args.by, reason=args.reason)
+                print("revoked")
+            else:
+                for g in access_grants.live_grants(conn, tenant_id):
+                    print(f"{g['tuple_id']}  {g['created_at']:%Y-%m-%d}  {g['source']}")
+        except access_grants.GrantRefused as e:
+            print(f"refused: {e}", file=sys.stderr)
+            return 1
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -571,6 +602,19 @@ def main(argv: list[str] | None = None) -> int:
     p_sc = sub.add_parser("selfcheck", help="run startup self-checks for a role")
     p_sc.add_argument("--role", choices=("app", "ingest"), default="app")
     p_sc.set_defaults(func=cmd_selfcheck)
+    p_acc = sub.add_parser("access", help="explicit company-wide read grants: grant, revoke, list (operator)")
+    acc = p_acc.add_subparsers(dest="access_cmd", required=True)
+    g = acc.add_parser("grant-company-reader")
+    g.add_argument("--principal", required=True, help="person:<employee ID> (verified against the HR export)")
+    g.add_argument("--approved-by", required=True)
+    g.add_argument("--decision", required=True, help="decision record reference")
+    g.add_argument("--purposes", default="interview,cockpit")
+    r = acc.add_parser("revoke")
+    r.add_argument("--tuple", required=True)
+    r.add_argument("--by", required=True)
+    r.add_argument("--reason", required=True)
+    acc.add_parser("list")
+    p_acc.set_defaults(func=cmd_access)
     sub.add_parser("hackathon-bootstrap", help="hackathon one-command start: admit released AND authorised packs "
                    "in order, project, ground agents, self-check").set_defaults(func=cmd_hackathon_bootstrap)
     p_init = sub.add_parser("init", help="privileged one-shot: migrate; bootstrap a fresh database only")
