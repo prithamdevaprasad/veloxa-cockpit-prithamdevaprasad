@@ -85,3 +85,43 @@ def test_the_expanded_synthetic_benchmark(lab):
     assert m["citation_precision"] == 1.0                 # every cited record exists, is readable and verified
     assert m["refusal_correctness"] == 1.0 and m["access_control_correctness"] == 1.0
     assert m["temporal_correctness"] == 1.0
+
+
+def _client(lab, monkeypatch, principal):
+    from conftest import DEV_TOKEN
+    from fastapi.testclient import TestClient
+
+    from veloxa.api import PRIVILEGED_ENV, create_app
+
+    for n in PRIVILEGED_ENV + ("VELOXA_OIDC",):
+        monkeypatch.delenv(n, raising=False)
+    for k, v in {"VELOXA_DEV_AUTH": "1", "VELOXA_DEV_TOKEN": DEV_TOKEN, "VELOXA_DEV_PRINCIPAL": principal,
+                 "VELOXA_DEV_TENANT": lab["slug"]}.items():
+        monkeypatch.setenv(k, v)
+    return TestClient(create_app(dsn=lab["dsns"]["app"])), {"Authorization": f"Bearer {DEV_TOKEN}"}
+
+
+def test_overview_kpis_and_series_come_from_admitted_records_only(lab, monkeypatch):
+    c, h = _client(lab, monkeypatch, "person:demo-ceo")
+    with c:
+        o = c.get("/v1/overview", headers=h).json()
+        keys = {k["key"]: k for k in o["kpis"]}
+        assert keys["headcount"]["value"] == lab["facts"]["headcount_total"] and o["synthetic"] is True
+        arr = next(v for k, v in keys.items() if k.startswith("reported:arr"))
+        assert arr["basis"].startswith("as reported for") and arr["evidence"]
+        rev = c.get("/v1/analytics/series", headers=h,
+                    params={"system": "revenue_reporting", "x": "Month", "agg": "sum", "y": "ARR"}).json()
+        assert len(rev["points"]) == 12 and rev["points"][-1]["value"] == lab["facts"]["arr_dec"]
+        bva = c.get("/v1/analytics/series", headers=h, params={"system": "fp_and_a", "x": "Month", "agg": "sum",
+                                                                "y": "Variance"}).json()
+        assert len(bva["points"]) == 12 and bva["records"] == 84
+        assert c.get("/v1/analytics/series", headers=h,
+                     params={"system": "keka_hrms", "x": "Department"}).status_code == 403   # personal rows
+        assert {s["system"] for s in c.get("/v1/analytics/sources", headers=h).json()["sources"]} >= {
+            "revenue_reporting", "crm", "issue_tracker"}
+    c, h = _client(lab, monkeypatch, "person:demo-outsider")
+    with c:
+        assert [k["key"] for k in c.get("/v1/overview", headers=h).json()["kpis"]] == ["coverage"]
+        assert c.get("/v1/analytics/series", headers=h,
+                     params={"system": "revenue_reporting", "x": "Month"}).status_code == 403
+        assert c.get("/v1/analytics/sources", headers=h).json()["sources"] == []
