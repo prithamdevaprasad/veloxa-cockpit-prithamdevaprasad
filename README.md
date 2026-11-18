@@ -146,7 +146,7 @@ docker compose up --detach --wait db
 | `docker compose up` (`init` then `api`) | `veloxa` in the Compose volume `pgdata` |
 | `veloxa <command>` | `VELOXA_DB_NAME` on `VELOXA_DB_HOST:VELOXA_DB_PORT` |
 
-> **Warning: this branch adds migrations 0013–0016.** `docker compose up` and `veloxa migrate` apply them to the database they point at. If your Compose volume holds a database you want to keep at an earlier migration, **do not** run them against it. Use a separate Compose project with its own volume and ports instead. Example (tested):
+> **Warning: this branch adds migrations 0013–0020** (0017 workspace, 0018 data room, 0019 text chunks, 0020 threads and agent updates). `docker compose up` and `veloxa migrate` apply them to the database they point at. If your Compose volume holds a database you want to keep at an earlier migration, **do not** run them against it. Use a separate Compose project with its own volume and ports instead. Example (tested):
 > ```powershell
 > $env:VELOXA_DB_PUBLISH_PORT = "55433"; $env:VELOXA_API_PORT = "8001"
 > docker compose -p veloxa-trial up --build --detach --wait
@@ -197,6 +197,32 @@ npm run dev
 - The demo's `/health` shows `degraded` while a released pack (D2) awaits authorisation. This is expected.
 - No separate worker is needed: DBOS workflows run in the process that starts them (section 8).
 
+### Demo Lab (Profile B): a fully populated fictional company
+
+The Demo Lab builds **Lumora Systems (DEMO)**, a synthetic company: 22 generated files, 14 synthetic agents with updates, and departments. All of it goes through the real data-room pipeline (submission, validation, review, authorisation, admission). It uses its **own** database and never touches `veloxa` or the hackathon demo.
+
+```powershell
+# Terminal 1: build once, then serve
+.\.venv\Scripts\Activate.ps1
+$env:VELOXA_TEST_ADMIN_DSN = "postgresql://veloxa_admin:local-dev-admin@127.0.0.1:55432/postgres"
+python scripts\demo_lab.py --db veloxa_demolab --create --originals $env:TEMP\veloxa-demolab-originals
+python scripts\demo_lab.py --db veloxa_demolab --serve --port 8770 --originals $env:TEMP\veloxa-demolab-originals
+#  -> Demo Lab API on http://127.0.0.1:8770; token synthetic-demo-lab-fixture-token-0123456789 (demo CEO)
+```
+
+```powershell
+# Terminal 2: the cockpit against the Demo Lab
+cd frontend
+$env:VELOXA_API_URL = "http://127.0.0.1:8770"
+npm run dev                               # http://127.0.0.1:5173
+```
+
+**Notes:**
+- **Allowlisted database names only.** The script accepts only `veloxa_demolab` or `veloxa_demolab_<suffix>` and refuses anything else.
+- `--create` refuses an existing database. To rebuild, either choose a new suffix (for example `veloxa_demolab_2`) or drop the old Demo Lab database yourself.
+- Use the **same** `--originals` folder for create and serve. That folder holds the uploaded original files that *Open original* and *Download original* serve.
+- `/health` may show the primary tenant's schedule; this is a known limitation.
+
 ### Real mode: your release packs
 
 ```powershell
@@ -220,17 +246,38 @@ Read the migration warning in section 5 first.
 
 ## 7. First-time demonstration
 
-1. Start the demo (section 6) and open `http://127.0.0.1:5173`.
-2. **Sign in.** Open *Sign in* (the Access page), paste the token printed by `demo_env.py` into *Bearer token* and choose *Use token*. It is a fixed synthetic fixture, `synthetic-demo-fixture-token-0123456789abcdef`, valid only for the throwaway demo database. The cockpit keeps it for the browser tab only.
-3. **Today:** at most three evidence-backed items, unranked, with the read basis ("data as of").
-4. **Ask** a question, e.g. *What is our headcount by department?* The answer shows its status, grade, interpretation and claims.
-5. **Citations:** open the evidence drawer. Each claim cites its records (source, locator, batch K, data class).
-6. **Conflicts:** sources that disagree, side by side, with provenance. No side is chosen.
-7. **Agents:** filter *People Ops* and open the labelled synthetic agent `syn-demo-ppl`. Interview it, look at *My memories*, close the session, then reopen it from *History*. The 14 real slots show as blocked.
-8. **Scenarios:** move a commitment by N days (observed, derived, assumption and unknown are kept apart; no probability). Below that, *Dependencies and early warnings*. The synthetic D1 names no commitment, so both say so.
-9. **Privacy refusal:** ask *What is Person Beta's salary?* (a synthetic person). It is refused with a policy, a reason and an alternative. Payroll totals are refused too.
-10. **Timeline** and **Access** pages show record events and what the signed-in principal may read.
-11. **Engineering continuity:** *blocked*. Its sources are not admitted, so the journey is not available.
+Use the Demo Lab (section 6) for the fullest tour; the hackathon demo (`demo_env.py`, token `synthetic-demo-fixture-token-0123456789abcdef`) works the same way with less data.
+
+1. Open `http://127.0.0.1:5173`.
+2. **Sign in:**
+   - go to **Administration** (sidebar);
+   - paste the token printed by the API into *Bearer token*;
+   - choose *Use token*.
+
+   The token is a fixed synthetic fixture, valid only for the local demo database, and is kept only for this browser tab.
+3. **Overview:**
+   - KPI cards and charts computed only from admitted rows you may read (each says what it was computed from);
+   - **Recent Agent Updates**, labelled DEMO.
+4. **Ask Veloxa:**
+   - the pill at the bottom, or **Ctrl+K**;
+   - try *What is our headcount by department?* or *What happened to Quartz 2.0?*;
+   - answers show status, grade, interpretation, highlighted matches and numbered claims;
+   - every question is saved as a conversation: use *Saved* (on narrow screens) or the left list to reopen it.
+5. **Contextual Ask:** open an agent update on the Overview and choose *Ask about this*. Follow-ups keep that context.
+6. **Evidence drawer:** select a claim's source number. It shows source, location, version and batch K, classification, admission, your access, *Open original* and *Download original* (audited).
+7. **Evidence & Data:**
+   - upload a file;
+   - run the dry-run validation;
+   - submit for review.
+
+   Review and authorisation are separate steps, and nothing is admitted until both happen.
+8. **Agents / Departments:** browse the 14 synthetic agents and their updates. Use **Ask the department** to send a clarification request.
+9. **Intelligence:** conflicts (sources side by side, no side chosen), source coverage, and what to watch (unranked until D-15).
+10. **What-if:** move a commitment by N days. Observed, derived, assumption and unknown stay separate, and no probability is invented.
+11. **Timeline:** record events, with a "known as at" date selector.
+12. **Privacy refusal:** ask *What is Person Beta's salary?* (hackathon demo). It is refused with a policy, a reason and an alternative.
+
+Everything is **facts-only**: no model writes any answer (DENY_ALL).
 
 ## 8. Testing
 
@@ -245,7 +292,7 @@ cd frontend
 npm run build                              # type-check + production build; exit 0
 $env:VELOXA_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe).Path
 npx playwright install chromium            # once
-npx playwright test                        # browser journeys on desktop, tablet, mobile; pass = "30 passed"
+npx playwright test                        # browser journeys on desktop, tablet, mobile; pass = "45 passed"
 cd ..
 ```
 
@@ -275,6 +322,9 @@ Always read the exit code (`$LASTEXITCODE`). Never judge a run by piping it thro
 | The API refuses to start: development fixture | All three `VELOXA_DEV_*` settings are needed; the token must be ≥ 32 characters |
 | 401 in the cockpit | Sign in with the token; with real mode, the `.env` fixture must be enabled |
 | Playwright cannot start its servers | Ports 8765 and 4173 must be free; `VELOXA_TEST_ADMIN_DSN` and `VELOXA_PYTHON` must be set; run `npm run build` first |
+| `refused: ... not an allowlisted Demo Lab database` | Use `--db veloxa_demolab` or `veloxa_demolab_<suffix>` |
+| Demo Lab `--create` says the database exists | Serve it with `--serve`, or create a new suffix such as `veloxa_demolab_2` |
+| *Open original* fails in the Demo Lab | Serve with the same `--originals` folder that was used for `--create` |
 | Leftover `veloxa_demo_*` databases | `python scripts\demo_env.py --cleanup` (drops only exact `veloxa_demo_<8 hex>` names) |
 
 ## 10. Stop and cleanup
@@ -282,6 +332,7 @@ Always read the exit code (`$LASTEXITCODE`). Never judge a run by piping it thro
 ```powershell
 # Ctrl+C in each terminal stops the demo API and the Vite server. Then, always:
 python scripts\demo_env.py --cleanup       # drops any demo database the stop left behind (exact veloxa_demo_<8 hex>)
+# The Demo Lab database (veloxa_demolab) is kept on purpose so it can be served again; drop it yourself when done.
 docker compose stop                        # stops db/api, keeps the data volume
 docker compose -p veloxa-trial down --volumes   # removes a TRIAL project and its volume (never your main volume)
 ```
