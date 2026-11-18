@@ -14,3 +14,41 @@ baseline = true
 approved_by = "Owner"
 approved_on = 2026-11-16
 decision_record = "DECISIONS.md, 16 Nov 2026: A-024 (D1 data classes, strict fail-closed), A-025 r2, A-026"
+
+# K-13 (owner decision, 18 Nov 2026): D2 and D3 are authorised SOURCE BY SOURCE for the hackathon tenant. Each
+# file must match one listed source, or the pack is refused (releases.Authorisation.check_sources). Release time
+# still applies: D3 cannot be admitted before 2026-11-18 10:00 IST. K-03 exclusions stay closed (leave type and pulse
+# comments never reach agents; payroll release stays off).
+[[pack]]
+id = "D2"
+approved_by = "Owner"
+approved_on = 2026-11-18
+decision_record = "Owner directive 18 Nov 2026 (Company Intelligence Foundation), K-13 per-source authorisation"
+sources = [
+  "data_room/hr/Hiring_Tracker.xlsx",          # hiring_tracker / personal
+  "data_room/hr/Leave_Register.xlsx",          # leave_register / sensitive_personal
+  "data_room/hr/Pulse_Survey.xlsx",            # pulse_survey / confidential (comments suppressed at source)
+  "data_room/documents/Resignation_Letter_SM.pdf",   # documents / confidential
+  "data_room/email/06.eml", "data_room/email/07.eml", "data_room/email/10.eml", "data_room/email/11.eml",
+  "transcripts/T3_Head_of_People_Call.docx",   # meeting_summaries / confidential
+  "transcripts/T6a_CEO_Voice_Note.docx",
+]
+
+[[pack]]
+id = "D3"
+approved_by = "Owner"
+approved_on = 2026-11-18
+decision_record = "Owner directive 18 Nov 2026 (Company Intelligence Foundation), K-13 per-source authorisation"
+sources = [
+  "data_room/documents/Atlas_Launch_Kit_v1.pdf",     # documents / confidential
+  "data_room/documents/Invoice_PIS-114.pdf",         # documents / confidential
+  "data_room/email/04.eml", "data_room/email/05.eml", "data_room/email/08.eml", "data_room/email/09.eml",
+  "data_room/email/Email_Printouts.pdf",             # email_printouts / private_comms (duplicates, not corroboration)
+  "data_room/engineering/Incidents_Aug-Oct_2026.xlsx",   # incident_log / internal
+  "data_room/engineering/Jira_Export_ATLAS.xlsx",    # jira / internal
+  "data_room/engineering/OnCall_Rota.xlsx",          # oncall_rota / internal
+  "data_room/engineering/git_log.csv",               # git / internal
+  "transcripts/T4_Head_of_Marketing_Call.docx",
+  "transcripts/T5_VP_Engineering_Call.docx",
+  "transcripts/T6b_CEO_Voice_Note.docx",
+]

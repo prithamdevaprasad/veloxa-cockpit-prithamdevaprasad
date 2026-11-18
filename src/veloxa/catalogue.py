@@ -53,7 +53,8 @@ def load_catalogue(path: Path | None = None) -> list[Rule]:
     rules = []
     for raw in tomllib.loads(path.read_text(encoding="utf-8"))["rule"]:
         rule = Rule(raw["pattern"], raw["kind"], raw["system"], raw["data_class"], raw["records"],
-                    raw.get("row_class"), Contract.from_toml(raw.get("contract")))
+                    raw.get("row_class"), Contract.from_toml(raw.get("contract")),
+                    tuple(raw.get("key_columns", ())))
         if rule.contract and rule.records != "rows":
             raise ValueError(f"a contract is only defined for row exports ({rule.pattern!r})")
         if rule.data_class not in DATA_CLASSES or rule.records not in RECORD_MODES:

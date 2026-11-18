@@ -20,6 +20,7 @@ PARSER_VERSIONS = {
     "eml": "eml/1",
     "text": "text/1",
     "jsonl_rows": "jsonl-rows/1",
+    "csv_rows": "csv-rows/1",
 }
 
 
@@ -35,6 +36,8 @@ class Envelope:
             return f"{loc['sheet']}!r{loc['row']}"
         if "line" in loc:
             return f"line{loc['line']}"
+        if "row" in loc:                          # CSV rows (no sheet)
+            return f"r{loc['row']}"
         return "document"
 
 
@@ -145,6 +148,22 @@ def parse_jsonl_rows(data: bytes) -> list[Envelope]:
     return out
 
 
+def parse_csv_rows(data: bytes) -> list[Envelope]:
+    """One envelope per CSV data row, values exactly as written (strings); row = 1-based line incl. the header."""
+    from .csv_rows import read
+
+    header, rows = read(data)
+    if len(set(header)) != len(header):
+        raise ValueError("duplicate column names in CSV header")
+    out = []
+    for r in rows:
+        if r["__width__"] != len(header):
+            raise ValueError(f"CSV data row {r['__row__']} has {r['__width__']} values, header has {len(header)}")
+        payload = {h: r.get(h) for h in header}
+        out.append(Envelope({"row": r["__row__"] + 1, "header_row": 1}, payload, PARSER_VERSIONS["csv_rows"]))
+    return out
+
+
 def parse(data: bytes, suffix: str, mode: str) -> list[Envelope]:
     """Parse the exact bytes that were hashed (never re-read the file)."""
     if mode == "none":
@@ -153,8 +172,10 @@ def parse(data: bytes, suffix: str, mode: str) -> list[Envelope]:
     if mode == "rows":
         if suffix == ".jsonl":
             return parse_jsonl_rows(data)
+        if suffix == ".csv":
+            return parse_csv_rows(data)
         if suffix != ".xlsx":
-            raise ValueError(f"row extraction is only defined for .xlsx and .jsonl, not {suffix}")
+            raise ValueError(f"row extraction is only defined for .xlsx, .csv and .jsonl, not {suffix}")
         return parse_xlsx_rows(data)
     if mode == "document":
         parser = {".docx": parse_docx, ".pdf": parse_pdf, ".eml": parse_eml, ".txt": parse_text}.get(suffix)

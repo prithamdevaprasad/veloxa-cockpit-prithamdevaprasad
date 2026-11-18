@@ -55,6 +55,7 @@ id = "D2"
 approved_by = "Synthetic owner"
 approved_on = 2026-11-17
 decision_record = "synthetic test authorisation"
+sources = ["data_room/hr/Hiring_Tracker.xlsx"]   # K-13: source-specific (never pack-wide)
 """
 
 
@@ -210,14 +211,22 @@ def test_existing_database_serves_d1_and_reports_d2_as_awaiting_authorisation(db
     app_dsn = db.dsn("app")
     for name in PRIVILEGED_ENV:
         monkeypatch.delenv(name, raising=False)
+    from veloxa.releases import current_time, load_authorisations, load_schedule
+
+    now, auth = current_time(), load_authorisations()      # real clock: derive what is released by now
+    later = [p.id for p in load_schedule().packs if p.id != "D1" and p.release_at <= now]
+    pending = [p for p in later if p in auth]
+    awaiting = [p for p in later if p not in auth]
     with TestClient(create_app(dsn=app_dsn)) as client:
-        assert client.get("/health").json() == {"status": "degraded", "selfcheck": "pass", "pending_admission": [],
-                                                "awaiting_authorisation": ["D2"], "auth": "none", "oidc": "off",
+        assert client.get("/health").json() == {"status": "degraded" if later else "ok", "selfcheck": "pass",
+                                                "pending_admission": pending, "awaiting_authorisation": awaiting,
+                                                "auth": "none", "oidc": "off",
             "model": {"model": "disabled", "reason": "no provider configured (DENY_ALL); facts-only composition"}}
         assert client.get("/v1/meta/clock").json()["sealed_watermark"] == 1
         packs = {p["pack"]: p for p in client.get("/v1/meta/releases").json()["packs"]}
         assert packs["D1"]["status"] == "sealed" and packs["D1"]["record_count"] == EXPECTED_RECORDS
-        assert packs["D2"]["status"] == "awaiting_authorisation" and packs["D2"]["record_count"] is None
+        assert packs["D2"]["status"] == ("pending_admission" if "D2" in auth else "awaiting_authorisation")
+        assert packs["D2"]["record_count"] is None                    # `init` never admits a later pack
     with connect(app_dsn) as conn:
         assert len(ledger.visible_record_ids(conn, init_env, 1)) == EXPECTED_RECORDS - 3  # protected pay hidden
         with pytest.raises(ledger.InvalidTime):

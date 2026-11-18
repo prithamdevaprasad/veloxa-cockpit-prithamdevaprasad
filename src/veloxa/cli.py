@@ -84,8 +84,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         requested = [p.id for p in schedule.released(now)] if args.pack == "released" else [args.pack]
         for pack_id in requested:
             try:
-                require_authorised(pack_id, authorised)
-                results.append(admit_pack(conn, tenant_id, schedule, pack_id, root, now))
+                auth = require_authorised(pack_id, authorised)
+                results.append(admit_pack(conn, tenant_id, schedule, pack_id, root, now, authorisation=auth))
             except Exception as exc:  # nothing partial is ever committed
                 failure = AdmissionFailure(pack_id, exc)
                 break

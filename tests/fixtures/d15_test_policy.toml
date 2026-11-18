@@ -1,0 +1,54 @@
+# INVENTED D-15 policy for unit tests only. Same structure as the private decision file; every anchor and weight here
+# is a test value, not the hackathon decision (that file is private: VELOXA_D15_POLICY).
+[decision]
+decision_ref = "D-15"
+status = "approved"
+approved_by = "Test fixture"
+approved_on = 2026-11-18
+decision_record = "unit-test fixture; not a decision; not production"
+
+[content]
+method = "additive multi-attribute value (swing weights), interval arithmetic; ordinal severity, never a probability"
+scope = "unit tests"
+probabilities = "disabled"
+guardrail_tiers = []
+
+[content.weights]
+C1 = 0.30
+C2 = 0.35
+C3 = 0.20
+C4 = 0.15
+
+[content.anchors.C1]
+measure = "C1.required_rate_ratio@1"
+best = 1.0
+worst = 2.0
+fallback_measure = "C1.documented_slip_days@1"
+fallback_best = 0
+fallback_worst = 90
+
+[content.anchors.C2]
+measure = "C2.net_impact_12m@1"
+best = 0
+worst = 1000
+
+[content.anchors.C3]
+measure = "C3.oncall_concentration@1"
+best = 0.5
+worst = 1.0
+
+[content.anchors.C4]
+measure = "C4.materiality_multiple@1"
+best = 1.0
+worst = 5.0
+
+[content.missing]
+not_applicable = "best_anchor"
+unquantified = "full_interval"
+
+[content.gate_thresholds]
+eligibility_min_measured_weight = 0.5
+min_evidence_records = 1
+require_verified_evidence = true
+sensitivity_weight_delta = 0.05
+tie_rule = "interval_overlap"

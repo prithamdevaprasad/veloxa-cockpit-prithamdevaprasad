@@ -77,6 +77,7 @@ def admit_pack(
     data_root: Path,
     now: datetime,
     rules: list[Rule] | None = None,
+    authorisation=None,
 ) -> AdmissionResult:
     with tenant_tx(conn, tenant_id):
         existing = _batch_rows(conn, tenant_id)
@@ -88,6 +89,8 @@ def admit_pack(
     # 2. Read, hash and parse the same bytes, in memory.
     rules = rules if rules is not None else load_catalogue()
     entries = build_manifest(data_root / pack.folder, rules)
+    if authorisation is not None:                 # K-13: every file needs its own source approval
+        authorisation.check_sources([e.relpath for e in entries])
     digest = manifest_sha256(entries)
 
     early = _existing_outcome(pack, existing.get(pack.batch_seq), digest)  # fast path, re-checked under the lock

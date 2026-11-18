@@ -131,6 +131,9 @@ def _build_batch(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int) -> int:
     from . import chunking
 
     rows += chunking.project_batch(conn, tenant_id, k, PROSE_KINDS, _prose)    # 0019 retrieval units
+    from . import knowledge
+
+    rows += knowledge.build_batch(conn, tenant_id, k)                          # 0021 claims + conflict registry
     return rows
 
 
