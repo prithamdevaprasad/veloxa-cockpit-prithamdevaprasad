@@ -171,6 +171,20 @@ A refusal is a normal answer, `status: "refused"`, with a policy ID, reason and 
 | `frontend/` | The cockpit (React + Vite + TypeScript; Playwright journeys in `frontend/tests`) |
 | `tests/` | pytest suite (synthetic data); real-data and gold tests run only locally |
 
+## Company intelligence (migration 0021)
+
+| Module | Role |
+|---|---|
+| `veloxa.knowledge` | Deterministic claims per sealed batch and the Conflict Registry (explicit precedence rule R-HR-SOR-01; everything else `needs_review`) |
+| `veloxa.agents.people`, `veloxa.agents.persona` | The 14 people mapped to HR records (K-01/K-02, hackathon tenant); evidence-only workload; the Assumption Ledger (`scope = persona`, never evidence) |
+| `veloxa.ask.confidence` | Deterministic per-claim confidence (High / Moderate / Low / Unknown / Conflicting), specialist routing, answer-derived follow-ups |
+| `veloxa.risk.ranking`, `veloxa.risk.worry` | D-15 v1 weighted severity intervals; unknown = full range; overlap = shared rank; sensitivity flag |
+| `veloxa.findings` | Event and daily findings, verification before notification, department queues, lifecycle events |
+| `veloxa.connectors` | Read-only Jira adapter feeding the data room (mocked tests; disabled without configuration) |
+| `veloxa.llm.gemini`, `veloxa.ask.wording` | Optional Gemini wording experiment behind `GovernedLLMClient`; synthetic tenants only; deterministic acceptance check |
+
+**Scripts:** `scripts/company_lab.py`, `scripts/run_acceptance.py`, `scripts/gemini_ab.py`.
+
 ## Current limitations
 
 - Production identity (OD-E), a model provider (OD-B), hosting, secrets management, PITR, a trace store and image CVE scanning are **not** in place.

@@ -214,7 +214,8 @@ def admitted_batches(admin: str, name: str) -> dict[str, dict]:
     check_name(name)
     tid = config.tenant_uuid(load_schedule().tenant_slug)
     with connect(_dsn(admin, name)) as a:
-        return {b["pack_id"]: {"batch_seq": b["batch_seq"], "admitted_at": b["admitted_at"].astimezone(UTC).isoformat()}
+        return {b["pack_id"]: {"batch_seq": b["batch_seq"],
+                               "admitted_at": str(b.get("sealed_at") or b.get("admitted_at") or "")}
                 for b in ledger.batches(a, tid) if b["sealed"]}
 
 

@@ -244,6 +244,38 @@ Read the migration warning in section 5 first.
 | `http://127.0.0.1:8000` | API (Compose or `veloxa serve`) |
 | `127.0.0.1:55432` | PostgreSQL (Compose) |
 
+### Company intelligence (the supplied company, D1–D3)
+
+The real release packs are loaded into an **isolated, allowlisted lab database** (`veloxa_company[_x]`) through the
+governed pipeline. The `veloxa` database is never migrated by this.
+
+```powershell
+$env:VELOXA_DATA_PATH = "C:\path\to\Veloxa_Hackathon_Release_Packs"
+$env:VELOXA_TEST_ADMIN_DSN = "postgresql://veloxa_admin:local-dev-admin@127.0.0.1:55432/postgres"
+python scripts\company_lab.py --dry-run D3                      # parse + contracts + K-13 source check, no database
+python scripts\company_lab.py --db veloxa_company --create --admit --review   # released + authorised packs only
+python scripts\company_lab.py --db veloxa_company --serve --port 8780         # local fixture token printed
+python scripts\company_lab.py --inventory inventory.json        # hash, rule and release state of every Day file
+```
+
+**How it works:**
+- **Admission:** source by source (K-13). Every file of a pack must be listed in `config/admission_authorisations.toml`.
+  A pack is never opened before its release time. **Day 4 is embargoed until 19 Nov 2026 10:00 IST.**
+- **New views:**
+  - claims and the Conflict Registry: `/v1/knowledge/conflicts`;
+  - the 14 grounded people with labelled persona assumptions: `/v1/people`;
+  - the D-15 weighted worry list: `/v1/worry`, page *What to worry about*;
+  - findings: `/v1/findings`;
+  - connector status: `/v1/admin/connectors`.
+- **D-15 file:** the D-15 v1 decision file is private (`VELOXA_D15_POLICY`). Record it in a lab database only.
+
+**Acceptance suite (one command, synthetic, CI-safe):** `python scripts\run_acceptance.py`. 34 cases; a non-zero
+exit code on any failure; JSON and Markdown reports.
+
+**Gemini wording experiment** (synthetic Lumora data only; the result was *do not adopt*):
+`pip install -e ".[gemini]"`, then `python scripts\gemini_ab.py --env-file <path with GEMINI_API_KEY>`. The key stays
+on the backend; the supplied company's tenant is refused by name.
+
 ## 7. First-time demonstration
 
 Use the Demo Lab (section 6) for the fullest tour; the hackathon demo (`demo_env.py`, token `synthetic-demo-fixture-token-0123456789abcdef`) works the same way with less data.
@@ -292,7 +324,7 @@ cd frontend
 npm run build                              # type-check + production build; exit 0
 $env:VELOXA_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe).Path
 npx playwright install chromium            # once
-npx playwright test                        # browser journeys on desktop, tablet, mobile; pass = "54 passed"
+npx playwright test                        # browser journeys on desktop, tablet, mobile; pass = "60 passed"
 cd ..
 ```
 

@@ -51,7 +51,8 @@ function Item({ x }: { x: WorryItem }) {
               <td><Badge value={v.status === "measured" ? "active" : v.status === "not_applicable" ? "" : "open"}
                          label={v.status.replace(/_/g, " ")} /></td>
               <td className="mono small">{v.measure ?? "—"}</td>
-              <td>{v.status === "measured" ? `${v.low}${v.high !== v.low ? `–${v.high}` : ""}` : "unknown"}</td>
+              <td>{v.status === "measured" ? `${v.low}${v.high !== v.low ? `–${v.high}` : ""}`
+                : v.status === "not_applicable" ? "n/a" : "unknown"}</td>
               <td>{pct(v.weight)}</td>
               <td>{v.contribution_low.toFixed(2)}–{v.contribution_high.toFixed(2)}</td>
               <td className="small muted">{v.reason}</td>
