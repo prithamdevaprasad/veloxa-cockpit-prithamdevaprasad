@@ -44,7 +44,7 @@ export function ScenariosPage() {
         {list.state === "ready" && (list.data.commitments.length === 0 ? (
           <EmptyState title="No named commitments">The admitted evidence names no commitment to analyse.</EmptyState>
         ) : (
-          <form className="row" onSubmit={run}>
+          <form className="row" style={{ alignItems: "flex-end" }} onSubmit={run}>
             <label className="field">Commitment
               <select className="input" value={object} onChange={(e) => setObject(e.target.value)} required>
                 <option value="" disabled>Select</option>

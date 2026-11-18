@@ -1,176 +1,227 @@
+// The CEO overview: how the company is doing (governed and as-reported figures), what changed (agent updates,
+// submissions, clarifications), what needs attention (evidence-backed, unranked until the owner's D-15 values),
+// and where to look further (departments). Every number comes from the API and states its basis.
 import { useState } from "react";
 import { api } from "../api/client";
 import { product } from "../api/product";
 import type { AgentUpdate, ChartSource } from "../api/product-types";
 import { useApi } from "../api/useApi";
-import { useAsk } from "../ui/AskPill";
+import { DeptArt } from "../ui/art";
+import { useAsk } from "../ui/Ask";
 import { useEvidence } from "../ui/EvidenceDrawer";
-import { Avatar, BarChart, DemoBadge, Guidance, KpiCard, LineChart, Tabs } from "../ui/kit";
+import { Avatar, BarChart, DemoBadge, Guidance, Icon, KpiCard, LineChart, Tabs } from "../ui/kit";
 import { Badge, Button, Drawer, ErrorState, Loading, Section } from "../ui";
 
 // Charts are only drawn for sources the viewer may read; each says what it was computed from.
-const CHARTS: { system: string; title: string; x: string; agg: "sum" | "count"; y?: string; kind: "line" | "bar" }[] = [
-  { system: "revenue_reporting", title: "ARR by month", x: "Month", agg: "sum", y: "ARR", kind: "line" },
-  { system: "fp_and_a", title: "Spend variance by department (actual − budget)", x: "Department", agg: "sum",
-    y: "Variance", kind: "bar" },
-  { system: "crm", title: "Pipeline value by stage", x: "Stage", agg: "sum", y: "Amount", kind: "bar" },
-  { system: "issue_tracker", title: "Issues by status", x: "Status", agg: "count", kind: "bar" },
-  { system: "people_metrics", title: "Headcount snapshots by month", x: "Month", agg: "sum", y: "Headcount", kind: "line" },
-  { system: "incident_log", title: "Incidents by month", x: "Month", agg: "count", kind: "bar" },
-  { system: "zoho_books", title: "Ledger lines by cost centre", x: "Cost Centre", agg: "count", kind: "bar" },
+const CHARTS: { system: string; title: string; short: string; x: string; agg: "sum" | "count"; y?: string;
+                kind: "line" | "bar" }[] = [
+  { system: "revenue_reporting", title: "ARR by month", short: "ARR", x: "Month", agg: "sum", y: "ARR", kind: "line" },
+  { system: "people_metrics", title: "Headcount snapshots by month", short: "Headcount", x: "Month", agg: "sum",
+    y: "Headcount", kind: "line" },
+  { system: "crm", title: "Pipeline value by stage", short: "Pipeline", x: "Stage", agg: "sum", y: "Amount", kind: "bar" },
+  { system: "fp_and_a", title: "Spend variance by department (actual minus budget)", short: "Spend variance",
+    x: "Department", agg: "sum", y: "Variance", kind: "bar" },
+  { system: "incident_log", title: "Incidents by month", short: "Incidents", x: "Month", agg: "count", kind: "bar" },
+  { system: "issue_tracker", title: "Issues by status", short: "Issues", x: "Status", agg: "count", kind: "bar" },
+  { system: "zoho_books", title: "Ledger lines by cost centre", short: "Ledger", x: "Cost Centre", agg: "count", kind: "bar" },
 ];
+
+const KIND_LABEL: Record<string, string> = {
+  new_finding: "New finding", commitment_changed: "Commitment changed", dependency_identified: "Dependency identified",
+  source_disagreement: "Sources disagree", incident_update: "Incident update", department_update: "Department update",
+  unresolved_question: "Open question", new_evidence: "New evidence",
+};
 
 function Chart({ c }: { c: (typeof CHARTS)[number] }) {
   const [s] = useApi((sig) => product.series({ system: c.system, x: c.x, agg: c.agg, y: c.y }, sig), [c.system]);
-  if (s.state === "loading") return <Loading lines={4} />;
+  if (s.state === "loading") return <Loading lines={5} />;
   if (s.state === "error") return <Guidance title="Not available">{s.error.message}</Guidance>;
   const pts = s.data.points.map((p) => ({ x: p.x, value: p.value }));
   return (
-    <div className="stack">
+    <div>
       {c.kind === "line" ? <LineChart points={pts} label={c.title} />
         : <BarChart rows={pts.map((p) => ({ label: p.x, values: [p.value] }))} series={[c.y ?? "count"]} label={c.title} />}
-      <p className="small muted">{s.data.basis} · {s.data.sources.join(", ")}</p>
+      <p className="chart-foot">{cap(s.data.basis)}. Source: {s.data.sources.join(", ")}.</p>
     </div>
   );
+}
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+function greeting(): string {
+  const h = new Date().getHours();
+  return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
+}
+
+export function relTime(iso: string): string {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 60) return mins <= 1 ? "just now" : `${mins} min ago`;
+  if (mins < 60 * 24) return `${Math.round(mins / 60)} h ago`;
+  if (mins < 60 * 24 * 7) return `${Math.round(mins / 1440)} d ago`;
+  return new Date(iso).toLocaleDateString();
 }
 
 export function OverviewPage({ go }: { go: (r: string) => void }) {
   const [me] = useApi((s) => product.me(s), []);
   const [ov, reloadOv] = useApi((s) => product.overview(s), []);
   const [srcs] = useApi((s) => product.chartSources(s), []);
-  const [deps] = useApi((s) => api.dependencies(s), []);
-  const [today] = useApi((s) => api.today(s), []);
   const ask = useAsk();
-  const name = me.state === "ready" ? (me.data.principal.display_name ?? "there") : "";
+  const evidence = useEvidence();
+  const name = me.state === "ready" ? (me.data.principal.display_name ?? "") : "";
   const available = srcs.state === "ready" ? new Set(srcs.data.sources.map((x: ChartSource) => x.system)) : new Set<string>();
-  const charts = CHARTS.filter((c) => available.has(c.system)).slice(0, 2);
+  const charts = CHARTS.filter((c) => available.has(c.system));
   return (
     <>
-      <header className="page-top">
+      <header className="ov-head">
         <div>
-          <h1>Welcome{name ? `, ${name}` : ""}</h1>
-          <p className="muted small">
-            {me.state === "ready" && <>{me.data.tenant.display_name} · </>}
-            {ov.state === "ready" ? ov.data.read_basis.banner : "Loading the knowledge point…"}{" "}
-            <DemoBadge show={ov.state === "ready" && ov.data.synthetic} />
-          </p>
+          <h1>Welcome{name ? `, ${name.split(" ")[0]}` : ""}</h1>
+          <div className="ov-meta">
+            <span>{greeting()}. {me.state === "ready" ? `${me.data.tenant.display_name} at a glance.` : ""}</span>
+            {ov.state === "ready" && <span className="fresh" title={ov.data.read_basis.banner}>
+              Current knowledge <span className="k">K={ov.data.read_basis.batch_seq}</span></span>}
+          </div>
         </div>
         <div className="row">
-          <Button onClick={() => ask.ask("")}>Ask Veloxa</Button>
-          <Button onClick={() => go("evidence")}>Upload evidence</Button>
+          <Button variant="primary" onClick={() => ask.open()}><Icon name="ask" size={16} /> Ask Veloxa</Button>
+          <Button onClick={() => go("evidence")}><Icon name="upload" size={16} /> Upload evidence</Button>
         </div>
       </header>
 
-      <Section aria-label="Key figures">
-        {ov.state === "loading" && <Loading lines={2} />}
-        {ov.state === "error" && <ErrorState error={ov.error} onRetry={reloadOv} />}
-        {ov.state === "ready" && (ov.data.kpis.length === 0
-          ? <Guidance title="Nothing to show yet">{ov.data.notes[0] ?? "No admitted evidence you may read."}</Guidance>
-          : <div className="kpi-strip">{ov.data.kpis.map((k, i) => (
-              <KpiCard key={k.key} label={k.label} value={typeof k.value === "number" ? k.value.toLocaleString() : k.value}
-                       basis={k.basis} dark={i === 0} />))}</div>)}
-      </Section>
+      <div className="ov-grid">
+        <section className="kpi-strip" aria-label="Key figures">
+          {ov.state === "loading" && [0, 1, 2, 3].map((i) => <div key={i} className="kpi"><Loading lines={2} /></div>)}
+          {ov.state === "error" && <div className="section" style={{ gridColumn: "1 / -1" }}><ErrorState error={ov.error} onRetry={reloadOv} /></div>}
+          {ov.state === "ready" && (ov.data.kpis.length === 0
+            ? <Guidance title="Nothing to show yet">{ov.data.notes[0] ?? "No admitted evidence you may read."}</Guidance>
+            : ov.data.kpis.map((k) => (
+                <KpiCard key={k.key} label={k.label} basis={k.basis}
+                         value={typeof k.value === "number" ? k.value.toLocaleString() : k.value}
+                         onSource={k.evidence.length ? () => evidence.open(k.evidence[0], `${k.label}: ${k.basis}`) : undefined} />)))}
+        </section>
 
-      <div className="grid-2">
-        {charts.length === 0 ? (
-          <Section title="Analytics"><Guidance title="No chartable sources">
-            Charts appear once departments contribute exports you are authorised to read (revenue, budgets, pipeline,
-            issues, incidents). Upload them in Evidence &amp; Data.</Guidance></Section>
-        ) : charts.map((c) => <Section key={c.system} title={c.title}><Chart c={c} /></Section>)}
+        <Performance charts={charts} loading={srcs.state === "loading"} go={go} />
+        <Attention />
+        <RecentIntelligence go={go} />
+        <DepartmentsCard go={go} />
       </div>
-
-      <div className="grid-2">
-        <Section title="Needs attention" subtitle="Evidence-backed signals. Not ranked: ranking needs the owner's D-15 values.">
-          {deps.state === "loading" && <Loading lines={3} />}
-          {deps.state === "error" && <ErrorState error={deps.error} />}
-          {deps.state === "ready" && (
-            deps.data.warnings.length === 0 && (today.state !== "ready" || today.data.today.items.length === 0)
-              ? <Guidance title="Nothing flagged">No admitted record states a delay, a missing date, a single-source
-                  commitment or a conflict right now.</Guidance>
-              : <ul className="plain stack">
-                  {deps.data.warnings.slice(0, 6).map((w, i) => (
-                    <li key={i} className="attention">
-                      <Badge value="open" label={w.kind.replace(/_/g, " ")} />
-                      <span>{w.statement}</span>
-                      <Button variant="ghost" onClick={() => ask.ask(`What do we know about ${w.commitment}?`)}>Ask</Button>
-                    </li>))}
-                  {today.state === "ready" && today.data.today.items.map((t, i) => (
-                    <li key={`t${i}`} className="attention"><Badge value="open" label="watch" /><span>{t.title}</span></li>))}
-                </ul>)}
-        </Section>
-        <Section title="Quick access">
-          <div className="quick">
-            <button onClick={() => ask.ask("")}>Ask Veloxa</button>
-            <button onClick={() => go("evidence")}>Upload evidence</button>
-            <button onClick={() => go("evidence")}>Review submissions</button>
-            <button onClick={() => go("agents")}>View agents</button>
-            <button onClick={() => go("departments")}>View departments</button>
-            <button onClick={() => go("intelligence")}>Review conflicts</button>
-          </div>
-        </Section>
-      </div>
-
-      <RecentUpdates go={go} />
     </>
   );
 }
 
-const KIND_LABEL: Record<string, string> = {
-  new_finding: "New finding", commitment_changed: "Commitment changed", dependency_identified: "Dependency",
-  source_disagreement: "Source disagreement", incident_update: "Incident", department_update: "Department update",
-  unresolved_question: "Unresolved question", new_evidence: "New evidence",
-};
+function Performance({ charts, loading, go }: { charts: typeof CHARTS; loading: boolean; go: (r: string) => void }) {
+  const [sel, setSel] = useState<string | null>(null);
+  const c = charts.find((x) => x.system === sel) ?? charts[0];
+  return (
+    <Section title="Business performance" subtitle={c ? c.title : "Charts from the exports you are authorised to read."}
+             aria-label="Business performance" className="span-8"
+             actions={charts.length > 1 ? (
+               <div className="seg" role="group" aria-label="Chart">
+                 {charts.slice(0, 5).map((x) => <button key={x.system} aria-pressed={x === c} onClick={() => setSel(x.system)}>
+                   {x.short}</button>)}
+               </div>) : undefined}>
+      {loading ? <Loading lines={6} /> : c ? <Chart key={c.system} c={c} /> : (
+        <Guidance title="No chartable sources yet">Charts appear once departments contribute exports you may read, such
+          as revenue, budgets, pipeline or incidents. <button className="link" onClick={() => go("evidence")}>Upload them in
+          Evidence &amp; Data</button>.</Guidance>)}
+    </Section>
+  );
+}
 
-function RecentUpdates({ go }: { go: (r: string) => void }) {
-  const [tab, setTab] = useState<"agents" | "conversations" | "activity">("agents");
+function Attention() {
+  const [deps] = useApi((s) => api.dependencies(s), []);
+  const [today] = useApi((s) => api.today(s), []);
+  const ask = useAsk();
+  const warnings = deps.state === "ready" ? deps.data.warnings : [];
+  const items = today.state === "ready" ? today.data.today.items : [];
+  return (
+    <Section title="Needs attention" aria-label="Needs attention" className="span-4"
+             subtitle="Evidence-backed signals, not ranked: ranking waits for the owner's D-15 values.">
+      {(deps.state === "loading" || today.state === "loading") && <Loading lines={4} />}
+      {deps.state === "error" && <ErrorState error={deps.error} />}
+      {deps.state === "ready" && today.state !== "loading" && (warnings.length === 0 && items.length === 0
+        ? <Guidance title="Nothing flagged">No admitted record states a delay, a missing date, a single-source commitment
+            or a conflict right now.</Guidance>
+        : <ul className="plain attention-list">
+            {warnings.slice(0, 5).map((w, i) => (
+              <li key={i}>
+                <span className="sig" aria-hidden="true" />
+                <span className="what">{cap(w.statement)}</span>
+                <span className="acts"><Badge value="open" label={w.kind.replace(/_/g, " ")} />
+                  <button className="link small" onClick={() => ask.ask(`What do we know about ${w.commitment}?`)}>
+                    Ask about this</button></span>
+              </li>))}
+            {items.slice(0, 3).map((t, i) => (
+              <li key={`t${i}`}>
+                <span className="sig info" aria-hidden="true" />
+                <span className="what">{t.title}</span>
+                <span className="acts small muted">{t.why_shown}</span>
+              </li>))}
+          </ul>)}
+    </Section>
+  );
+}
+
+function RecentIntelligence({ go }: { go: (r: string) => void }) {
+  const [tab, setTab] = useState<"agents" | "requests" | "activity">("agents");
   const [ups] = useApi((s) => product.updates(undefined, s), []);
-  const [threads] = useApi((s) => product.threads(false, s), []);
+  const [reqs] = useApi((s) => product.clarifications(s), []);
   const [subs] = useApi((s) => product.submissions(undefined, s), []);
   const [open, setOpen] = useState<AgentUpdate | null>(null);
   const ask = useAsk();
   const evidence = useEvidence();
   return (
-    <Section title="Recent Agent Updates" subtitle="Summaries of persisted agent sessions, with their evidence.">
-      <Tabs label="Recent activity" value={tab} onChange={setTab} tabs={[
-        { value: "agents", label: "Agents", count: ups.state === "ready" ? ups.data.updates.length : undefined },
-        { value: "conversations", label: "Conversations",
-          count: threads.state === "ready" ? threads.data.threads.length : undefined },
-        { value: "activity", label: "Activity", count: subs.state === "ready" ? subs.data.submissions.length : undefined }]} />
+    <Section title="Recent intelligence" aria-label="Recent intelligence" className="span-8"
+             subtitle="What changed: agent updates from recorded sessions, clarification requests and new evidence.">
+      <Tabs label="Recent intelligence" value={tab} onChange={setTab} tabs={[
+        { value: "agents", label: "Agent updates", count: ups.state === "ready" ? ups.data.updates.length : undefined },
+        { value: "requests", label: "Clarifications", count: reqs.state === "ready" ? reqs.data.requests.length : undefined },
+        { value: "activity", label: "New evidence", count: subs.state === "ready" ? subs.data.submissions.length : undefined }]} />
       {tab === "agents" && (ups.state === "loading" ? <Loading /> : ups.state === "error" ? <ErrorState error={ups.error} />
         : ups.data.updates.length === 0
           ? <Guidance title="No agent updates yet">An update is published from a completed agent interview. Open an
               agent, interview it, then publish its update.</Guidance>
-          : <ul className="plain updates">{ups.data.updates.slice(0, 8).map((u) => (
+          : <ul className="plain updates">{ups.data.updates.slice(0, 6).map((u) => (
               <li key={u.update_id}>
                 <button className="update" onClick={() => setOpen(u)}>
-                  <Avatar name={u.agent_id} />
+                  <Avatar name={u.agent_id} size={36} />
                   <span className="update-body">
                     <span className="update-top"><strong>{u.agent_id.replace(/^syn-/, "")}</strong>
-                      <span className="muted small">{u.department.replace("_", " ")}</span>
-                      <DemoBadge show={u.synthetic} /></span>
+                      <span>{u.department.replace(/_/g, " ")}</span><DemoBadge show={u.synthetic} /></span>
                     <span className="update-title">{u.title}</span>
-                    <span className="small muted">{KIND_LABEL[u.kind] ?? u.kind}{u.project ? ` · ${u.project}` : ""} ·
-                      {" "}{u.evidence.length} source(s) · {new Date(u.created_at).toLocaleString()}</span>
+                    <span className="update-why">{KIND_LABEL[u.kind] ?? u.kind}{u.project ? ` in ${u.project}` : ""}.
+                      {" "}{u.evidence.length} source{u.evidence.length === 1 ? "" : "s"}.</span>
                   </span>
-                  <Badge value={u.status} />
+                  <span className="update-side"><span>{relTime(u.created_at)}</span><Badge value={u.status} /></span>
                 </button>
               </li>))}</ul>)}
-      {tab === "conversations" && (threads.state !== "ready" ? <Loading /> : threads.data.threads.length === 0
-        ? <Guidance title="No saved conversations">Ask Veloxa from the pill below; conversations are saved here.</Guidance>
-        : <ul className="plain">{threads.data.threads.slice(0, 8).map((t) => (
-            <li key={t.thread_id} className="row-item"><span>{t.title}</span>
-              <span className="small muted">{t.answers} answer(s)</span></li>))}</ul>)}
-      {tab === "activity" && (subs.state !== "ready" ? <Loading /> : subs.data.submissions.length === 0
-        ? <Guidance title="No submissions">Department contributions appear here as they move through review.</Guidance>
-        : <RecentEvidence rows={subs.data.submissions.slice(0, 8)} onOpen={() => go("evidence")} />)}
+      {tab === "requests" && (reqs.state === "loading" ? <Loading /> : reqs.state === "error" ? <ErrorState error={reqs.error} />
+        : reqs.data.requests.length === 0
+          ? <Guidance title="No clarification requests">Ask a department from Intelligence. Veloxa records the request;
+              it does not send notifications yet.</Guidance>
+          : <ul className="plain updates">{reqs.data.requests.slice(0, 6).map((r) => (
+              <li key={r.request_id} className="row-item" style={{ padding: "10px 4px" }}>
+                <DeptArt id={r.department_id} size={28} />
+                <span style={{ flex: 1, minWidth: 0 }}>{r.question}
+                  <span className="small muted" style={{ display: "block" }}>{r.department_id}, {relTime(r.created_at)}</span></span>
+                <Badge value={r.state === "open" ? "open" : r.state} label={r.state.replace(/_/g, " ")} />
+              </li>))}</ul>)}
+      {tab === "activity" && (subs.state === "loading" ? <Loading /> : subs.state === "error" ? <ErrorState error={subs.error} />
+        : subs.data.submissions.length === 0
+          ? <Guidance title="No submissions">Department contributions appear here as they move through review.</Guidance>
+          : <RecentEvidence rows={subs.data.submissions.slice(0, 6)} onOpen={() => go("evidence")} />)}
       {open && (
         <Drawer title={open.title} onClose={() => setOpen(null)}>
           <div className="stack">
-            <div className="row"><Avatar name={open.agent_id} /><strong>{open.agent_id}</strong><DemoBadge show={open.synthetic} />
-              <Badge value={open.status} /></div>
-            <p>{open.summary}</p>
-            <p className="small muted">{KIND_LABEL[open.kind] ?? open.kind}{open.project ? ` · ${open.project}` : ""} ·
-              session {open.session_id.slice(0, 8)} · {new Date(open.created_at).toLocaleString()}</p>
+            <div className="row"><Avatar name={open.agent_id} size={40} /><div><strong>{open.agent_id}</strong>
+              <div className="small muted">{open.department.replace(/_/g, " ")}</div></div>
+              <DemoBadge show={open.synthetic} /><Badge value={open.status} /></div>
+            <p style={{ maxWidth: "62ch" }}>{open.summary}</p>
+            <dl className="meta small">
+              <dt>What kind</dt><dd>{KIND_LABEL[open.kind] ?? open.kind}</dd>
+              {open.project && <><dt>Project</dt><dd>{open.project}</dd></>}
+              <dt>Recorded</dt><dd>{new Date(open.created_at).toLocaleString()}</dd>
+              <dt>Session</dt><dd className="mono">{open.session_id.slice(0, 8)}</dd>
+              {open.suggested_follow_up && <><dt>Follow-up</dt><dd>{open.suggested_follow_up}</dd></>}
+            </dl>
             <div className="row">
               <Button variant="primary" onClick={async () => {
                 const t = await product.updateThread(open.update_id); setOpen(null); ask.openThread(t.thread_id); }}>
@@ -179,11 +230,38 @@ function RecentUpdates({ go }: { go: (r: string) => void }) {
                 View evidence</Button>
               <Button onClick={() => { setOpen(null); go("agents"); }}>View agent</Button>
             </div>
-            {open.evidence.length > 1 && <ul className="plain small">{open.evidence.map((r) => (
+            {open.evidence.length > 1 && <ul className="plain small stack">{open.evidence.map((r) => (
               <li key={r}><button className="link" onClick={() => evidence.open(r, open.title)}>{r.split(":").pop()}</button></li>))}</ul>}
           </div>
         </Drawer>
       )}
+    </Section>
+  );
+}
+
+function DepartmentsCard({ go }: { go: (r: string) => void }) {
+  const [deps] = useApi((s) => product.departments(s), []);
+  const [ups] = useApi((s) => product.updates(undefined, s), []);
+  const updates = ups.state === "ready" ? ups.data.updates : [];
+  const forDept = (id: string) => updates.filter((u) => u.department === id || (id === "people" && u.department === "people_ops"));
+  return (
+    <Section title="Departments" aria-label="Departments overview" className="span-4" subtitle="Latest agent update per department.">
+      {deps.state === "loading" && <Loading lines={4} />}
+      {deps.state === "error" && <ErrorState error={deps.error} />}
+      {deps.state === "ready" && (deps.data.departments.length === 0
+        ? <Guidance title="No departments yet">An administrator adds departments in Administration.</Guidance>
+        : <ul className="plain dept-list">{deps.data.departments.map((d) => {
+            const u = forDept(d.department_id);
+            return (
+              <li key={d.department_id}>
+                <button className="dept-row" onClick={() => go("departments")}>
+                  <DeptArt id={d.department_id} size={36} />
+                  <span style={{ minWidth: 0 }}><span className="name">{d.name}</span>
+                    <span className="sub" style={{ display: "block" }}>{u[0]?.title ?? "No agent updates yet"}</span></span>
+                  <span className="count">{u.length ? `${u.length} update${u.length === 1 ? "" : "s"}` : ""}</span>
+                </button>
+              </li>);
+          })}</ul>)}
     </Section>
   );
 }
@@ -193,12 +271,12 @@ export function RecentEvidence({ rows, onOpen }: { rows: { submission_id: string
   onOpen: (id: string) => void }) {
   return (
     <div className="table-wrap"><table>
-      <thead><tr><th>Source</th><th>Department</th><th>Uploaded</th><th>Period</th><th>Contributor</th><th>Status</th><th /></tr></thead>
+      <thead><tr><th>Source</th><th>Department</th><th>Uploaded</th><th>Period</th><th>Status</th><th /></tr></thead>
       <tbody>{rows.map((r) => (
         <tr key={r.submission_id}>
           <td>{r.title}<div className="small muted">{r.source_type.replace(/_/g, " ")}</div></td>
           <td>{r.department_id}</td><td>{new Date(r.submitted_at).toLocaleDateString()}</td>
-          <td>{r.data_period ?? "—"}</td><td className="small">{r.submitted_by.replace("person:", "")}</td>
+          <td>{r.data_period ?? "Not stated"}</td>
           <td><Badge value={r.state === "projected" ? "active" : "pending_admission"} label={r.state.replace(/_/g, " ")} /></td>
           <td><Button variant="ghost" onClick={() => onOpen(r.submission_id)}>View</Button></td>
         </tr>))}</tbody>

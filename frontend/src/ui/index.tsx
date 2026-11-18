@@ -20,9 +20,9 @@ export function Badge({ value, label, title }: { value: string; label?: string; 
 }
 
 export function Section(props: { title?: string; subtitle?: ReactNode; actions?: ReactNode; children: ReactNode;
-                                  "aria-label"?: string }) {
+                                  "aria-label"?: string; className?: string }) {
   return (
-    <section className="section" aria-label={props["aria-label"] ?? props.title}>
+    <section className={`section${props.className ? ` ${props.className}` : ""}`} aria-label={props["aria-label"] ?? props.title}>
       {(props.title || props.actions) && (
         <div className="section-head">
           <div>

@@ -31,7 +31,7 @@ It also:
 | Workflows | DBOS 3.5.0 durable workflows (separate system database) |
 | Model client | Governed client: policy, redaction, hard token budgets, record/replay. **Default DENY_ALL: no model is called** |
 | API | FastAPI, versioned JSON (`/v1`). Gateway controls: security headers, body limits, rate limits |
-| Cockpit | React 18 + Vite 6 + TypeScript (`frontend/`) |
+| Cockpit | React 18 + Vite 6 + TypeScript (`frontend/`); dark plum design system, self-hosted IBM Plex fonts; rules in `.claude/skills/no-ai-slop-frontend` |
 
 **What works in the local demo** (synthetic data):
 - Today view and briefing;
@@ -259,10 +259,10 @@ Use the Demo Lab (section 6) for the fullest tour; the hackathon demo (`demo_env
    - KPI cards and charts computed only from admitted rows you may read (each says what it was computed from);
    - **Recent Agent Updates**, labelled DEMO.
 4. **Ask Veloxa:**
-   - the pill at the bottom, or **Ctrl+K**;
+   - the search field in the top bar, the *Ask Veloxa* button, or **Ctrl+K** opens a window over the page; the expand icon (or *Ask Veloxa* in the sidebar, `#/ask`) turns the same conversation into a full-screen workspace, and Back returns to the window;
    - try *What is our headcount by department?* or *What happened to Quartz 2.0?*;
    - answers show status, grade, interpretation, highlighted matches and numbered claims;
-   - every question is saved as a conversation: use *Saved* (on narrow screens) or the left list to reopen it.
+   - every question is saved as a conversation: search and reopen it from the conversation list (the menu icon on narrow screens).
 5. **Contextual Ask:** open an agent update on the Overview and choose *Ask about this*. Follow-ups keep that context.
 6. **Evidence drawer:** select a claim's source number. It shows source, location, version and batch K, classification, admission, your access, *Open original* and *Download original* (audited).
 7. **Evidence & Data:**
@@ -292,7 +292,7 @@ cd frontend
 npm run build                              # type-check + production build; exit 0
 $env:VELOXA_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe).Path
 npx playwright install chromium            # once
-npx playwright test                        # browser journeys on desktop, tablet, mobile; pass = "45 passed"
+npx playwright test                        # browser journeys on desktop, tablet, mobile; pass = "54 passed"
 cd ..
 ```
 

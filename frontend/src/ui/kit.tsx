@@ -1,30 +1,48 @@
 // Executive design-system primitives: icons, KPI cards, charts, tabs, avatars and DEMO markers.
 // Charts are plain SVG driven by API data (no chart library); each has a text equivalent for accessibility.
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
+import { AgentAvatar } from "./art";
 
 const PATHS: Record<string, string> = {
-  overview: "M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z",
-  agents: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5z",
-  departments: "M3 21V7l9-4 9 4v14h-6v-6H9v6H3z",
-  evidence: "M6 2h9l5 5v15H6V2zm8 1v5h5",
-  intelligence: "M12 2a7 7 0 0 0-4 12.7V18h8v-3.3A7 7 0 0 0 12 2zM9 21h6",
-  whatif: "M4 19h16M6 15l4-4 3 3 5-6",
-  timeline: "M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z",
-  admin: "M12 1l9 4v6c0 5-4 9.7-9 11-5-1.3-9-6-9-11V5l9-4z",
-  search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zm10 2-5-5",
-  send: "M3 20l18-8L3 4v6l12 2-12 2v6z",
+  overview: "M4 13h6V4H4v9zm0 7h6v-4H4v4zm10 0h6v-9h-6v9zm0-16v4h6V4h-6z",
+  ask: "M5 5h14v10H9l-4 4V5zm4 4h6M9 12h4",
+  agents: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 8c0-3.3 3.1-6 7-6s7 2.7 7 6",
+  departments: "M4 20V8l8-4 8 4v12M9 20v-5h6v5M4 20h16",
+  evidence: "M7 3h7l5 5v13H7V3zm7 0v5h5M10 13h6M10 17h6",
+  intelligence: "M12 3a6 6 0 0 0-3.5 10.9V17h7v-3.1A6 6 0 0 0 12 3zM10 21h4",
+  whatif: "M4 19h16M5 15l4-4 3 3 6-7m0 0h-4m4 0v4",
+  timeline: "M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z",
+  admin: "M12 3l8 3.5v5.5c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6.5L12 3z",
+  search: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zm9 2-4.3-4.3",
+  send: "M4 12h14m-5-6 6 6-6 6",
   close: "M6 6l12 12M18 6 6 18",
-  file: "M6 2h9l5 5v15H6V2z",
-  chat: "M4 4h16v12H8l-4 4V4z",
-  upload: "M12 3v12m-5-7 5-5 5 5M4 21h16",
+  expand: "M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7",
+  collapse: "M4 14h6v6M20 10h-6V4M10 14l-7 7M14 10l7-7",
+  menu: "M4 7h16M4 12h16M4 17h16",
+  plus: "M12 5v14M5 12h14",
+  file: "M7 3h7l5 5v13H7V3z",
+  chat: "M5 5h14v10H9l-4 4V5z",
+  upload: "M12 15V4m-5 5 5-5 5 5M4 20h16",
+  back: "M15 6l-6 6 6 6",
 };
 
 export function Icon({ name, size = 18, label }: { name: keyof typeof PATHS | string; size?: number; label?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7}
          strokeLinecap="round" strokeLinejoin="round" role={label ? "img" : undefined} aria-label={label}
          aria-hidden={label ? undefined : true}>
       <path d={PATHS[name] ?? PATHS.file} />
+    </svg>
+  );
+}
+
+/** Veloxa's mark: a stylised V cut from a lens. */
+export function BrandMark() {
+  return (
+    <svg className="brand-mark" viewBox="0 0 28 28" aria-hidden="true">
+      <rect width="28" height="28" rx="8" fill="#352b43" />
+      <path d="M7.5 8.5l6.5 12 6.5-12" fill="none" stroke="#c1a7f5" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="14" cy="9.5" r="2" fill="#9b7ae8" />
     </svg>
   );
 }
@@ -33,17 +51,18 @@ export function DemoBadge({ show }: { show: boolean }) {
   return show ? <span className="demo-badge" title="Synthetic demo data">DEMO</span> : null;
 }
 
-export function Avatar({ name }: { name: string }) {
-  const initials = name.replace(/^syn-/, "").split(/[-\s]+/).filter(Boolean).slice(0, 2)
-    .map((w) => w[0]?.toUpperCase()).join("");
-  return <span className="avatar" aria-hidden="true">{initials || "?"}</span>;
+/** Kept for existing call sites: an avatar for an agent or person id (illustration only for synthetic agents). */
+export function Avatar({ name, size }: { name: string; size?: number }) {
+  return <AgentAvatar id={name} size={size} />;
 }
 
-export function KpiCard({ label, value, basis, dark }: { label: string; value: ReactNode; basis: string; dark?: boolean }) {
+export function KpiCard({ label, value, basis, onSource }: { label: string; value: ReactNode; basis: string;
+                                                               onSource?: () => void }) {
   return (
-    <div className={`kpi${dark ? " dark" : ""}`}>
-      <div className="kpi-label">{label}</div>
-      <div className="kpi-value">{value}</div>
+    <div className="kpi">
+      <div className="kpi-label"><span>{label}</span>
+        {onSource && <button className="src" onClick={onSource} aria-label={`Source for ${label}`}>Source</button>}</div>
+      <div className={`kpi-value${typeof value === "string" && value.length > 14 ? " long" : ""}`}>{value}</div>
       <div className="kpi-basis">{basis}</div>
     </div>
   );
@@ -71,64 +90,88 @@ export function Guidance({ title, children }: { title: string; children: ReactNo
   );
 }
 
-function fmt(v: number): string {
-  if (Math.abs(v) >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(v) >= 1_000) return `${(v / 1_000).toFixed(0)}k`;
+export function fmt(v: number): string {
+  const a = Math.abs(v);
+  if (a >= 1_000_000) return `${(v / 1_000_000).toFixed(a >= 10_000_000 ? 0 : 1)}M`;
+  if (a >= 10_000) return `${(v / 1_000).toFixed(0)}k`;
+  if (a >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
   return String(Math.round(v * 10) / 10);
 }
 
-/** A line chart over ordered points (x = category labels). */
-export function LineChart({ points, label, height = 180 }: { points: { x: string; value: number }[]; label: string;
+/** A line chart over ordered points (x = category labels). Hover or focus shows each value. */
+export function LineChart({ points, label, height = 220 }: { points: { x: string; value: number }[]; label: string;
                                                              height?: number }) {
   const [hover, setHover] = useState<number | null>(null);
+  const gid = useId().replace(/:/g, "");
   if (points.length === 0) return <Guidance title="No data">Nothing admitted supports this chart yet.</Guidance>;
-  const w = 600, h = height, pad = 32;
-  const max = Math.max(...points.map((p) => p.value)), min = Math.min(0, ...points.map((p) => p.value));
-  const sx = (i: number) => pad + (i * (w - pad * 2)) / Math.max(1, points.length - 1);
-  const sy = (v: number) => h - pad - ((v - min) / Math.max(1, max - min)) * (h - pad * 2);
+  const w = 720, h = height, padL = 44, padR = 12, padT = 12, padB = 26;
+  const vals = points.map((p) => p.value);
+  const max = Math.max(...vals), min = Math.min(0, ...vals);
+  const sx = (i: number) => padL + (i * (w - padL - padR)) / Math.max(1, points.length - 1);
+  const sy = (v: number) => h - padB - ((v - min) / Math.max(1e-9, max - min)) * (h - padT - padB);
   const d = points.map((p, i) => `${i ? "L" : "M"}${sx(i).toFixed(1)},${sy(p.value).toFixed(1)}`).join(" ");
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => min + (max - min) * f);
+  const every = Math.max(1, Math.ceil(points.length / 8));
   return (
-    <figure className="chart" aria-label={label}>
-      <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label={label} preserveAspectRatio="none">
-        {[0, 0.5, 1].map((f) => <line key={f} x1={pad} x2={w - pad} y1={sy(min + (max - min) * f)}
-                                      y2={sy(min + (max - min) * f)} className="grid" />)}
-        <path d={`${d} L${sx(points.length - 1)},${sy(min)} L${sx(0)},${sy(min)} Z`} className="area" />
-        <path d={d} className="line" />
-        {points.map((p, i) => (
-          <circle key={p.x} cx={sx(i)} cy={sy(p.value)} r={hover === i ? 5 : 3} className="dot"
-                  onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
+    <figure className="chart" aria-label={label} onMouseLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label={label}>
+        <defs>
+          <linearGradient id={`area-${gid}`} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stopColor="#9b7ae8" stopOpacity="0.28" />
+            <stop offset="1" stopColor="#9b7ae8" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {ticks.map((t, i) => (
+          <g key={i}>
+            <line x1={padL} x2={w - padR} y1={sy(t)} y2={sy(t)} className="grid" />
+            <text x={padL - 8} y={sy(t) + 4} className="axis" textAnchor="end">{fmt(t)}</text>
+          </g>
         ))}
-        <text x={pad} y={14} className="axis">{fmt(max)}</text>
-        <text x={pad} y={h - 8} className="axis">{points[0].x}</text>
-        <text x={w - pad} y={h - 8} className="axis" textAnchor="end">{points[points.length - 1].x}</text>
+        {points.map((p, i) => i % every === 0 || i === points.length - 1 ? (
+          <text key={p.x} x={sx(i)} y={h - 6} className="axis" textAnchor="middle">{p.x}</text>) : null)}
+        <path d={`${d} L${sx(points.length - 1)},${sy(min)} L${sx(0)},${sy(min)} Z`} fill={`url(#area-${gid})`} />
+        <path d={d} className="line" />
+        {hover !== null && <line x1={sx(hover)} x2={sx(hover)} y1={padT} y2={h - padB} className="guide" />}
+        {points.map((p, i) => (
+          <g key={p.x}>
+            <rect className="hit" x={sx(i) - (w - padL - padR) / Math.max(1, points.length - 1) / 2} y={padT}
+                  width={(w - padL - padR) / Math.max(1, points.length - 1)} height={h - padT - padB}
+                  onMouseEnter={() => setHover(i)} />
+            <circle cx={sx(i)} cy={sy(p.value)} r={hover === i ? 5 : 2.5} className="dot" />
+          </g>
+        ))}
       </svg>
-      {hover !== null && <div className="chart-tip">{points[hover].x}: {points[hover].value.toLocaleString()}</div>}
+      {hover !== null && (
+        <div className="chart-tip" style={{ left: `${(sx(hover) / w) * 100}%`, top: `${(sy(points[hover].value) / h) * 100}%` }}>
+          <span>{points[hover].x}</span>{points[hover].value.toLocaleString()}
+        </div>
+      )}
       <figcaption className="sr-only">{points.map((p) => `${p.x}: ${p.value}`).join("; ")}</figcaption>
     </figure>
   );
 }
 
-/** Horizontal bars, optionally two series (e.g. budget vs actual). */
-export function BarChart({ rows, label, series }: { rows: { label: string; values: number[] }[]; label: string;
-                                                   series: string[] }) {
+/** Horizontal bars, optionally two series (e.g. budget vs actual). Negative values are drawn in the failure colour. */
+export function BarChart({ rows, label, series, listLabel }: { rows: { label: string; values: number[] }[]; label: string;
+                                                               series: string[]; listLabel?: string }) {
   if (rows.length === 0) return <Guidance title="No data">Nothing admitted supports this chart yet.</Guidance>;
-  const max = Math.max(1, ...rows.flatMap((r) => r.values));
+  const max = Math.max(1, ...rows.flatMap((r) => r.values.map(Math.abs)));
   return (
     <figure className="bars" aria-label={label}>
       {series.length > 1 && (
         <div className="legend small">{series.map((s, i) => <span key={s}><i className={`sw s${i}`} />{s}</span>)}</div>
       )}
-      <ul className="plain">
+      <ul className="plain" aria-label={listLabel}>
         {rows.map((r) => (
           <li key={r.label} className="bar-row">
-            <span className="bar-label small">{r.label}</span>
+            <span className="bar-label small" title={r.label}>{r.label}</span>
             <span className="bar-tracks">
               {r.values.map((v, i) => (
-                <span key={i} className={`bar-fill s${i}`} style={{ width: `${(v / max) * 100}%` }}
+                <span key={i} className={`bar-fill s${i}${v < 0 ? " neg" : ""}`} style={{ width: `${(Math.abs(v) / max) * 100}%` }}
                       title={`${series[i] ?? ""} ${v.toLocaleString()}`} />
               ))}
             </span>
-            <span className="bar-val small mono">{r.values.map(fmt).join(" / ")}</span>
+            <span className="bar-val small">{r.values.map(fmt).join(" / ")}</span>
           </li>
         ))}
       </ul>

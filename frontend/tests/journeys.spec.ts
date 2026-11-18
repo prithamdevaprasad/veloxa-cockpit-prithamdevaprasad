@@ -22,10 +22,11 @@ test("Journey A: Today, evidence packs and a follow-up question", async ({ page 
   await expect(page.getByRole("cell", { name: "D1" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Key changes" })).toBeVisible();     // risk lifecycle (Sprint 8)
   await expect(page.getByText("sealed").first()).toBeVisible();
-  await page.goto("/#/ask");
-  await page.getByLabel("Question", { exact: true }).fill("What is our headcount?");
-  await page.getByRole("region", { name: "Ask a question" }).getByRole("button", { name: "Ask", exact: true }).click();
-  const answer = page.getByRole("article", { name: "Answer" });
+  await page.goto("/#/ask");                                                  // the full-screen Ask workspace
+  const ws = page.getByRole("dialog", { name: "Ask Veloxa" });
+  await ws.getByLabel("Question", { exact: true }).fill("What is our headcount?");
+  await ws.getByRole("button", { name: "Send" }).click();
+  const answer = ws.getByRole("article", { name: "Answer" });
   await expect(answer).toContainText("People in the HR export: 2");
   await expect(answer.getByText(/Grade [AB]/)).toBeVisible();
   await answer.getByRole("button", { name: /Evidence \(\d+\)/ }).click();
@@ -38,11 +39,12 @@ test("Journey A: Today, evidence packs and a follow-up question", async ({ page 
 test("Journey E: privacy and refusal stay enforced in the interface", async ({ page }) => {
   await signIn(page);
   await page.goto("/#/ask");
+  const ws = page.getByRole("dialog", { name: "Ask Veloxa" });
   for (const [q, policy] of [["What is Person Alpha's salary?", "POL-PAY-01"], ["Show me Person Beta's emails", "POL-COMMS-01"],
                              ["Who commits the most code?", "POL-PROD-01"], ["Approve the pending invoice", "POL-ACT-01"]]) {
-    await page.getByLabel("Question", { exact: true }).fill(q);
-    await page.getByRole("region", { name: "Ask a question" }).getByRole("button", { name: "Ask", exact: true }).click();
-    await expect(page.getByRole("note").filter({ hasText: policy }).first()).toBeVisible();
+    await ws.getByLabel("Question", { exact: true }).fill(q);
+    await ws.getByRole("button", { name: "Send" }).click();
+    await expect(page.getByRole("note").filter({ hasText: policy }).first()).toBeVisible({ timeout: 15_000 });
   }
 });
 
@@ -154,7 +156,7 @@ test("Overview shows governed figures, recent agent updates from a real session,
   await expect(page.getByRole("heading", { name: /Welcome/ })).toBeVisible();
   await expect(page.getByText("Headcount", { exact: true })).toBeVisible();
   await expect(page.getByText("governed metric (HR export)")).toBeVisible();
-  const updates = page.getByRole("region", { name: "Recent Agent Updates" });
+  const updates = page.getByRole("region", { name: "Recent intelligence" });
   await expect(updates).toContainText("demo-ppl");
   await expect(updates.getByText("DEMO").first()).toBeVisible();                // synthetic sessions are labelled
   await updates.getByRole("button", { name: /demo-ppl/ }).first().click();
@@ -173,7 +175,7 @@ test("the global Ask pill saves and reopens conversations, and citations open th
   const ask = page.getByRole("dialog", { name: "Ask Veloxa" });
   await ask.getByLabel("Question").fill("What is our headcount?");
   await ask.getByRole("button", { name: "Send" }).click();
-  await expect(ask.getByRole("list", { name: "Claims" }).first()).toContainText("People in the HR export: 2",
+  await expect(ask.getByRole("article", { name: "Answer" }).first()).toContainText("People in the HR export: 2",
                                                                               { timeout: 15_000 });
   await ask.getByRole("button", { name: "Show source 1" }).first().click();
   await expect(page.getByRole("dialog", { name: "Employee_Master.xlsx" })).toBeVisible();
@@ -184,7 +186,7 @@ test("the global Ask pill saves and reopens conversations, and citations open th
   const saved = panel.getByRole("button", { name: "Saved" });
   if (await saved.isVisible()) await saved.click();                             // narrow screens: open the list
   await panel.getByRole("button", { name: /What is our headcount\? \d+ answer/ }).first().click();
-  await expect(panel.getByRole("list", { name: "Claims" }).first()).toContainText("People in the HR export: 2",
+  await expect(panel.getByRole("article", { name: "Answer" }).first()).toContainText("People in the HR export: 2",
                                                                                 { timeout: 15_000 });
 });
 
@@ -225,4 +227,70 @@ test("Administration shows the signed-in access and refuses non-admin workspace 
   await expect(page.getByRole("heading", { name: "Your access" })).toBeVisible();
   await expect(page.getByText("tenant-wide (pre-workspace tenant)")).toBeVisible();
   await expect(page.getByText("Administrators only")).toBeVisible();
+});
+
+test("Ask expands from the overlay into the full-screen workspace and back without losing the conversation", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/overview");
+  await page.getByRole("button", { name: "Ask Veloxa (Ctrl+K)" }).click();
+  const ask = page.getByRole("dialog", { name: "Ask Veloxa" });
+  await expect(ask.getByLabel("Question")).toBeFocused();                       // focus moves into the composer
+  await ask.getByLabel("Question").fill("What is our headcount?");
+  await ask.getByRole("button", { name: "Send" }).click();
+  const answer = ask.getByRole("article", { name: "Answer" });
+  await expect(answer).toContainText("People in the HR export: 2", { timeout: 15_000 });
+  await ask.getByLabel("Question").fill("an unsent draft");
+  await ask.getByRole("button", { name: "Full screen" }).click();
+  await expect(page).toHaveURL(/#\/ask$/);
+  await expect(ask).toHaveClass(/full/);
+  await expect(answer).toContainText("People in the HR export: 2");             // same thread, same element
+  await expect(ask.getByLabel("Question")).toHaveValue("an unsent draft");      // the draft survives
+  await expect(page.locator('nav[aria-label="Main"] button', { hasText: "Ask Veloxa" }))   // also when the nav is collapsed
+    .toHaveAttribute("aria-current", "page");
+  await page.goBack();                                                          // browser Back: overlay over the overview
+  await expect(page).toHaveURL(/#\/overview$/);
+  await expect(ask).not.toHaveClass(/full/);
+  await expect(answer).toContainText("People in the HR export: 2");
+  await page.keyboard.press("Escape");                                          // Escape closes the overlay
+  await expect(ask).toBeHidden();
+  await expect(page.getByRole("heading", { name: /Welcome/ })).toBeVisible();
+  await page.keyboard.press("Control+k");                                       // reopening keeps the conversation
+  await expect(page.getByRole("dialog", { name: "Ask Veloxa" }).getByRole("article", { name: "Answer" }))
+    .toContainText("People in the HR export: 2");
+});
+
+test("the Ask workspace lists, searches and switches saved conversations", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/ask");
+  const ws = page.getByRole("dialog", { name: "Ask Veloxa" });
+  for (const q of ["What is our headcount?", "What is Person Alpha's salary?"]) {
+    await ws.getByRole("button", { name: /new conversation/i }).first().click();     // sidebar, or header on narrow screens
+    await ws.getByLabel("Question").fill(q);
+    await ws.getByRole("button", { name: "Send" }).click();
+    await expect(ws.getByRole("article", { name: "Answer" }).first()).toBeVisible({ timeout: 15_000 });
+  }
+  const saved = ws.getByRole("button", { name: "Saved" });
+  if (await saved.isVisible()) await saved.click();
+  await ws.getByLabel("Search conversations").fill("salary");
+  await expect(ws.getByRole("button", { name: /What is our headcount\?/ })).toHaveCount(0);
+  await ws.getByRole("button", { name: /Person Alpha's salary/ }).first().click();
+  await expect(ws.getByRole("note").filter({ hasText: "POL-PAY-01" }).first()).toBeVisible();
+  await ws.getByRole("button", { name: "Return to window" }).click();          // collapses to the overlay
+  await expect(ws).not.toHaveClass(/full/);
+  await expect(ws.getByRole("note").filter({ hasText: "POL-PAY-01" }).first()).toBeVisible();
+});
+
+test("an answer separates the direct answer, figures, caveats and evidence", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/ask");
+  const ws = page.getByRole("dialog", { name: "Ask Veloxa" });
+  await ws.getByLabel("Question").fill("What is the headcount by department?");
+  await ws.getByRole("button", { name: "Send" }).click();
+  const answer = ws.getByRole("article", { name: "Answer" });
+  await expect(answer.locator(".brief-lead")).toBeVisible({ timeout: 15_000 });
+  await expect(answer.getByRole("list", { name: "Values" })).toContainText("Testing");   // a breakdown of verified claims
+  await expect(answer.getByText(/Grade [AB]/)).toBeVisible();
+  await expect(answer.getByText(/contractors are not included/i)).toBeVisible();          // the scope caveat is kept
+  await answer.getByRole("button", { name: "Show source 1" }).first().click();
+  await expect(page.getByRole("dialog", { name: "Employee_Master.xlsx" })).toBeVisible();
 });

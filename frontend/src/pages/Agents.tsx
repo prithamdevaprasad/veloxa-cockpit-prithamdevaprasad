@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { api, ApiError, newIdempotencyKey } from "../api/client";
 import { useApi } from "../api/useApi";
 import type { AgentSession, AgentSummary, AgentTurn, SessionDetail } from "../api/types";
+import { AgentAvatar } from "../ui/art";
 import { Badge, Button, EmptyState, ErrorState, EvidenceList, Loading, PageHead, Section, Segmented } from "../ui";
 
 type Cat = "all" | AgentSummary["category"];
@@ -25,7 +26,7 @@ export function AgentsPage() {
 
   return (
     <>
-      <PageHead title="Employee agents" intro="One shared runtime. Each agent answers only from evidence that is in its
+      <PageHead title="Agents" intro="One shared runtime. Each agent answers only from evidence that is in its
         knowledge boundary, that you are authorised to see, and that interview policy allows. Agents take no action." />
       <div className="row" style={{ marginBottom: 12 }}>
         <Segmented label="Category" value={cat} options={CATS} onChange={(c) => { setCat(c); setDirPage(0); }} />
@@ -43,7 +44,7 @@ export function AgentsPage() {
                 <tbody>{rows.map((a) => (
                   <tr key={a.agent_id} className="clickable" tabIndex={0} aria-selected={selected?.agent_id === a.agent_id}
                       onClick={() => setSelected(a)} onKeyDown={(e) => e.key === "Enter" && setSelected(a)}>
-                    <td className="mono">{a.agent_id}</td>
+                    <td><span className="row" style={{ flexWrap: "nowrap", gap: 10 }}><AgentAvatar id={a.agent_id} size={28} /><span className="mono">{a.agent_id}</span></span></td>
                     <td>{a.category.replace("_", " ")}</td>
                     <td><Badge value={a.activation} label={a.activation === "synthetic_test" ? "synthetic test" : a.activation} />
                       {!a.assigned && !a.agent_id.startsWith("syn-") && <> <Badge value="unassigned" /></>}</td>
@@ -82,6 +83,11 @@ function AgentDetail({ agent }: { agent: AgentSummary }) {
 
   return (
     <Section title={agent.agent_id} subtitle={describe(agent)}>
+      <div className="row" style={{ gap: 12, marginBottom: 12, flexWrap: "nowrap" }}>
+        <AgentAvatar id={agent.agent_id} size={56} />
+        <span className="small muted">{agent.agent_id.startsWith("syn-") ? "Illustration of a synthetic agent. It is not a portrait of anyone."
+          : "Real employees are shown by initials until an approved profile image exists."}</span>
+      </div>
       <dl className="small" style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 12px" }}>
         <dt className="muted">Category</dt><dd style={{ margin: 0 }}>{agent.category.replace("_", " ")}</dd>
         <dt className="muted">Activation</dt><dd style={{ margin: 0 }}><Badge value={agent.activation} /></dd>
