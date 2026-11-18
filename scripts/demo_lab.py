@@ -231,6 +231,9 @@ def main() -> int:
                          agent_runtime=lambda conn: AgentRuntime(conn, "Asia/Kolkata",
                                                                  kb=SyntheticTestKnowledgeBoundary()))
         print(f"Demo Lab API on http://127.0.0.1:{args.port}; token {DEMO_TOKEN} (demo CEO)", flush=True)
+        from veloxa import telemetry as _telemetry
+
+        _telemetry.configure_logging()        # unhandled errors are logged with their request ID and traceback
         uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
     return 0
 

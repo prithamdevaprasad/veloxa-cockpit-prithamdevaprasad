@@ -31,7 +31,7 @@ function Profile({ p, onClose }: { p: Person; onClose: () => void }) {
         </div>
         <Tabs label="Profile" value={tab} onChange={setTab} tabs={[{ value: "overview", label: "Overview" },
           { value: "workload", label: "Workload" }, { value: "personal", label: "Personal" },
-          { value: "unknowns", label: "Unknown" }]} />
+          { value: "unknowns", label: "Not yet known" }]} />
         {tab === "overview" && <dl className="meta">{(p.verified_facts ?? []).map((f) => (
           <><dt key={`k${f.fact}`}>{f.fact}</dt><dd key={`v${f.fact}`}>{f.value}{" "}
             <button className="link small" onClick={() => evidence.open(f.record, f.fact)}>source</button></dd></>))}</dl>}

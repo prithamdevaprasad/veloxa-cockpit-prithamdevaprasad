@@ -435,3 +435,17 @@ mark.hl { background: #fdeccb; color: var(--text); padding: 0 2px; border-radius
 
 .dash-side { display: grid; gap: 16px; align-content: start; }
 .dash-side > .section { margin: 0; }
+
+/* Executive explanations: each section says where its statements come from */
+.explain { display: grid; gap: 10px; }
+.explain-head { font-size: 16px; font-weight: 600; line-height: 1.45; max-width: 75ch; }
+.explain-sec { border-radius: 0 8px 8px 0; }
+.explain-sec-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.explain-sec-head h4 { font-size: 14px; font-weight: 600; margin: 0; }
+.basis-tag { font-size: 12px; color: var(--text-2, #5b5873); white-space: nowrap; }
+.explain-items { display: grid; gap: 6px; margin-top: 6px; max-width: 75ch; }
+.explain-items li { line-height: 1.5; }
+.explain-items .link { margin-left: 8px; }
+.explain-actions { gap: 12px; align-items: center; }
+.explain-details summary { cursor: pointer; font-size: 13px; color: var(--accent); }
+.explain-details[open] summary { margin-bottom: 6px; }

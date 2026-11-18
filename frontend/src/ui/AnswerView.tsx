@@ -4,10 +4,10 @@
 // added, inferred or dropped: each claim keeps its citations, and the full claim text stays in the accessible text.
 import { useState } from "react";
 import { product } from "../api/product";
-import type { Wording } from "../api/product-types";
 import type { Answer, Claim, Evidence } from "../api/types";
 import { useAsk } from "./Ask";
 import { useEvidence } from "./EvidenceDrawer";
+import { ExplanationView, useExplanation } from "./Explanation";
 import { BarChart } from "./kit";
 import { Badge, Drawer } from "./index";
 
@@ -95,7 +95,6 @@ export function AnswerView({ answer }: { answer: Answer }) {
   const st = STATUS[answer.status] ?? { label: answer.status, tone: "" };
   const partial = answer.unknowns.some((u) => /not shown|incomplete|missing/i.test(u));
   const scope = answer.qualifiers.filter((q) => !FACTS_ONLY.test(q));
-  const factsOnly = answer.qualifiers.some((q) => FACTS_ONLY.test(q));
 
   // At most three citation numbers per claim; the rest stay one click away in the Evidence list.
   const Cites = ({ c }: { c: Claim }) => {
@@ -106,6 +105,11 @@ export function AnswerView({ answer }: { answer: Answer }) {
       {ids.length > 3 && <button className="cite" onClick={() => setOpen(true)}
                                  aria-label={`${ids.length - 3} more sources`}>+{ids.length - 3}</button>}</>;
   };
+
+  // Every answer that is not a refusal is explained automatically (a refusal keeps its own policy notice).
+  const explainable = answer.status !== "refused" && !!answer.audit_id;
+  const ex = useExplanation(async () => (await product.explainAnswer(answer.audit_id!)).explanation,
+                            [answer.audit_id], explainable);
 
   // The direct answer: the single verified claim itself, or what was answered, or the status in plain words.
   let lead: string, leadTone = "";
@@ -134,6 +138,7 @@ export function AnswerView({ answer }: { answer: Answer }) {
       </div>
 
       <p className={`brief-lead ${leadTone}`}>{lead}</p>
+      {explainable && <ExplanationView ex={ex} compact />}
 
       {answer.refusal && (
         <div className="callout bad" role="note">
@@ -223,7 +228,7 @@ export function AnswerView({ answer }: { answer: Answer }) {
         </section>
       )}
 
-      {(answer.unknowns.length > 0 || scope.length > 0) && (
+      {!ex.e && (answer.unknowns.length > 0 || scope.length > 0) && (   /* shown by the explanation once loaded */
         <div className={`caveats${partial ? "" : " neutral"}`}>
           <strong>{partial ? "Some information is missing" : "Scope and caveats"}</strong>
           <ul className="small">
@@ -240,13 +245,11 @@ export function AnswerView({ answer }: { answer: Answer }) {
         </p>
       )}
       {(answer.follow_ups?.length ?? 0) > 0 && <FollowUps items={answer.follow_ups!} />}
-      {!["refused", "abstained", "conflict"].includes(answer.status) && answer.audit_id && <Explain id={answer.audit_id} />}
 
       <footer className="brief-foot">
         {answer.evidence.length > 0 && (
           <button className="btn" onClick={() => setOpen(true)}>Evidence ({answer.evidence.length})</button>)}
         <span>{answer.read_basis.banner ?? `Knowledge point K=${answer.read_basis.batch_seq}`}</span>
-        {factsOnly && <span>Written from verified records only. No AI model composed this answer.</span>}
         <details className="small" style={{ flexBasis: "100%" }}>
           <summary>How Veloxa read the question</summary>
           <p style={{ marginTop: 4 }}>{answer.interpretation}</p>
@@ -289,23 +292,3 @@ function FollowUps({ items }: { items: string[] }) {
   );
 }
 
-/** Optional plain-English wording of THIS recorded answer (experimental model, synthetic tenants only). The server
- * rewords its own stored answer; the verified claims above stay the answer, and a rejected wording falls back. */
-function Explain({ id }: { id: string }) {
-  const [w, setW] = useState<Wording | null>(null);
-  const [busy, setBusy] = useState(false);
-  return (
-    <div>
-      {!w && <button className="link small" disabled={busy} onClick={async () => {
-        setBusy(true);
-        try { setW((await product.explainAnswer(id)).wording); }
-        catch { setW({ mode: "facts_only", reason: "the explanation service is unavailable" }); }
-        finally { setBusy(false); }
-      }}>{busy ? "Writing…" : "Explain in plain English"}</button>}
-      {w && (w.mode === "experimental_model"
-        ? <div className="experimental" role="note"><p>{w.summary}</p>
-            <p className="small muted" style={{ marginTop: 6 }}>{w.label} ({w.model}).</p></div>
-        : <p className="small muted" role="note">Showing the verified answer only: {w.reason}.</p>)}
-    </div>
-  );
-}

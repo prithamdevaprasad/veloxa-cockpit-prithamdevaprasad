@@ -290,7 +290,7 @@ test("an answer separates the direct answer, figures, caveats and evidence", asy
   await expect(answer.locator(".brief-lead")).toBeVisible({ timeout: 15_000 });
   await expect(answer.getByRole("list", { name: "Values" })).toContainText("Testing");   // a breakdown of verified claims
   await expect(answer.getByText(/Grade [AB]/)).toBeVisible();
-  await expect(answer.getByText(/contractors are not included/i)).toBeVisible();          // the scope caveat is kept
+  await expect(answer.getByText(/contractors are not included/i).first()).toBeVisible();          // the scope caveat is kept
   await answer.getByRole("button", { name: "Show source 1" }).first().click();
   await expect(page.getByRole("dialog", { name: "Employee_Master.xlsx" })).toBeVisible();
 });
@@ -308,4 +308,71 @@ test("Agents shows the people section honestly when no owner-approved mapping ex
   await signIn(page);
   await page.goto("/#/agents");
   await expect(page.getByRole("region", { name: "People" })).toContainText("No people mapped yet");
+});
+
+test("every answer is explained automatically; abstentions say why; refusals are never dressed up", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/ask");
+  const ws = page.getByRole("dialog", { name: "Ask Veloxa" });
+  await ws.getByLabel("Question", { exact: true }).fill("What is our headcount?");
+  await ws.getByRole("button", { name: "Send" }).click();
+  const answer = ws.getByRole("article", { name: "Answer" }).last();
+  const ex = answer.getByLabel("Explanation");
+  await expect(ex).toBeVisible();                                                   // no click needed
+  await expect(ex).toContainText("People in the HR export: 2");
+  await expect(answer.getByRole("button", { name: /Explain/ })).toHaveCount(0);     // one experience, no buttons
+  await expect(ex.getByRole("note")).toHaveText(
+    "AI-assisted wording isn't enabled for this workspace. Showing the verified explanation instead.");
+  await expect(page.locator("body")).not.toContainText("DENY_ALL");
+  await ex.getByText("Evidence and verified details").click();
+  await expect(ex.getByRole("button", { name: /View source/ }).first()).toBeVisible();
+
+  await ws.getByLabel("Question", { exact: true }).fill("What will revenue be next year?");
+  await ws.getByRole("button", { name: "Send" }).click();
+  const abstained = ws.getByRole("article", { name: "Answer" }).last().getByLabel("Explanation");
+  await expect(abstained.getByRole("heading", { name: "Why there is no answer" })).toBeVisible();
+  await expect(abstained).toContainText("cannot answer this from the admitted records");
+
+  await ws.getByLabel("Question", { exact: true }).fill("What is Person Alpha's salary?");
+  await ws.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByRole("note").filter({ hasText: "POL-PAY-01" }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(ws.getByRole("article", { name: "Answer" }).last().getByLabel("Explanation")).toHaveCount(0);
+});
+
+test("an explanation that fails to load is an error, not an explanation", async ({ page }) => {
+  await signIn(page);
+  await page.route("**/v1/answers/*/explain*", (r) => r.fulfill({ status: 500, contentType: "application/json",
+    body: JSON.stringify({ error: "internal_error", request_id: "req-explain-1" }) }));
+  await page.goto("/#/ask");
+  const ws = page.getByRole("dialog", { name: "Ask Veloxa" });
+  await ws.getByLabel("Question", { exact: true }).fill("What is our headcount?");
+  await ws.getByRole("button", { name: "Send" }).click();
+  const answer = ws.getByRole("article", { name: "Answer" }).last();
+  await expect(answer.getByRole("alert")).toContainText("Veloxa hit an internal error");
+  await expect(answer.getByLabel("Explanation")).toHaveCount(0);
+  await expect(answer).toContainText("People in the HR export: 2");                 // the verified answer itself stays
+});
+
+test("the executive brief is an explanation with sources, and API errors are explained, not hidden", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/overview");
+  const brief = page.getByRole("region", { name: "Executive brief" });
+  await expect(brief.getByLabel("Explanation")).toContainText("Headcount in the HR export: 2");
+  await expect(brief.getByRole("button", { name: /Explain/ })).toHaveCount(0);
+  await page.route("**/v1/worry", (r) => r.fulfill({ status: 500, contentType: "application/json",
+    body: JSON.stringify({ error: "internal_error", request_id: "req-test-123" }) }));
+  await page.goto("/#/worry");
+  const alert = page.getByRole("alert").first();
+  await expect(alert).toContainText("Veloxa hit an internal error");
+  await expect(alert).toContainText("req-test-123");                               // the operator can trace it
+  await expect(page.locator("body")).not.toContainText("Request failed (500)");
+});
+
+test("Admin states the AI-wording model and workspace scope accurately", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/admin");
+  const panel = page.getByLabel("AI-assisted wording");
+  await expect(panel).toContainText("off for this workspace");                      // this test API has no model
+  await expect(panel).toContainText("none configured");
+  await expect(panel).toContainText("DENY_ALL");                                     // diagnostics live here only
 });

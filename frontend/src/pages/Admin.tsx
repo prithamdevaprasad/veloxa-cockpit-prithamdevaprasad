@@ -118,10 +118,28 @@ function Connectors() {
                   <td><Badge value={r.status === "ok" ? "active" : "failed"} label={r.status} /></td>
                   <td>{r.fetched}</td><td>{r.changed}</td><td>{r.submitted}</td></tr>))}</tbody>
             </table></div>)}
-          <p className="small">Model: {String(c.data.model.model)} ({String(c.data.model.reason ?? c.data.model.provider ?? "")}).
-            Gemini experiment: key {c.data.gemini_experiment.key_configured ? "configured on the backend" : "not configured"};
-            {" "}{c.data.gemini_experiment.scope}.</p>
+          {c.data.ai_wording && <AiWordingPanel a={c.data.ai_wording} keyConfigured={c.data.gemini_experiment.key_configured} />}
         </div>)}
     </Section>
+  );
+}
+
+/** What the CEO's explanations are actually using, from the API this page is connected to (diagnostics live here only). */
+function AiWordingPanel({ a, keyConfigured }: { a: import("../api/product-types").AiWording; keyConfigured: boolean }) {
+  const reason = String(a.configuration.reason ?? "");
+  return (
+    <div className="callout" aria-label="AI-assisted wording">
+      <strong>AI-assisted wording: {a.active ? "on for this workspace" : "off for this workspace"}</strong>
+      <dl className="small" style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 12px", marginTop: 8 }}>
+        <dt className="muted">Model</dt><dd style={{ margin: 0 }}>{a.model ? `${a.provider} ${a.model}` : "none configured"}</dd>
+        <dt className="muted">Workspace</dt><dd style={{ margin: 0 }}>{a.workspace} ({a.workspace_synthetic ? "synthetic"
+          : "real company data"}): {a.workspace_in_scope ? "in scope" : "not in scope"}. {a.scope_reason}.</dd>
+        <dt className="muted">API key</dt><dd style={{ margin: 0 }}>{keyConfigured ? "set on the backend (never shown)" : "not set"}</dd>
+        {reason && <><dt className="muted">Diagnostic</dt><dd className="mono" style={{ margin: 0 }}>{reason}</dd></>}
+        <dt className="muted">Connected API</dt><dd className="mono" style={{ margin: 0 }}>{window.location.host} → /v1 (proxied)</dd>
+      </dl>
+      <p className="small muted" style={{ marginTop: 6 }}>{a.what_it_does}. When it is off or a wording fails the
+        check, the verified explanation is shown.</p>
+    </div>
   );
 }

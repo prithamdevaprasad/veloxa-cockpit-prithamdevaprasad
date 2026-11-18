@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { api } from "../api/client";
+import { product } from "../api/product";
+import { ExplanationView, useExplanation } from "../ui/Explanation";
 import { useApi } from "../api/useApi";
 import type { Conflict } from "../api/types";
 import { Badge, Drawer, EmptyState, ErrorState, Loading, PageHead, Pager, Section, usePage } from "../ui";
@@ -46,6 +48,7 @@ export function ConflictsPage() {
           </div>
         ))}
       </Section>
+      <Registry />
       {open && (
         <Drawer title={open.subject} onClose={() => setOpen(null)}>
           <p className="small muted">Definition {open.definition}; period {open.period.replace(/_/g, " ")}. Status: open. No value is chosen.</p>
@@ -65,5 +68,33 @@ export function ConflictsPage() {
         </Drawer>
       )}
     </>
+  );
+}
+
+/** The Conflict Registry (claim level): each disagreement explained in plain English, with every value kept. */
+function Registry() {
+  const [reg, reload] = useApi((s) => product.registry(s), []);
+  return (
+    <Section title="Disagreements between sources, explained" aria-label="Conflict Registry"
+             subtitle="What each source says, how Veloxa treats it, and what remains uncertain.">
+      {reg.state === "loading" && <Loading lines={2} />}
+      {reg.state === "error" && <ErrorState error={reg.error} onRetry={reload} />}
+      {reg.state === "ready" && (reg.data.conflicts.length === 0
+        ? <EmptyState title="No recorded disagreements">No two admitted sources disagree about the same figure at this
+            knowledge point{reg.data.hidden_for_access ? `; ${reg.data.hidden_for_access} you may not read are hidden` : ""}.</EmptyState>
+        : <ul className="plain stack">{reg.data.conflicts.map((c) => <RegistryItem key={c.conflict_id} id={c.conflict_id}
+            title={`${c.predicate.replace(/_/g, " ")} for ${c.subject}`} values={c.claims.map((x) => x.object)} />)}</ul>)}
+    </Section>
+  );
+}
+
+function RegistryItem({ id, title, values }: { id: string; title: string; values: string[] }) {
+  const ex = useExplanation(async () => (await product.explainConflict(id)).explanation, [id]);
+  return (
+    <li className="worry-item">
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <strong>{title}</strong><span className="small muted num">{values.join(" vs ")}</span></div>
+      <ExplanationView ex={ex} />
+    </li>
   );
 }

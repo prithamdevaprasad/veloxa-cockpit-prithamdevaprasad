@@ -27,7 +27,7 @@ from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import auth, config, ledger, selfcheck, tenancy, tools
+from . import auth, config, ledger, schema, selfcheck, tenancy, tools
 from .ask import pipeline, timeparse
 from .authz import evidence as evidence_authz
 from .authz.current import RelationshipStore
@@ -211,15 +211,26 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
 
             return PlainTextResponse(telemetry.METRICS.render())
 
+    @app.exception_handler(schema.SchemaOutOfDate)
+    async def _schema_out_of_date(request: Request, exc: schema.SchemaOutOfDate):
+        from . import telemetry
+
+        telemetry.log.warning("schema out of date", extra={"fields": {"feature": exc.feature,
+                                                                       "migration": exc.migration}})
+        return JSONResponse(status_code=503, content=exc.body())
+
     @app.get("/health")
     def health() -> dict:
         with connect(state["dsn"]) as conn:
             failures = selfcheck.run(conn)
             _, _, rows = _pack_states(conn)
+            schema_missing = schema.missing(conn)
         pending = [r["pack"] for r in rows if r["status"] == "pending_admission"]
         awaiting = [r["pack"] for r in rows if r["status"] == "awaiting_authorisation"]
         return {
-            "status": "ok" if not failures and not pending and not awaiting else "degraded",
+            "status": "ok" if not failures and not pending and not awaiting and not schema_missing else "degraded",
+            "schema": {"current": not schema_missing,
+                       "missing": [{k: m[k] for k in ("feature", "migration", "unavailable")} for m in schema_missing]},
             "selfcheck": "pass" if not failures else "fail",
             "pending_admission": pending,
             "awaiting_authorisation": awaiting,
@@ -391,6 +402,33 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
                 return JSONResponse(status_code=422, content={"error": "invalid_scenario", "detail": str(e)})
             except ValueError as e:
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
+
+    @app.post("/v1/scenarios/commitment-shift/explain")
+    def scenario_explain(body: ShiftRequest, model: bool = True, authorization: str | None = Header(default=None)):
+        """The same deterministic scenario, explained for an executive: the original commitment, the change being
+        tested, the calculated result, the implications the records support and what cannot be determined.
+        `model=true` adds governed model wording (synthetic tenants only) AFTER the scenario has been computed."""
+        from . import explain
+        from .risk import scenarios
+
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
+            try:
+                basis = _scenario_basis(conn, body.as_known_at, tenant_id, tz)
+                result = scenarios.commitment_shift(conn, basis, tz, body.business_object, body.shift_days)
+            except scenarios.ScenarioError as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_scenario", "detail": str(e)})
+            except ValueError as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
+            ex = explain.scenario(result)
+            if model:
+                ids = sorted({r for _, it in explain.items_of(ex) for r in it["evidence"]})
+                ev = [{"record_id": x.record_id, "data_class": x.data_class} for x in tools._evidence(conn, basis, ids)]
+                ex = explain.with_model(conn, tenant_id, ex, ev)
+            return {"scenario": result, "explanation": ex}
 
     @app.get("/v1/risks/history")
     def risk_history(authorization: str | None = Header(default=None)):

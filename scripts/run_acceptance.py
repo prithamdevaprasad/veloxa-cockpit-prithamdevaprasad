@@ -396,6 +396,43 @@ def cases(s: Suite, admin: str, db: str, data: Path, built: dict) -> None:  # no
            lambda: (any(u["item_id"].startswith("hiring:") for u in wr["unrankable"])
                     and not any(x["item_id"].startswith("hiring:") for x in wr["ranked"]), True),
            refusal="unsupported risk conclusion not ranked")
+
+    # ---- Executive explanations (4): deterministic, built from the same verified results; no model (DENY_ALL)
+    from urllib.parse import quote
+
+    def sections(e):
+        return {x["key"]: " ".join(i["text"] for i in x["items"]) for x in e["sections"]}
+
+    top = wr["ranked"][0]
+    xw = client.get(f"/v1/worry/{quote(top['item_id'], safe='')}/explain", headers=H).json()["explanation"]
+    sw = sections(xw)
+    s.case("X1", "explanation", "Explain the top worry in plain English",
+           "What is recorded, how it was ranked (not a probability) and what is not known; same severity numbers",
+           lambda: ({"recorded", "ranking", "unknown"} <= set(sw) and "not a probability" in sw["ranking"]
+                    and f"{top['severity']['low']:.2f} to {top['severity']['high']:.2f}" in sw["ranking"]
+                    and xw["wording"]["mode"] == "facts_only", xw["headline"]))
+    un = next(u for u in wr["unrankable"] if u["item_id"].startswith("notice:"))
+    xu = client.get(f"/v1/worry/{quote(un['item_id'], safe='')}/explain", headers=H).json()["explanation"]
+    s.case("X2", "explanation", "Explain why an item is not ranked",
+           "Says it is recorded but not enough is measured to rank, with the reason",
+           lambda: ("not enough is measured to rank" in xu["headline"]
+                    and "Not ranked" in sections(xu).get("unknown", ""), xu["headline"]),
+           refusal="unrankable item explained, not ranked")
+    regc = client.get("/v1/knowledge/conflicts", headers=H).json()["conflicts"]
+    xc = client.get(f"/v1/knowledge/conflicts/{regc[0]['conflict_id']}/explain", headers=H).json()["explanation"] \
+        if regc else {"sections": [], "confidence": None, "headline": ""}
+    sc = sections(xc) if regc else {}
+    s.case("X3", "explanation", "Explain a disagreement between sources",
+           "Every competing value is kept, each with its record; uncertainty stated; confidence conflicting",
+           lambda: (bool(regc) and all(str(cl["object"]) in sc.get("recorded", "") for cl in regc[0]["claims"])
+                    and sc.get("unknown") and xc["confidence"] == "conflicting", xc["headline"]),
+           confidence="conflicting")
+    xa = client.post(f"/v1/answers/{arr['audit_id']}/explain", headers=H).json()["explanation"]
+    s.case("X4", "explanation", "Explain the conflicting ARR answer",
+           "The explanation keeps the disagreement as not established and gives no single figure",
+           lambda: ("disagree" in sections(xa).get("unknown", "").lower() and xa["status"] == "explained"
+                    and xa["wording"]["mode"] == "facts_only", list(sections(xa))),
+           confidence="conflicting", refusal="disagreement not resolved by wording")
     del knowledge
 
 

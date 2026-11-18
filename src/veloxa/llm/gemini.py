@@ -71,7 +71,9 @@ def check_tenant(slug: str, synthetic: bool, allowed: frozenset[str] | None = No
 
 SYSTEM = ("You rewrite verified facts for a company CEO in plain English. Rules: use ONLY the facts given; never add a "
           "number, date, name or claim that is not in them; keep every fact's meaning and its fact_id; if facts "
-          "disagree, say so; do not give advice. Return JSON only.")
+          "disagree, say so; do not give advice. Facts labelled as an assumption stay an assumption and facts "
+          "labelled as not established stay unknown; never add a cause, likelihood, consequence or recommendation. "
+          "Return JSON only.")
 
 
 @dataclass
@@ -79,8 +81,8 @@ class GeminiProvider:
     """`complete(model, request)` for GovernedLLMClient. `client_factory` is injectable for tests (no network)."""
     name: str = "gemini"
     region: str | None = "google-ai-studio"
-    max_output_tokens: int = 600
-    timeout_s: float = 20.0
+    max_output_tokens: int = 1500       # an explanation re-words up to ~12 items; 600 truncated the JSON
+    timeout_s: float = 30.0
     meter: UsageMeter = field(default_factory=lambda: UsageMeter(int(os.environ.get("VELOXA_GEMINI_DAILY_REQUESTS",
                                                                                     "200"))))
     client_factory: object = None

@@ -91,12 +91,14 @@ function AskPanel({ full, threadId, setThreadId, draft, setDraft, focusTick, onC
   const [pending, setPending] = useState<string | null>(null);
   const [showList, setShowList] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [threadsErr, setThreadsErr] = useState<ApiError | null>(null);   // never shown as an empty list
   const input = useRef<HTMLTextAreaElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const created = useRef<string | null>(null);   // a thread this panel just created: its answer arrives via send()
 
   const loadThreads = useCallback(async () => {
-    try { setThreads((await product.threads()).threads); } catch { setThreads([]); }
+    try { setThreads((await product.threads()).threads); setThreadsErr(null); }
+    catch (e) { setThreadsErr(e instanceof ApiError ? e : new ApiError(0, "unknown", String(e))); setThreads(null); }
   }, []);
   useEffect(() => { void loadThreads(); }, [loadThreads]);
   useEffect(() => { input.current?.focus(); }, [focusTick, threadId]);
@@ -151,7 +153,8 @@ function AskPanel({ full, threadId, setThreadId, draft, setDraft, focusTick, onC
         <input className="input" type="search" placeholder="Search conversations" aria-label="Search conversations"
                value={filter} onChange={(e) => setFilter(e.target.value)} />
         <h3>Saved conversations</h3>
-        {threads === null ? <Loading lines={3} /> : shown.length === 0
+        {threadsErr ? <p className="small muted" role="alert" style={{ padding: "0 4px" }}>Saved conversations could not be loaded: {threadsErr.message}</p>
+          : threads === null ? <Loading lines={3} /> : shown.length === 0
           ? <p className="small muted" style={{ padding: "0 4px" }}>
               {threads.length === 0 ? "Questions you ask are saved here." : "No conversation matches."}</p>
           : <ul className="plain">{shown.map((t) => (

@@ -83,6 +83,8 @@ def init_env(db, tmp_path, monkeypatch):
     monkeypatch.setenv("VELOXA_DB_ADMIN_PASSWORD", parts.password)
     return tenant
 
+SCHEMA_OK = {"schema": {"current": True, "missing": []}}   # /health: the database serves every feature
+
 
 def _state(db, tenant):
     with connect(db.dsn("ingest")) as conn:
@@ -219,6 +221,7 @@ def test_existing_database_serves_d1_and_reports_d2_as_awaiting_authorisation(db
     awaiting = [p for p in later if p not in auth]
     with TestClient(create_app(dsn=app_dsn)) as client:
         assert client.get("/health").json() == {"status": "degraded" if later else "ok", "selfcheck": "pass",
+                                                **SCHEMA_OK,
                                                 "pending_admission": pending, "awaiting_authorisation": awaiting,
                                                 "auth": "none", "oidc": "off",
             "model": {"model": "disabled", "reason": "no provider configured (DENY_ALL); facts-only composition"}}

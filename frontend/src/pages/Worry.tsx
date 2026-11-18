@@ -6,6 +6,7 @@ import { product } from "../api/product";
 import type { Finding, WorryItem } from "../api/product-types";
 import { useApi } from "../api/useApi";
 import { useEvidence } from "../ui/EvidenceDrawer";
+import { ExplanationView, useExplanation } from "../ui/Explanation";
 import { Guidance } from "../ui/kit";
 import { Badge, Button, ErrorState, Loading, PageHead, Section } from "../ui";
 
@@ -15,6 +16,7 @@ const pct = (x: number) => `${Math.round(x * 100)}%`;
 function Item({ x }: { x: WorryItem }) {
   const [open, setOpen] = useState(false);
   const evidence = useEvidence();
+  const ex = useExplanation(async () => (await product.explainWorry(x.item_id)).explanation, [x.item_id]);
   const s = x.severity;
   return (
     <li className="worry-item">
@@ -28,13 +30,13 @@ function Item({ x }: { x: WorryItem }) {
               moves this item between ranks" /></>}</div>
         </div>
         <div className="sev">
-          <span className="small muted">Severity</span>
+          <span className="small muted" title="An ordering of exposure on a 0 to 1 scale, never a probability">Exposure (not a probability)</span>
           <div><strong>{s.low.toFixed(2)}–{s.high.toFixed(2)}</strong></div>
           <div className="sev-bar" aria-hidden="true"><span style={{ left: `${s.low * 100}%`,
             width: `${Math.max(2, (s.high - s.low) * 100)}%` }} /></div>
         </div>
       </div>
-      <p className="small muted" style={{ maxWidth: "80ch" }}>{x.why}</p>
+      <ExplanationView ex={ex} />
       <div className="row">
         <Button variant="ghost" onClick={() => setOpen(!open)} aria-expanded={open}>
           {open ? "Hide the calculation" : "Show the calculation"}</Button>

@@ -66,15 +66,25 @@ export function EmptyState({ title, children }: { title: string; children?: Reac
   );
 }
 
+export function errorTitle(error: ApiError): string {
+  if (error.status === 401) return "Sign in required";
+  if (error.status === 403) return "Not authorised";
+  if (error.code === "network") return "The API is unreachable";
+  if (error.code === "schema_out_of_date") return "This feature needs a database update";
+  if (error.code === "internal_error") return "Veloxa hit an internal error";
+  if (error.status === 429) return "Too many requests";
+  if (error.status === 422) return "Veloxa could not use that request";
+  return "Something went wrong";
+}
+
 export function ErrorState({ error, onRetry }: { error: ApiError; onRetry?: () => void }) {
-  const title = error.status === 401 ? "Sign in required"
-    : error.status === 403 ? "Not authorised"
-    : error.code === "network" ? "The API is unreachable" : "Something went wrong";
   return (
     <div className="state error" role="alert">
-      <h3>{title}</h3>
+      <h3>{errorTitle(error)}</h3>
       <p>{error.message}</p>
-      {onRetry && error.status !== 401 && error.status !== 403 && (
+      {error.requestId && <p className="small muted" style={{ marginTop: 6 }}>
+        Reference for the operator: <span className="mono">{error.requestId}</span></p>}
+      {onRetry && error.status !== 401 && error.status !== 403 && error.code !== "schema_out_of_date" && (
         <p style={{ marginTop: 12 }}><Button onClick={onRetry}>Try again</Button></p>
       )}
     </div>

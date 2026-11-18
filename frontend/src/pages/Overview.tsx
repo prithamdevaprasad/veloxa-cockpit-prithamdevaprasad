@@ -4,11 +4,12 @@
 import { useState } from "react";
 import { api } from "../api/client";
 import { product } from "../api/product";
-import type { AgentUpdate, Brief, ChartSource } from "../api/product-types";
+import type { AgentUpdate, ChartSource } from "../api/product-types";
 import { useApi } from "../api/useApi";
 import { DeptArt } from "../ui/art";
 import { useAsk } from "../ui/Ask";
 import { useEvidence } from "../ui/EvidenceDrawer";
+import { ExplanationView } from "../ui/Explanation";
 import { Avatar, BarChart, DemoBadge, Donut, Guidance, Icon, KpiCard, LineChart, Tabs } from "../ui/kit";
 import { Badge, Button, Drawer, ErrorState, Loading, Section } from "../ui";
 
@@ -228,28 +229,14 @@ function WorkforceCard() {
 }
 
 function BriefCard() {
-  const [b] = useApi((s) => product.brief(false, s), []);
-  const [explained, setExplained] = useState<Brief | null>(null);
-  const [busy, setBusy] = useState(false);
-  const w = explained?.wording;
+  const [b] = useApi((s) => product.brief(s), []);
   return (
     <Section title="Executive brief" aria-label="Executive brief"
-             subtitle="Each line is a verified figure or registry fact. Nothing here is generated.">
+             subtitle="Verified figures and registry facts at the current knowledge point.">
       {b.state === "loading" ? <Loading lines={4} /> : b.state === "error" ? <ErrorState error={b.error} />
-        : b.data.lines.length === 0 ? <Guidance title="Nothing to brief yet">No admitted evidence you may read.</Guidance>
-          : <>
-              <ul className="plain brief-lines">{b.data.lines.map((l) => <li key={l.text}>{l.text}</li>)}</ul>
-              <div className="row" style={{ marginTop: 10 }}>
-                <Button disabled={busy} onClick={async () => { setBusy(true);
-                  try { setExplained(await product.brief(true)); } finally { setBusy(false); } }}>
-                  {busy ? "Writing…" : "Explain in plain English"}</Button>
-              </div>
-              {w && (w.mode === "experimental_model"
-                ? <div className="experimental" style={{ marginTop: 10 }} role="note">
-                    <p>{w.summary}</p>
-                    <p className="small muted" style={{ marginTop: 6 }}>{w.label} ({w.model}).</p></div>
-                : <p className="small muted" style={{ marginTop: 10 }} role="note">Showing the verified lines only: {w.reason}.</p>)}
-            </>}
+        : b.data.lines.length === 0 || !b.data.explanation
+          ? <Guidance title="Nothing to brief yet">No admitted evidence you may read.</Guidance>
+          : <ExplanationView ex={{ e: b.data.explanation, error: null, loading: false, retry: () => undefined }} />}
     </Section>
   );
 }

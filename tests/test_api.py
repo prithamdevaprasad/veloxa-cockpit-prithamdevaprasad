@@ -13,6 +13,8 @@ def veloxa_d1(db, tmp_path_factory):
     ensure_configured_d1(db, tmp_path_factory.mktemp("veloxa_pack"))
     return db.dsn("app")
 
+SCHEMA_OK = {"schema": {"current": True, "missing": []}}   # /health: the database serves every feature
+
 
 def _drop_privileged(monkeypatch):
     from veloxa.api import PRIVILEGED_ENV
@@ -32,6 +34,7 @@ def test_health_and_time_metadata(veloxa_d1, monkeypatch):
 
     with TestClient(create_app(dsn=veloxa_d1)) as client:
         assert client.get("/health").json() == {"status": "ok", "selfcheck": "pass", "pending_admission": [],
+                                                **SCHEMA_OK,
                                                 "awaiting_authorisation": [], "auth": "none", "oidc": "off",
             "model": {"model": "disabled", "reason": "no provider configured (DENY_ALL); facts-only composition"}}
 
@@ -55,6 +58,7 @@ def test_api_keeps_serving_the_latest_sealed_batch_when_a_released_pack_is_not_a
     with TestClient(create_app(dsn=veloxa_d1, clock=lambda: after_d2_release)) as client:
         health = client.get("/health").json()
         assert health == {"status": "degraded", "selfcheck": "pass", "pending_admission": ["D2"],
+                          **SCHEMA_OK,
                           "awaiting_authorisation": [], "auth": "none", "oidc": "off",   # D2 authorised (K-13, 18 Nov)
                           "model": {"model": "disabled",
                                     "reason": "no provider configured (DENY_ALL); facts-only composition"}}

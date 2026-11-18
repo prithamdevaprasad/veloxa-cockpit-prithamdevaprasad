@@ -47,9 +47,21 @@ export const product = {
   revoke: (tupleId: string) => request("POST", `/v1/admin/grants/${enc(tupleId)}/revoke`),
   clarifications: (s?: AbortSignal) => get<{ requests: P.Clarification[] }>("/v1/clarifications", s),
   workforce: (s?: AbortSignal) => get<P.Workforce>("/v1/workforce", s),
-  brief: (explain = false, s?: AbortSignal) => get<P.Brief>("/v1/brief" + qs({ explain: explain ? "true" : undefined }), s),
-  explainAnswer: (answerId: string) => request<{ answer_id: string; wording: P.Wording }>(
-    "POST", `/v1/answers/${enc(answerId)}/explain`),
+  brief: (s?: AbortSignal) => get<P.Brief>("/v1/brief", s),
+  explainAnswer: (answerId: string, model = true) =>
+    request<{ answer_id: string; wording: P.Wording; explanation: P.Explanation }>(
+      "POST", `/v1/answers/${enc(answerId)}/explain` + qs({ model: model ? "true" : "false" })),
+  explainScenario: (business_object: string, shift_days: number, model = false) =>
+    request<{ scenario: import("./types").Scenario; explanation: P.Explanation }>(
+      "POST", "/v1/scenarios/commitment-shift/explain" + qs({ model: model ? "true" : undefined }),
+      { business_object, shift_days }),
+  explainWorry: (itemId: string, model = false) => get<{ item_id: string; explanation: P.Explanation }>(
+    `/v1/worry/${enc(itemId)}/explain` + qs({ model: model ? "true" : undefined })),
+  registry: (s?: AbortSignal) => get<{ conflicts: { conflict_id: string; subject: string; predicate: string;
+    resolution: string; claims: { claim_id: string; object: string; record_id: string }[] }[];
+    hidden_for_access: number }>("/v1/knowledge/conflicts", s),
+  explainConflict: (id: string, model = false) => get<{ conflict_id: string; explanation: P.Explanation }>(
+    `/v1/knowledge/conflicts/${enc(id)}/explain` + qs({ model: model ? "true" : undefined })),
   people: (s?: AbortSignal) => get<{ people: P.Person[]; count: number }>("/v1/people", s),
   worry: (asKnownAt?: string, s?: AbortSignal) => get<P.Worry>("/v1/worry" + qs({ as_known_at: asKnownAt }), s),
   findings: (s?: AbortSignal) => get<{ findings: P.Finding[]; hidden_for_access: number }>("/v1/findings", s),

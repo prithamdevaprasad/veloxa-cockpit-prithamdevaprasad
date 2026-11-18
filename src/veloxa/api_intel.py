@@ -7,11 +7,11 @@ an item or conflict citing a record the principal may not read is hidden and cou
 
 from __future__ import annotations
 
-from fastapi import Header
+from fastapi import Header, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import ledger, tools
+from . import explain, ledger, schema, tools
 from .ask import timeparse
 from .db import connect, tenant_tx
 from .temporal import resolve_basis
@@ -60,6 +60,7 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
             p, basis, tz = ctx(conn, authorization, as_known_at)
             if basis is None:
                 return p
+            schema.require(conn, "company_intelligence")   # authenticated: 503, not 500
             policy = governance.current_policy(conn, p.tenant_id)
             with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
                 items = w.build_items(conn, p.tenant_id, basis.batch_seq, assessment_date(basis, tz)) \
@@ -90,6 +91,7 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
             p, basis, _ = ctx(conn, authorization, as_known_at)
             if basis is None:
                 return p
+            schema.require(conn, "company_intelligence")   # authenticated: 503, not 500
             with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
                 ids = [r["agent_id"] for r in conn.execute(
                     "SELECT DISTINCT agent_id FROM runtime.agent_person ORDER BY agent_id").fetchall()]
@@ -104,6 +106,7 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
             p, basis, _ = ctx(conn, authorization, as_known_at)
             if basis is None:
                 return p
+            schema.require(conn, "company_intelligence")   # authenticated: 503, not 500
             with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
                 prof = people.profile(conn, p.tenant_id, basis.batch_seq, agent_id)
             return {"read_basis": basis_json(basis), **prof}
@@ -118,6 +121,7 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
             p, basis, _ = ctx(conn, authorization, as_known_at)
             if basis is None:
                 return p
+            schema.require(conn, "company_intelligence")   # authenticated: 503, not 500
             with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
                 found = knowledge.conflicts_at(conn, p.tenant_id, basis.batch_seq) if basis.batch_seq else []
             ok = readable(conn, p, basis, [c["record_id"] for f in found for c in f["claims"]])
@@ -145,6 +149,7 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
             p, basis, _ = ctx(conn, authorization, None)
             if basis is None:
                 return p
+            schema.require(conn, "company_intelligence")   # authenticated: 503, not 500
             with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
                 rows = [dict(r) for r in conn.execute(
                     "SELECT finding_id, title, description, department, project, trigger, evidence, ranking,"
@@ -171,6 +176,7 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
             p, basis, _ = ctx(conn, authorization, None)
             if basis is None:
                 return p
+            schema.require(conn, "company_intelligence")   # authenticated: 503, not 500
             with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
                 if not conn.execute("SELECT 1 FROM runtime.finding WHERE finding_id = %s", (finding_id,)).fetchone():
                     return JSONResponse(status_code=404, content={"error": "not_found"})   # or not visible to you
@@ -191,21 +197,78 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
             p, basis, _ = ctx(conn, authorization, None)
             if basis is None:
                 return p
+            schema.require(conn, "company_intelligence")   # authenticated: 503, not 500
             with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
                 runs = [dict(r) for r in conn.execute(
                     "SELECT connector, mode, status, fetched, changed, submitted, error, started_at, finished_at"
                     " FROM runtime.connector_run ORDER BY started_at DESC LIMIT 20").fetchall()]
+                t = conn.execute("SELECT slug, synthetic FROM directory.tenant WHERE tenant_id = %s",
+                                 (p.tenant_id,)).fetchone()
         for r in runs:
             r["started_at"] = r["started_at"].isoformat()
             r["finished_at"] = r["finished_at"].isoformat() if r["finished_at"] else None
         planned = [{"connector": n, "state": "not implemented (interface defined: veloxa.connectors.Connector)"}
                    for n in ("github", "gitlab", "hrms", "finance", "crm", "incidents")]
-        return {"connectors": [connectors.jira_status()] + planned, "runs": runs,
-                "model": llm_config.status(),
+        from .llm.gemini import TenantNotPermitted, check_tenant
+
+        status = llm_config.status()
+        try:
+            check_tenant(t["slug"], bool(t["synthetic"]))
+            in_scope, scope_reason = True, "this synthetic workspace is on the allowlist"
+        except TenantNotPermitted as e:
+            in_scope, scope_reason = False, str(e)
+        active = status.get("model") == "configured" and status.get("provider") == "gemini" and in_scope
+        ai = {"active": active, "provider": status.get("provider"),
+              "model": _os.environ.get("VELOXA_MODEL_NAME") if status.get("model") == "configured" else None,
+              "workspace": t["slug"], "workspace_synthetic": bool(t["synthetic"]), "workspace_in_scope": in_scope,
+              "scope_reason": scope_reason, "configuration": status,
+              "what_it_does": "re-words verified explanations only; never answers, ranks or computes"}
+        return {"connectors": [connectors.jira_status()] + planned, "runs": runs, "ai_wording": ai,
+                "model": status,
                 "gemini_experiment": {"key_configured": bool(_os.environ.get("GEMINI_API_KEY")),
                                       "synthetic_tenants": [x for x in _os.environ.get("VELOXA_GEMINI_TENANTS",
                                                                                        "").split(",") if x],
                                       "scope": "synthetic Lumora data only; the supplied company is refused"}}
+
+    @app.get("/v1/worry/{item_id:path}/explain")
+    def worry_explain(item_id: str, model: bool = True, authorization: str | None = Header(default=None)):
+        """One worry (ranked or unrankable) explained in plain English: what is recorded, how it was ranked, what is
+        not known. Built from the same response as /v1/worry, so access rules and hidden items are identical."""
+        data = worry(None, authorization)
+        if isinstance(data, JSONResponse):
+            return data
+        ranked = [x for x in data.get("ranked", []) if x["item_id"] == item_id]
+        other = [x for x in data.get("unrankable", data.get("unranked", [])) if x["item_id"] == item_id]
+        if not ranked and not other:
+            return JSONResponse(status_code=404, content={
+                "error": "not_found",
+                "detail": "no such worry at this knowledge point, or you may not read all of its evidence"})
+        ex = explain.worry(ranked[0] if ranked else other[0], ranked=bool(ranked),
+                           total_ranked=len(data.get("ranked", [])))
+        return {"item_id": item_id, "explanation": _maybe_model(authorization, ex, model)}
+
+    @app.get("/v1/knowledge/conflicts/{conflict_id}/explain")
+    def conflict_explain(conflict_id: str, model: bool = True, authorization: str | None = Header(default=None)):
+        """One source disagreement explained: what each source says, how it is treated, what remains uncertain."""
+        data = conflict_registry(None, authorization)
+        if isinstance(data, JSONResponse):
+            return data
+        found = [c for c in data["conflicts"] if c["conflict_id"] == conflict_id]
+        if not found:
+            return JSONResponse(status_code=404, content={"error": "not_found"})
+        return {"conflict_id": conflict_id,
+                "explanation": _maybe_model(authorization, explain.conflict(found[0]), model)}
+
+    def _maybe_model(authorization, ex: dict, model: bool) -> dict:
+        if not model:
+            return ex
+        with connect(state["dsn"]) as conn:
+            p, basis, _ = ctx(conn, authorization, None)
+            if basis is None:
+                return ex
+            ids = sorted({r for _, it in explain.items_of(ex) for r in it["evidence"]})
+            ev = [{"record_id": x.record_id, "data_class": x.data_class} for x in tools._evidence(conn, basis, ids)]
+            return explain.with_model(conn, p.tenant_id, ex, ev)
 
     @app.get("/v1/workforce")
     def workforce(as_known_at: str | None = None, authorization: str | None = Header(default=None)):
@@ -237,24 +300,8 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
                     "basis": "governed metric headcount@1 (HR export, as at extraction; contractors not included)",
                     "evidence_records": len({r for f in hc.facts for r in f.inputs})}
 
-    def _experimental_wording(conn, p, result: dict) -> dict:
-        """Optional model wording (Gemini experiment): only through GovernedLLMClient, only for allowlisted synthetic
-        tenants, only after the deterministic answer is complete; any failure returns the facts-only answer."""
-        from .ask import wording
-        from .llm import config as llm_config
-        from .llm.client import GovernedLLMClient
-
-        policy, provider = llm_config.policy_and_provider()
-        if provider is None or getattr(provider, "name", "") != "gemini":
-            return {"mode": "facts_only", "reason": "no experimental model is configured (DENY_ALL)"}
-        with tenant_tx(conn, p.tenant_id):
-            t = conn.execute("SELECT slug, synthetic FROM directory.tenant WHERE tenant_id = %s",
-                             (p.tenant_id,)).fetchone()
-        tenant = {"tenant_id": p.tenant_id, "slug": t["slug"], "synthetic": bool(t["synthetic"])}
-        return wording.reword(conn, tenant, result, GovernedLLMClient(conn, policy, provider))["wording"]
-
     @app.post("/v1/answers/{answer_id}/explain")
-    def explain_answer(answer_id: str, authorization: str | None = Header(default=None)):
+    def explain_answer(answer_id: str, model: bool = True, authorization: str | None = Header(default=None)):
         """Plain-English wording of one of YOUR recorded answers (read from the server, never from the client)."""
         import uuid as _uuid
 
@@ -271,10 +318,17 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
                                    (aid, p.principal_id)).fetchone()
             if row is None:
                 return JSONResponse(status_code=404, content={"error": "not_found"})
-            return {"answer_id": answer_id, "wording": _experimental_wording(conn, p, row["answer"])}
+            a = row["answer"]
+            ex = explain.answer(a)
+            if model and ex["status"] != "refused":
+                ex = explain.with_model(conn, p.tenant_id, ex, [{"record_id": x.get("record_id"),
+                                                                 "data_class": x.get("data_class")}
+                                                                for x in a.get("evidence", [])])
+            return {"answer_id": answer_id, "explanation": ex, "wording": ex["wording"]}   # one model call
 
     @app.get("/v1/brief")
-    def executive_brief(explain: bool = False, authorization: str | None = Header(default=None)):
+    def executive_brief(explain_: bool = Query(True, alias="explain"),
+                        authorization: str | None = Header(default=None)):
         """A deterministic executive brief: each line is a verified figure or registry fact with its records. The
         optional `explain=true` adds an experimental model wording (synthetic tenants only); the lines never change."""
         from . import knowledge, metrics
@@ -286,6 +340,7 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
             p, basis, tz = ctx(conn, authorization, None)
             if basis is None:
                 return p
+            schema.require(conn, "company_intelligence")   # authenticated: 503, not 500
             claims, records = [], set()
             if basis.batch_seq:
                 hc = tools.headcount(conn, basis, p)
@@ -314,11 +369,11 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
                 claims.append({"text": f"Findings not yet resolved: {open_f}", "evidence": []})
             ev = [{"record_id": e.record_id, "system": e.system, "data_class": e.data_class}
                   for e in tools._evidence(conn, basis, sorted(records))]
-            brief = {"status": "answered" if claims else "abstained", "claims": claims, "evidence": ev,
-                     "interpretation": "Executive brief at the current knowledge point", "unknowns": [],
-                     "qualifiers": [], "confidence": {"label": "Deterministic"}, "audit_id": f"brief-{basis.batch_seq}"}
             out = {"read_basis": basis_json(basis), "lines": claims,
                    "method": "deterministic: governed metrics, the D-15 item builder, the Conflict Registry, findings"}
-            if explain:
-                out["wording"] = _experimental_wording(conn, p, brief)
+            ex = explain.brief(claims)
+            if explain_:
+                ex = explain.with_model(conn, p.tenant_id, ex, ev)                 # one model call
+                out["wording"] = ex["wording"]
+            out["explanation"] = ex
             return out

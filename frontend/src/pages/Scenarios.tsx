@@ -1,22 +1,12 @@
 import { useState } from "react";
 import { api, ApiError } from "../api/client";
-import type { Scenario, ScenarioStatement as Statement } from "../api/types";
+import { product } from "../api/product";
+import type { Explanation } from "../api/product-types";
+import { ExplanationView } from "../ui/Explanation";
+import type { Scenario } from "../api/types";
 import { useApi } from "../api/useApi";
 import { Badge, Button, EmptyState, ErrorState, Loading, PageHead, Section } from "../ui";
 
-function List({ title, items, tone }: { title: string; items: Statement[] | string[]; tone: string }) {
-  return (
-    <div className={`callout ${tone}`} style={{ marginBottom: 10 }}>
-      <strong>{title}</strong>
-      {items.length === 0 ? <p className="small muted">None.</p> : (
-        <ul className="bullets small">{items.map((s, i) => typeof s === "string" ? <li key={i}>{s}</li> : (
-          <li key={i}>{s.statement}{s.calculation && <span className="muted"> · {s.calculation}</span>}
-            {s.evidence && s.evidence.length > 0 && <span className="muted"> · {s.evidence.length} source(s)</span>}</li>
-        ))}</ul>
-      )}
-    </div>
-  );
-}
 
 /** Deterministic "what if" analysis: observed facts, derived implications, the assumption and the unknowns are
  * shown separately. No probability, score or ranking exists to show. */
@@ -25,19 +15,23 @@ export function ScenariosPage() {
   const [object, setObject] = useState("");
   const [shift, setShift] = useState(30);
   const [result, setResult] = useState<Scenario | null>(null);
+  const [ex, setEx] = useState<Explanation | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
 
+  const [busy, setBusy] = useState(false);
   async function run(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    try { setResult(await api.commitmentShift(object, shift)); }
+    setError(null); setBusy(true); setResult(null); setEx(null);
+    try { const r = await product.explainScenario(object, shift); setResult(r.scenario); setEx(r.explanation); }
     catch (err) { setError(err instanceof ApiError ? err : new ApiError(0, "unknown", String(err))); }
+    finally { setBusy(false); }
   }
 
   return (
     <>
-      <PageHead title="What-if Analysis" intro="What follows if a commitment moves. Facts, arithmetic, your assumption and the
-        unknowns are kept apart. Veloxa does not predict and shows no probability." />
+      <PageHead title="What-if Analysis" intro="Test what happens if a commitment moves. Veloxa explains what was
+        committed, the change you are testing, what it can calculate and what the records cannot tell you. It does not
+        predict and gives no probability." />
       <Section title="Move a commitment" subtitle={list.state === "ready" ? list.data.read_basis.banner : undefined}>
         {list.state === "loading" && <Loading lines={2} />}
         {list.state === "error" && <ErrorState error={list.error} onRetry={reload} />}
@@ -55,17 +49,14 @@ export function ScenariosPage() {
               <input className="input" type="number" min={-730} max={730} value={shift}
                      onChange={(e) => setShift(Number(e.target.value))} />
             </label>
-            <Button variant="primary" type="submit" disabled={!object}>Analyse</Button>
+            <Button variant="primary" type="submit" disabled={!object || busy}>{busy ? "Analysing…" : "Analyse"}</Button>
           </form>
         ))}
       </Section>
       {error && <Section><ErrorState error={error} /></Section>}
-      {result && (
+      {result && ex && (
         <Section title={result.business_object} subtitle={result.read_basis.banner}>
-          <List title="Observed (from records)" items={result.observed} tone="info" />
-          <List title="Derived (arithmetic)" items={result.derived} tone="" />
-          <List title="Assumption (your input, not evidence)" items={result.assumptions} tone="warn" />
-          <List title="Unknown" items={result.unknowns} tone="bad" />
+          <ExplanationView ex={{ e: ex, error: null, loading: false, retry: () => undefined }} />
         </Section>
       )}
 

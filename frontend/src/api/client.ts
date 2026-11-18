@@ -7,7 +7,7 @@ import type {
 const TOKEN_KEY = "veloxa.token";
 
 export class ApiError extends Error {
-  constructor(public status: number, public code: string, message: string) {
+  constructor(public status: number, public code: string, message: string, public requestId?: string) {
     super(message);
   }
   get isAuth(): boolean {
@@ -52,9 +52,13 @@ export async function request<T>(method: string, path: string, body?: unknown, s
     throw new ApiError(res.status, "invalid_response", "The API returned a response that is not JSON.");
   }
   if (!res.ok) {
-    const d = (data ?? {}) as { error?: string; detail?: unknown };
-    const detail = typeof d.detail === "string" ? d.detail : `Request failed (${res.status}).`;
-    throw new ApiError(res.status, d.error ?? `http_${res.status}`, detail);
+    const d = (data ?? {}) as { error?: string; detail?: unknown; request_id?: string };
+    const rid = d.request_id ?? res.headers.get("X-Request-ID") ?? undefined;
+    const detail = typeof d.detail === "string" ? d.detail
+      : d.error === "internal_error" ? "Veloxa could not complete this request because of an internal error. "
+        + "Nothing was changed, and the error was logged for the operator."
+      : `The server answered with status ${res.status}.`;
+    throw new ApiError(res.status, d.error ?? `http_${res.status}`, detail, rid);
   }
   return data as T;
 }

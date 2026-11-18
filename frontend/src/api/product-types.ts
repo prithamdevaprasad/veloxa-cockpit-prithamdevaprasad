@@ -75,7 +75,10 @@ export interface Finding { finding_id: string; title: string; description: strin
   project: string | null; trigger: string; evidence: string[]; confidence: string; unknowns: string[]; state: string;
   created_at: string; updated_at: string; history: { state: string; actor: string; note: string | null; at: string }[];
   notified: { recipient: string; basis: string; delivered_at: string }[] }
-export interface ConnectorStatus { connectors: { connector: string; state: string; reason?: string }[];
+export interface AiWording { active: boolean; provider?: string | null; model?: string | null; workspace: string;
+  workspace_synthetic: boolean; workspace_in_scope: boolean; scope_reason: string;
+  configuration: Record<string, unknown>; what_it_does: string }
+export interface ConnectorStatus { ai_wording?: AiWording; connectors: { connector: string; state: string; reason?: string }[];
   runs: { connector: string; mode: string; status: string; fetched: number; changed: number; submitted: number;
     error: string | null; started_at: string }[];
   model: Record<string, unknown>; gemini_experiment: { key_configured: boolean; synthetic_tenants: string[];
@@ -86,4 +89,13 @@ export interface Workforce { state: "ok" | "denied" | "no_data" | string; total?
 export interface Wording { mode: "experimental_model" | "facts_only"; reason?: string; label?: string; model?: string;
   summary?: string; claims?: Record<string, string>; rejections?: string[]; latency_ms?: number | null; fallback?: boolean }
 export interface Brief { read_basis: { batch_seq: number; banner: string }; lines: { text: string; evidence: string[] }[];
-  method: string; wording?: Wording }
+  method: string; wording?: Wording; explanation?: Explanation }
+export type Basis = "recorded" | "calculated" | "assumption" | "unknown" | "caveat";
+export interface ExplanationItem { id: string; text: string; evidence: string[]; detail?: string }
+export interface ExplanationSection { key: string; title: string; basis: Basis; basis_label: string;
+  items: ExplanationItem[] }
+export interface ExplanationWording { mode: "experimental_model" | "facts_only"; notice?: string;
+  diagnostic?: string; model?: string; summary?: string; items?: Record<string, string>; rejections?: string[];
+  fallback?: boolean }
+export interface Explanation { kind: string; status: "explained" | "abstained" | "refused"; headline: string;
+  summary: string; sections: ExplanationSection[]; confidence: string | null; wording: ExplanationWording }

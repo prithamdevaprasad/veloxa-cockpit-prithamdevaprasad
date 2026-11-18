@@ -194,19 +194,37 @@ function Conversation({ session, history, onClosed }: { session: AgentSession; h
   );
 }
 
+/** Agent turns stay facts-only (no model wording). These are plain-English readings of their fixed labels. */
+const TURN_LEAD: Record<string, string> = {
+  answered: "Answered from records this person took part in.",
+  qualified: "Partly answered: some of this comes from records the person may not have seen, or has gaps listed below.",
+  abstained: "This agent could not answer from the records it is allowed to use.",
+  refused: "This agent will not answer this request.",
+};
+const BASIS_WORDS: Record<string, { label: string; title: string }> = {
+  participant: { label: "they took part", title: "The person this agent represents took part in this record." },
+  role_plausible: { label: "likely seen in their role", title: "Their role would normally see this record; it is not "
+    + "recorded that they did." },
+  possible: { label: "may not have seen it", title: "The record is in their area, but nothing shows they saw it." },
+};
+
 function TurnView({ turn }: { turn: AgentTurn }) {
   const [showEvidence, setShowEvidence] = useState(false);
   return (
     <div className="bubble stack">
       <div className="row"><Badge value={turn.status} />{turn.replayed && <Badge value="replayed" />}
         <span className="label-ai">{turn.label}</span></div>
+      {TURN_LEAD[turn.status] && <p className="small">{TURN_LEAD[turn.status]}</p>}
       {turn.refusal && <div className="callout bad small"><strong>{turn.refusal.policy}</strong> {turn.refusal.reason}</div>}
       {turn.claims.length > 0 && (
         <ul className="plain">{turn.claims.map((c) => (
-          <li key={c.fact_id} className="claim">{c.text} <Badge value={c.knowledge_basis} title="knowledge basis" /></li>
+          <li key={c.fact_id} className="claim">{c.text} <Badge value={c.knowledge_basis} label={BASIS_WORDS[c.knowledge_basis]?.label ?? c.knowledge_basis}
+                                     title={BASIS_WORDS[c.knowledge_basis]?.title ?? "knowledge basis"} /></li>
         ))}</ul>
       )}
-      {turn.unknowns.length > 0 && <ul className="bullets small">{turn.unknowns.map((u, i) => <li key={i}>{u}</li>)}</ul>}
+      {turn.unknowns.length > 0 && <div className="callout bad small"><strong>
+        {turn.status === "abstained" ? "Why there is no answer" : "What this agent could not establish"}</strong>
+        <ul className="bullets">{turn.unknowns.map((u, i) => <li key={i}>{u}</li>)}</ul></div>}
       {turn.escalation && <p className="small muted">Escalation: {turn.escalation.to}, through {turn.escalation.how}.</p>}
       <details className="small">
         <summary>Tools and boundary</summary>

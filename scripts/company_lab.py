@@ -266,6 +266,9 @@ def main() -> int:
         os.environ.update({"VELOXA_DEV_AUTH": "1", "VELOXA_DEV_TOKEN": LAB_TOKEN,
                            "VELOXA_DEV_PRINCIPAL": os.environ.get("VELOXA_LAB_PRINCIPAL", "T001")})
         print(f"Company Lab API on http://127.0.0.1:{args.port}; local fixture token {LAB_TOKEN}", flush=True)
+        from veloxa import telemetry as _telemetry
+
+        _telemetry.configure_logging()        # unhandled errors are logged with their request ID and traceback
         uvicorn.run(create_app(dsn=app_dsn), host="127.0.0.1", port=args.port, log_level="warning")
     return 0
 
