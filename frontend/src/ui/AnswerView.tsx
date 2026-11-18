@@ -3,6 +3,8 @@
 // regroups them (e.g. a department breakdown) and rewrites a few fixed system notes into plain English. Nothing is
 // added, inferred or dropped: each claim keeps its citations, and the full claim text stays in the accessible text.
 import { useState } from "react";
+import { product } from "../api/product";
+import type { Wording } from "../api/product-types";
 import type { Answer, Claim, Evidence } from "../api/types";
 import { useAsk } from "./Ask";
 import { useEvidence } from "./EvidenceDrawer";
@@ -238,6 +240,7 @@ export function AnswerView({ answer }: { answer: Answer }) {
         </p>
       )}
       {(answer.follow_ups?.length ?? 0) > 0 && <FollowUps items={answer.follow_ups!} />}
+      {!["refused", "abstained", "conflict"].includes(answer.status) && answer.audit_id && <Explain id={answer.audit_id} />}
 
       <footer className="brief-foot">
         {answer.evidence.length > 0 && (
@@ -282,6 +285,27 @@ function FollowUps({ items }: { items: string[] }) {
   return (
     <div className="follow-ups" role="group" aria-label="Suggested follow-ups">
       {items.map((q) => <button key={q} className="chip" onClick={() => ask.ask(q)}>{q}</button>)}
+    </div>
+  );
+}
+
+/** Optional plain-English wording of THIS recorded answer (experimental model, synthetic tenants only). The server
+ * rewords its own stored answer; the verified claims above stay the answer, and a rejected wording falls back. */
+function Explain({ id }: { id: string }) {
+  const [w, setW] = useState<Wording | null>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div>
+      {!w && <button className="link small" disabled={busy} onClick={async () => {
+        setBusy(true);
+        try { setW((await product.explainAnswer(id)).wording); }
+        catch { setW({ mode: "facts_only", reason: "the explanation service is unavailable" }); }
+        finally { setBusy(false); }
+      }}>{busy ? "Writing…" : "Explain in plain English"}</button>}
+      {w && (w.mode === "experimental_model"
+        ? <div className="experimental" role="note"><p>{w.summary}</p>
+            <p className="small muted" style={{ marginTop: 6 }}>{w.label} ({w.model}).</p></div>
+        : <p className="small muted" role="note">Showing the verified answer only: {w.reason}.</p>)}
     </div>
   );
 }

@@ -117,3 +117,31 @@ def test_the_key_never_appears_in_source_or_the_frontend():
         text = path.read_text(encoding="utf-8", errors="ignore")
         assert "VITE_GEMINI" not in text and "AIza" not in text
     assert "GEMINI" not in "".join(p.read_text(encoding="utf-8") for p in (ROOT / "frontend" / "src").rglob("*.ts*"))
+
+
+def test_gemini_is_configurable_only_with_a_backend_key_and_never_composes_agent_turns(monkeypatch):
+    from veloxa.agents.model import FactsOnlyComposer
+    from veloxa.llm import config as llm_config
+
+    env = {"VELOXA_MODEL_PROVIDER": "gemini", "VELOXA_MODEL_NAME": "gemini-3.1-flash-lite",
+           "VELOXA_MODEL_STAGES": "compose", "VELOXA_MODEL_ALLOWED_CLASSES": "internal",
+           "VELOXA_MODEL_MAX_ESTIMATE_TOKENS": "2000"}
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    assert llm_config.status() == {"model": "disabled", "reason": "incomplete configuration",
+                                   "missing": ["GEMINI_API_KEY"]}
+    monkeypatch.setenv("GEMINI_API_KEY", "test-value-not-a-key")
+    st = llm_config.status()
+    assert st["model"] == "configured" and "test-value-not-a-key" not in str(st)
+    policy, provider = llm_config.policy_and_provider()
+    assert provider.name == "gemini" and policy.stages == frozenset({"compose"})
+    assert isinstance(llm_config.agent_composer(None), FactsOnlyComposer)      # agents stay facts-only
+
+
+def test_the_adapter_refuses_any_prompt_other_than_the_wording_task():
+    from dataclasses import replace
+
+    req = replace(wording.request_for(answer(), TID), prompt_version="agent-turn/1")
+    with pytest.raises(gemini.TenantNotPermitted):
+        gemini.GeminiProvider(client_factory=lambda: None).complete("m", req)

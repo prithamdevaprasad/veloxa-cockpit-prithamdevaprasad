@@ -46,6 +46,10 @@ export const product = {
     request<{ tuple_id: string }>("POST", "/v1/admin/grants", b),
   revoke: (tupleId: string) => request("POST", `/v1/admin/grants/${enc(tupleId)}/revoke`),
   clarifications: (s?: AbortSignal) => get<{ requests: P.Clarification[] }>("/v1/clarifications", s),
+  workforce: (s?: AbortSignal) => get<P.Workforce>("/v1/workforce", s),
+  brief: (explain = false, s?: AbortSignal) => get<P.Brief>("/v1/brief" + qs({ explain: explain ? "true" : undefined }), s),
+  explainAnswer: (answerId: string) => request<{ answer_id: string; wording: P.Wording }>(
+    "POST", `/v1/answers/${enc(answerId)}/explain`),
   people: (s?: AbortSignal) => get<{ people: P.Person[]; count: number }>("/v1/people", s),
   worry: (asKnownAt?: string, s?: AbortSignal) => get<P.Worry>("/v1/worry" + qs({ as_known_at: asKnownAt }), s),
   findings: (s?: AbortSignal) => get<{ findings: P.Finding[]; hidden_for_access: number }>("/v1/findings", s),

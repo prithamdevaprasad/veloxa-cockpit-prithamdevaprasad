@@ -264,6 +264,18 @@ def cases(s: Suite, admin: str, db: str, data: Path, built: dict) -> None:  # no
            "Follow-up questions derived from the answer (the disagreement)",
            lambda: (any("disagree" in f for f in arr.get("follow_ups", [])), arr.get("follow_ups")))
 
+    wf = client.get("/v1/workforce", headers=H).json()
+    s.case("C6", "answers", "How is the workforce distributed by department? (dashboard)",
+           "Aggregate counts from the governed headcount metric only (17 people; Engineering 5); no individual records",
+           lambda: (wf["state"] == "ok" and wf["total"] == 17
+                    and {"label": "Engineering", "count": 5} in wf["by_department"]
+                    and "Syn " not in json.dumps(wf), {"total": wf.get("total")}))
+    br = client.get("/v1/brief", params={"explain": "true"}, headers=H).json()
+    s.case("C7", "answers", "Executive brief with plain-English explanation requested (no model configured)",
+           "Deterministic lines from governed figures; the explanation falls back to the verified lines (DENY_ALL)",
+           lambda: (any("Headcount in the HR export: 17" in ln["text"] for ln in br["lines"])
+                    and br["wording"]["mode"] == "facts_only", br.get("wording")))
+
     # ---- Ranked worry view (4)
     pending = client.get("/v1/worry", headers=H).json()
     s.case("W1", "worry", "What should I worry about? (before D-15 is recorded)",

@@ -206,3 +206,119 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
                                       "synthetic_tenants": [x for x in _os.environ.get("VELOXA_GEMINI_TENANTS",
                                                                                        "").split(",") if x],
                                       "scope": "synthetic Lumora data only; the supplied company is refused"}}
+
+    @app.get("/v1/workforce")
+    def workforce(as_known_at: str | None = None, authorization: str | None = Header(default=None)):
+        """Workforce distribution from the governed headcount metric (headcount@1, the HR export as at extraction):
+        aggregate counts by department and by recorded status only. No individual record, no pay, no leave detail.
+        The same evidence access gate as the Overview KPI applies; a principal without access gets `denied`."""
+        from . import metrics
+        from .authz import evidence as ev_authz
+
+        with connect(state["dsn"]) as conn:
+            p, basis, _ = ctx(conn, authorization, as_known_at)
+            if basis is None:
+                return p
+            if not basis.batch_seq:
+                return {"read_basis": basis_json(basis), "state": "no_data"}
+            hc = tools.headcount(conn, basis, p)
+            if p.access is not None:
+                hc, _ = ev_authz.gate(hc, p.access)
+            if hc.status != "ok" or not hc.facts:
+                return {"read_basis": basis_json(basis), "state": "denied" if hc.status == "ok" else hc.status}
+            d = metrics.load_definitions()["headcount"]
+            by = {}
+            for dim in ("department", "status"):
+                res = metrics.run(conn, d, basis, [dim])
+                by[dim] = sorted(({"label": r.dims[dim], "count": r.value} for r in res.rows),
+                                 key=lambda x: (-x["count"], x["label"]))
+            return {"read_basis": basis_json(basis), "state": "ok", "total": hc.facts[0].value,
+                    "by_department": by["department"], "by_status": by["status"],
+                    "basis": "governed metric headcount@1 (HR export, as at extraction; contractors not included)",
+                    "evidence_records": len({r for f in hc.facts for r in f.inputs})}
+
+    def _experimental_wording(conn, p, result: dict) -> dict:
+        """Optional model wording (Gemini experiment): only through GovernedLLMClient, only for allowlisted synthetic
+        tenants, only after the deterministic answer is complete; any failure returns the facts-only answer."""
+        from .ask import wording
+        from .llm import config as llm_config
+        from .llm.client import GovernedLLMClient
+
+        policy, provider = llm_config.policy_and_provider()
+        if provider is None or getattr(provider, "name", "") != "gemini":
+            return {"mode": "facts_only", "reason": "no experimental model is configured (DENY_ALL)"}
+        with tenant_tx(conn, p.tenant_id):
+            t = conn.execute("SELECT slug, synthetic FROM directory.tenant WHERE tenant_id = %s",
+                             (p.tenant_id,)).fetchone()
+        tenant = {"tenant_id": p.tenant_id, "slug": t["slug"], "synthetic": bool(t["synthetic"])}
+        return wording.reword(conn, tenant, result, GovernedLLMClient(conn, policy, provider))["wording"]
+
+    @app.post("/v1/answers/{answer_id}/explain")
+    def explain_answer(answer_id: str, authorization: str | None = Header(default=None)):
+        """Plain-English wording of one of YOUR recorded answers (read from the server, never from the client)."""
+        import uuid as _uuid
+
+        with connect(state["dsn"]) as conn:
+            p, basis, _ = ctx(conn, authorization, None)
+            if basis is None:
+                return p
+            try:
+                aid = _uuid.UUID(answer_id)
+            except ValueError:
+                return JSONResponse(status_code=404, content={"error": "not_found"})
+            with tenant_tx(conn, p.tenant_id, p.principal_id):
+                row = conn.execute("SELECT answer FROM runtime.answer WHERE answer_id = %s AND principal_id = %s",
+                                   (aid, p.principal_id)).fetchone()
+            if row is None:
+                return JSONResponse(status_code=404, content={"error": "not_found"})
+            return {"answer_id": answer_id, "wording": _experimental_wording(conn, p, row["answer"])}
+
+    @app.get("/v1/brief")
+    def executive_brief(explain: bool = False, authorization: str | None = Header(default=None)):
+        """A deterministic executive brief: each line is a verified figure or registry fact with its records. The
+        optional `explain=true` adds an experimental model wording (synthetic tenants only); the lines never change."""
+        from . import knowledge, metrics
+        from .authz import evidence as ev_authz
+        from .risk import worry as w
+        from .signals.registry import assessment_date
+
+        with connect(state["dsn"]) as conn:
+            p, basis, tz = ctx(conn, authorization, None)
+            if basis is None:
+                return p
+            claims, records = [], set()
+            if basis.batch_seq:
+                hc = tools.headcount(conn, basis, p)
+                if p.access is not None:
+                    hc, _ = ev_authz.gate(hc, p.access)
+                if hc.status == "ok" and hc.facts:
+                    res = metrics.run(conn, metrics.load_definitions()["headcount"], basis, ["department"])
+                    top = sorted(res.rows, key=lambda r: -r.value)[:2]
+                    ids = sorted({i for f in hc.facts for i in f.inputs})
+                    largest = ", ".join(f"{r.dims['department']} {r.value}" for r in top)
+                    claims.append({"text": f"Headcount in the HR export: {hc.facts[0].value} across {len(res.rows)} "
+                                   "departments" + (f"; largest: {largest}" if top else ""), "evidence": ids[:3]})
+                    records |= set(ids[:3])
+                with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
+                    items = w.build_items(conn, p.tenant_id, basis.batch_seq, assessment_date(basis, tz))
+                    conflicts = knowledge.conflicts_at(conn, p.tenant_id, basis.batch_seq)
+                    open_f = conn.execute("SELECT count(*) AS n FROM runtime.finding_current WHERE state NOT IN"
+                                          " ('resolved', 'dismissed')").fetchone()["n"]
+                ok = readable(conn, p, basis, [r for i in items for r in i.evidence])
+                items = [i for i in items if set(i.evidence) <= ok]
+                for i in items[:3]:
+                    claims.append({"text": i.title, "evidence": i.evidence[:3]})
+                    records |= set(i.evidence[:3])
+                if conflicts:
+                    claims.append({"text": f"Open source disagreements: {len(conflicts)}", "evidence": []})
+                claims.append({"text": f"Findings not yet resolved: {open_f}", "evidence": []})
+            ev = [{"record_id": e.record_id, "system": e.system, "data_class": e.data_class}
+                  for e in tools._evidence(conn, basis, sorted(records))]
+            brief = {"status": "answered" if claims else "abstained", "claims": claims, "evidence": ev,
+                     "interpretation": "Executive brief at the current knowledge point", "unknowns": [],
+                     "qualifiers": [], "confidence": {"label": "Deterministic"}, "audit_id": f"brief-{basis.batch_seq}"}
+            out = {"read_basis": basis_json(basis), "lines": claims,
+                   "method": "deterministic: governed metrics, the D-15 item builder, the Conflict Registry, findings"}
+            if explain:
+                out["wording"] = _experimental_wording(conn, p, brief)
+            return out

@@ -26,7 +26,8 @@ from pathlib import Path
 
 from .client import DENY_ALL, Provider, ReplayProvider, TenantModelPolicy
 
-IMPLEMENTED_ADAPTERS = ("replay",)
+IMPLEMENTED_ADAPTERS = ("replay", "gemini")
+_PROVIDERS: dict = {}          # one adapter instance per process, so its daily and concurrency caps hold
 _REQUIRED = ("VELOXA_MODEL_PROVIDER", "VELOXA_MODEL_NAME", "VELOXA_MODEL_STAGES", "VELOXA_MODEL_ALLOWED_CLASSES",
              "VELOXA_MODEL_MAX_ESTIMATE_TOKENS")
 
@@ -46,6 +47,8 @@ def status() -> dict:
                 "implemented_adapters": list(IMPLEMENTED_ADAPTERS)}
     if missing:
         return {"model": "disabled", "reason": "incomplete configuration", "missing": missing}
+    if provider == "gemini" and not os.environ.get("GEMINI_API_KEY", "").strip():
+        return {"model": "disabled", "reason": "incomplete configuration", "missing": ["GEMINI_API_KEY"]}
     if provider == "replay" and not os.environ.get("VELOXA_MODEL_REPLAY_DIR", "").strip():
         return {"model": "disabled", "reason": "incomplete configuration", "missing": ["VELOXA_MODEL_REPLAY_DIR"]}
     return {"model": "configured", "provider": provider,
@@ -61,7 +64,12 @@ def policy_and_provider() -> tuple[TenantModelPolicy, Provider | None]:
     except ValueError:
         return DENY_ALL, None
     region = os.environ.get("VELOXA_MODEL_REGION", "").strip() or None
-    provider: Provider = ReplayProvider(Path(os.environ["VELOXA_MODEL_REPLAY_DIR"]))   # region "local"; a different
+    if name == "gemini":
+        from .gemini import GeminiProvider
+
+        provider: Provider = _PROVIDERS.setdefault("gemini", GeminiProvider())
+    else:
+        provider = ReplayProvider(Path(os.environ["VELOXA_MODEL_REPLAY_DIR"]))   # region "local"; a different
     # permitted region is refused by the client (residency), never silently matched
     return (TenantModelPolicy(name, os.environ["VELOXA_MODEL_NAME"].strip(), region, _csv("VELOXA_MODEL_STAGES"),
                               _csv("VELOXA_MODEL_ALLOWED_CLASSES"), ceiling), provider)
@@ -74,6 +82,6 @@ def agent_composer(conn):
     from .client import GovernedLLMClient
 
     policy, provider = policy_and_provider()
-    if provider is None:
+    if provider is None or getattr(provider, "name", "") == "gemini":   # the experiment is wording-only, never agents
         return FactsOnlyComposer()
     return GovernedLLMClient(conn, policy, provider)

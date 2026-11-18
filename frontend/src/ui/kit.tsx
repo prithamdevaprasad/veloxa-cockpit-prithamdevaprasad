@@ -41,9 +41,9 @@ export function Icon({ name, size = 18, label }: { name: keyof typeof PATHS | st
 export function BrandMark() {
   return (
     <svg className="brand-mark" viewBox="0 0 28 28" aria-hidden="true">
-      <rect width="28" height="28" rx="8" fill="#352b43" />
-      <path d="M7.5 8.5l6.5 12 6.5-12" fill="none" stroke="#c1a7f5" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx="14" cy="9.5" r="2" fill="#9b7ae8" />
+      <rect width="28" height="28" rx="8" fill="#ffffff" fillOpacity="0.12" />
+      <path d="M7.5 8.5l6.5 12 6.5-12" fill="none" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="14" cy="9.5" r="2" fill="#f5c26b" />
     </svg>
   );
 }
@@ -118,8 +118,8 @@ export function LineChart({ points, label, height = 220 }: { points: { x: string
       <svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label={label}>
         <defs>
           <linearGradient id={`area-${gid}`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0" stopColor="#9b7ae8" stopOpacity="0.28" />
-            <stop offset="1" stopColor="#9b7ae8" stopOpacity="0" />
+            <stop offset="0" stopColor="#5b3cc4" stopOpacity="0.22" />
+            <stop offset="1" stopColor="#5b3cc4" stopOpacity="0" />
           </linearGradient>
         </defs>
         {ticks.map((t, i) => (
@@ -176,6 +176,45 @@ export function BarChart({ rows, label, series, listLabel }: { rows: { label: st
           </li>
         ))}
       </ul>
+    </figure>
+  );
+}
+
+export const PALETTE = ["#5b3cc4", "#2f9e7a", "#2f6fc4", "#d9822b", "#c0567a", "#8e74e0", "#3ea6b5", "#9a8f2e"];
+
+/** A donut over category counts (from the API). The centre shows the total; hover or focus shows a slice. */
+export function Donut({ data, label, centreLabel }: { data: { label: string; count: number }[]; label: string;
+                                                     centreLabel: string }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const total = data.reduce((a, d) => a + d.count, 0);
+  if (!total) return <Guidance title="No data">Nothing admitted supports this chart yet.</Guidance>;
+  const r = 70, c = 2 * Math.PI * r;
+  let offset = 0;
+  return (
+    <figure className="donut" aria-label={label}>
+      <svg viewBox="0 0 200 200" role="img" aria-label={label}>
+        <circle cx="100" cy="100" r={r} fill="none" stroke="var(--surface-2)" strokeWidth="26" />
+        {data.map((d, i) => {
+          const len = (d.count / total) * c;
+          const seg = (
+            <circle key={d.label} cx="100" cy="100" r={r} fill="none" stroke={PALETTE[i % PALETTE.length]}
+                    strokeWidth={hover === i ? 30 : 26} strokeDasharray={`${Math.max(0, len - 2)} ${c}`}
+                    strokeDashoffset={-offset} transform="rotate(-90 100 100)" className="donut-seg"
+                    onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />);
+          offset += len;
+          return seg;
+        })}
+        <text x="100" y="96" textAnchor="middle" className="donut-total">{hover === null ? total : data[hover].count}</text>
+        <text x="100" y="118" textAnchor="middle" className="donut-sub">{hover === null ? centreLabel : data[hover].label}</text>
+      </svg>
+      <ul className="plain donut-legend">
+        {data.map((d, i) => (
+          <li key={d.label} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+            <i style={{ background: PALETTE[i % PALETTE.length] }} /><span>{d.label}</span>
+            <b>{d.count}</b>
+          </li>))}
+      </ul>
+      <figcaption className="sr-only">{data.map((d) => `${d.label}: ${d.count}`).join("; ")}</figcaption>
     </figure>
   );
 }

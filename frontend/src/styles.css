@@ -1,37 +1,39 @@
-/* Veloxa design system: dark plum surfaces, restrained lavender for interaction and selection only; green, amber and
+/* Veloxa design system: light surfaces, deep-purple shell, purple for interaction and selection only; green, amber and
    red carry status meaning only. IBM Plex Sans for the interface, IBM Plex Mono for identifiers. 4px spacing scale.
    Radii: controls 8, cards 12, the Ask panel 16, pills only for status labels. Rules: .claude/skills/no-ai-slop-frontend */
 :root {
-  --bg: #17131f;
-  --nav-bg: #1d1826;
-  --surface: #211b2b;
-  --surface-2: #292235;          /* elevated: inputs, nested panels */
-  --surface-3: #352b43;          /* hover and selected */
-  --border: #393044;
-  --border-strong: #4a3f58;
-  --text: #f3eff8;
-  --text-2: #b6acc0;             /* secondary (lifted from #A79DB1 for AA on --surface) */
-  --text-3: #8f849b;
-  --accent: #9b7ae8;             /* violet: primary actions, selected states */
-  --accent-strong: #ab8ef0;
-  --lavender: #c1a7f5;           /* links, focus, selected navigation text */
-  --accent-soft: rgba(155, 122, 232, 0.16);
-  --ok: #82cfa3;  --ok-soft: rgba(130, 207, 163, 0.13);
-  --warn: #e8bb6c; --warn-soft: rgba(232, 187, 108, 0.14);
-  --bad: #f09090; --bad-soft: rgba(240, 144, 144, 0.14);
-  --neutral-soft: rgba(243, 239, 248, 0.07);
-  --focus: #c1a7f5;
+  /* Light enterprise surfaces with a deep-purple shell (owner direction, 18 Nov 2026, inspired by Keka HRMS). */
+  --bg: #f4f5fa;
+  --nav-bg: #1f1240;             /* dark-purple icon sidebar */
+  --header-bg: #3a1c8c;          /* deep-purple top header */
+  --surface: #ffffff;
+  --surface-2: #f7f7fb;          /* nested panels, inputs */
+  --surface-3: #f0ebfd;          /* hover and selected (lavender tint) */
+  --border: #e7e6f0;
+  --border-strong: #d6d4e4;
+  --text: #1e1b2e;
+  --text-2: #57536e;
+  --text-3: #858199;
+  --accent: #5b3cc4;             /* primary actions, selected states */
+  --accent-strong: #4a2fb0;
+  --lavender: #5b3cc4;           /* links, focus, selected navigation */
+  --accent-soft: rgba(91, 60, 196, 0.09);
+  --ok: #1f8a5b;  --ok-soft: #e6f5ee;
+  --warn: #a8670f; --warn-soft: #fbf1e1;
+  --bad: #c0392b; --bad-soft: #fbe9e7;
+  --neutral-soft: #f1f1f6;
+  --focus: #6f4fe0;
   --r-control: 8px; --r-card: 12px; --r-panel: 16px;
   --radius: var(--r-control);
-  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-panel: 0 24px 64px rgba(6, 3, 12, 0.55), 0 0 0 1px rgba(193, 167, 245, 0.06);
+  --shadow-1: 0 1px 2px rgba(24, 18, 52, 0.05), 0 2px 8px rgba(24, 18, 52, 0.04);
+  --shadow-panel: 0 24px 64px rgba(24, 18, 52, 0.22), 0 0 0 1px rgba(24, 18, 52, 0.05);
   --shadow: var(--shadow-1);
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --t-fast: 160ms; --t-med: 220ms;
   --font: "IBM Plex Sans", ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
-  --nav-w: 236px;
-  color-scheme: dark;
+  --nav-w: 92px;
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -47,7 +49,7 @@ a { color: var(--lavender); }
 code, .mono { font-family: var(--mono); font-size: 12px; }
 .num, .kpi-value, .bar-val, td.num { font-variant-numeric: tabular-nums; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-::selection { background: rgba(155, 122, 232, 0.35); }
+::selection { background: rgba(91, 60, 196, 0.18); }
 * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 
 /* Page structure */
@@ -81,24 +83,24 @@ ul.bullets li + li { margin-top: 2px; }
 
 /* Controls */
 .btn { font: 500 13.5px/1.2 var(--font); cursor: pointer; border-radius: var(--r-control); padding: 8px 14px;
-  border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
   display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
   transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
-.btn:hover:not(:disabled) { background: var(--surface-3); border-color: var(--lavender); }
+.btn:hover:not(:disabled) { background: var(--surface-3); border-color: var(--accent); color: var(--accent); }
 .btn:active:not(:disabled) { transform: translateY(1px); }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #150f20; font-weight: 600; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #ffffff; font-weight: 600; }
 .btn.primary:hover:not(:disabled) { background: var(--accent-strong); border-color: var(--accent-strong); }
 .btn.ghost { border-color: transparent; background: transparent; color: var(--text-2); }
 .btn.ghost:hover:not(:disabled) { color: var(--text); background: var(--surface-3); border-color: transparent; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.input, select.input, textarea.input { font: inherit; color: var(--text); background: var(--surface-2);
+.input, select.input, textarea.input { font: inherit; color: var(--text); background: var(--surface);
   border: 1px solid var(--border-strong); border-radius: var(--r-control); padding: 8px 10px; min-width: 0;
   transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease); }
 .input:focus, textarea:focus { outline: none; border-color: var(--lavender); box-shadow: 0 0 0 3px var(--accent-soft); }
 .input::placeholder, textarea::placeholder { color: var(--text-3); }
 textarea.input { width: 100%; resize: vertical; }
-select.input option { background: var(--surface-2); }
-input[type="date"] { color-scheme: dark; }
+select.input option { background: var(--surface); }
+input[type="date"] { color-scheme: light; }
 label.field { display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; color: var(--text-2); }
 .seg { display: inline-flex; flex-wrap: wrap; max-width: 100%; gap: 2px; padding: 3px; background: var(--surface);
   border: 1px solid var(--border); border-radius: 10px; }
@@ -136,7 +138,7 @@ tr.clickable[aria-selected="true"] td:first-child { box-shadow: inset 2px 0 0 va
 @keyframes shimmer { to { background-position: -200% 0; } }
 
 /* Drawer */
-.drawer-backdrop { position: fixed; inset: 0; background: rgba(10, 6, 16, 0.5); z-index: 40;
+.drawer-backdrop { position: fixed; inset: 0; background: rgba(24, 18, 52, 0.32); z-index: 40;
   animation: fade var(--t-med) var(--ease); }
 .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(540px, 100vw); background: var(--surface);
   border-left: 1px solid var(--border); box-shadow: var(--shadow-panel); z-index: 41; display: flex; flex-direction: column;

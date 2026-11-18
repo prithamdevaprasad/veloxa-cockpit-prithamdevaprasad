@@ -18,20 +18,23 @@ import { EvidenceProvider } from "./ui/EvidenceDrawer";
 import { Avatar, BrandMark, DemoBadge, Icon } from "./ui/kit";
 import { EmptyState } from "./ui";
 
-const NAV = [
-  { route: "overview", label: "Overview", icon: "overview" },
-  { route: "ask", label: "Ask Veloxa", icon: "ask" },
-  { route: "worry", label: "What to worry about", icon: "alert" },
-  { route: "agents", label: "Agents", icon: "agents" },
-  { route: "departments", label: "Departments", icon: "departments" },
-  { route: "evidence", label: "Evidence & Data", icon: "evidence" },
-  { route: "intelligence", label: "Intelligence", icon: "intelligence" },
-  { route: "whatif", label: "What-if Analysis", icon: "whatif" },
-  { route: "timeline", label: "Timeline", icon: "timeline" },
+// Sidebar = groups (icon above a short label); the sub-navigation shows the pages of the active group.
+const GROUPS = [
+  { id: "home", label: "Home", icon: "overview", pages: [["overview", "Overview"], ["worry", "What to worry about"],
+                                                         ["timeline", "Timeline"]] },
+  { id: "ask", label: "Ask Veloxa", icon: "ask", pages: [["ask", "Ask Veloxa"]] },
+  { id: "people", label: "People", icon: "agents", pages: [["agents", "Agents"], ["departments", "Departments"]] },
+  { id: "intel", label: "Intelligence", icon: "intelligence", pages: [["intelligence", "Intelligence"],
+                                                                      ["evidence", "Evidence & Data"],
+                                                                      ["whatif", "What-if Analysis"]] },
 ] as const;
+const ADMIN = { id: "admin", label: "Admin", icon: "admin", pages: [["admin", "Administration & Access"]] } as const;
 // Earlier routes stay reachable (bookmarks and tests): today, conflicts, scenarios, access.
-const ALIASES: Record<string, string> = { scenarios: "whatif", access: "admin" };
-const KNOWN = new Set<string>([...NAV.map((n) => n.route), "admin", "today", "conflicts", "scenarios", "access"]);
+const ALIASES: Record<string, string> = { scenarios: "whatif", access: "admin", today: "overview", conflicts: "intelligence" };
+const KNOWN = new Set<string>([...GROUPS.flatMap((g) => g.pages.map((p) => p[0])), "admin", "today", "conflicts",
+                               "scenarios", "access"]);
+const groupOf = (route: string) => [...GROUPS, ADMIN].find((g) => g.pages.some((p) => p[0] === (ALIASES[route] ?? route)))
+  ?? GROUPS[0];
 
 function current(): string {
   const r = window.location.hash.replace(/^#\/?/, "");
@@ -75,28 +78,30 @@ function Shell() {
   }, [authTick]);
   const go = useCallback((r: string) => { window.location.hash = `/${r}`; }, []);
   const shown = ALIASES[route] ?? route;
-  const active = (r: string) => shown === r || (r === "overview" && route === "today")
-                                || (r === "intelligence" && route === "conflicts") || (r === "ask" && ask.full);
+  const group = ask.full ? GROUPS[1] : groupOf(route);
+  const navButton = (g: (typeof GROUPS)[number] | typeof ADMIN, label: string, title: string) => (
+    <button key={g.id} aria-current={group.id === g.id ? "page" : undefined} onClick={() => go(g.pages[0][0])}
+            title={title}>
+      <Icon name={g.icon} size={20} /> <span>{label}</span>
+    </button>
+  );
   return (
     <div className={`shell${navOpen ? " nav-open" : ""}`}>
       <nav className="nav" aria-label="Main">
         <div className="brand"><BrandMark />
           <span className="brand-text"><span className="brand-name">Veloxa</span><small>Executive intelligence</small></span></div>
-        {NAV.map((n) => (
-          <button key={n.route} aria-current={active(n.route) ? "page" : undefined} onClick={() => go(n.route)}
-                  title={n.label}>
-            <Icon name={n.icon} /> <span>{n.label}</span>
-          </button>
-        ))}
+        {GROUPS.map((g) => navButton(g, g.label, g.label))}
         <div className="spacer" />
-        <button aria-current={shown === "admin" ? "page" : undefined} onClick={() => go("admin")}
-                title={getToken() ? "Administration & Access" : "Sign in"}>
-          <Icon name="admin" /> <span>{getToken() ? "Administration & Access" : "Sign in"}</span>
-        </button>
+        {navButton(ADMIN, getToken() ? "Admin" : "Sign in", getToken() ? "Administration & Access" : "Sign in")}
       </nav>
       {navOpen && <div className="nav-scrim" onClick={() => setNavOpen(false)} />}
       <div className="workspace">
         <TopBar me={me} onMenu={() => setNavOpen(true)} />
+        {group.pages.length > 1 && (
+          <nav className="subnav" aria-label={`${group.label} pages`}>
+            {group.pages.map(([r, label]) => (
+              <button key={r} aria-current={shown === r ? "page" : undefined} onClick={() => go(r)}>{label}</button>))}
+          </nav>)}
         <main className="main" key={authTick}>
           {route === "overview" && <OverviewPage go={go} />}
           {route === "today" && <TodayPage onAsk={(q) => ask.ask(q)} />}

@@ -80,3 +80,10 @@ export interface ConnectorStatus { connectors: { connector: string; state: strin
     error: string | null; started_at: string }[];
   model: Record<string, unknown>; gemini_experiment: { key_configured: boolean; synthetic_tenants: string[];
     scope: string } }
+export interface Workforce { state: "ok" | "denied" | "no_data" | string; total?: number;
+  by_department?: { label: string; count: number }[]; by_status?: { label: string; count: number }[];
+  basis?: string; evidence_records?: number; read_basis: { batch_seq: number; banner: string } }
+export interface Wording { mode: "experimental_model" | "facts_only"; reason?: string; label?: string; model?: string;
+  summary?: string; claims?: Record<string, string>; rejections?: string[]; latency_ms?: number | null; fallback?: boolean }
+export interface Brief { read_basis: { batch_seq: number; banner: string }; lines: { text: string; evidence: string[] }[];
+  method: string; wording?: Wording }

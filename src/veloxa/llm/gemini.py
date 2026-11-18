@@ -98,6 +98,8 @@ class GeminiProvider:
         return genai.Client(http_options=types.HttpOptions(timeout=int(self.timeout_s * 1000)))
 
     def complete(self, model: str, request) -> tuple[dict, int]:
+        if request.prompt_version != "answer-wording/1":      # defence in depth: the experiment's only task
+            raise TenantNotPermitted(f"prompt {request.prompt_version!r} is not part of the wording experiment")
         prompt = json.dumps({"task": request.stage, "schema": request.schema, "messages": request.messages},
                             ensure_ascii=False, default=str)
         self.meter.acquire()

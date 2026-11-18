@@ -4,12 +4,12 @@
 import { useState } from "react";
 import { api } from "../api/client";
 import { product } from "../api/product";
-import type { AgentUpdate, ChartSource } from "../api/product-types";
+import type { AgentUpdate, Brief, ChartSource } from "../api/product-types";
 import { useApi } from "../api/useApi";
 import { DeptArt } from "../ui/art";
 import { useAsk } from "../ui/Ask";
 import { useEvidence } from "../ui/EvidenceDrawer";
-import { Avatar, BarChart, DemoBadge, Guidance, Icon, KpiCard, LineChart, Tabs } from "../ui/kit";
+import { Avatar, BarChart, DemoBadge, Donut, Guidance, Icon, KpiCard, LineChart, Tabs } from "../ui/kit";
 import { Badge, Button, Drawer, ErrorState, Loading, Section } from "../ui";
 
 // Charts are only drawn for sources the viewer may read; each says what it was computed from.
@@ -67,7 +67,8 @@ export function OverviewPage({ go }: { go: (r: string) => void }) {
   const ask = useAsk();
   const evidence = useEvidence();
   const name = me.state === "ready" ? (me.data.principal.display_name ?? "") : "";
-  const available = srcs.state === "ready" ? new Set(srcs.data.sources.map((x: ChartSource) => x.system)) : new Set<string>();
+  const sources = srcs.state === "ready" ? srcs.data.sources : [];
+  const available = new Set(sources.map((x: ChartSource) => x.system));
   const charts = CHARTS.filter((c) => available.has(c.system));
   return (
     <>
@@ -86,24 +87,170 @@ export function OverviewPage({ go }: { go: (r: string) => void }) {
         </div>
       </header>
 
-      <div className="ov-grid">
-        <section className="kpi-strip" aria-label="Key figures">
-          {ov.state === "loading" && [0, 1, 2, 3].map((i) => <div key={i} className="kpi"><Loading lines={2} /></div>)}
-          {ov.state === "error" && <div className="section" style={{ gridColumn: "1 / -1" }}><ErrorState error={ov.error} onRetry={reloadOv} /></div>}
+      <div className="dash-row dash-top">
+        <Section title="Company overview" aria-label="Key figures"
+                 subtitle="Governed and as-reported figures; each card states what it was computed from.">
+          {ov.state === "loading" && <Loading lines={2} />}
+          {ov.state === "error" && <ErrorState error={ov.error} onRetry={reloadOv} />}
           {ov.state === "ready" && (ov.data.kpis.length === 0
             ? <Guidance title="Nothing to show yet">{ov.data.notes[0] ?? "No admitted evidence you may read."}</Guidance>
-            : ov.data.kpis.map((k) => (
+            : <div className="kpi-strip">{ov.data.kpis.map((k) => (
                 <KpiCard key={k.key} label={k.label} basis={k.basis}
                          value={typeof k.value === "number" ? k.value.toLocaleString() : k.value}
-                         onSource={k.evidence.length ? () => evidence.open(k.evidence[0], `${k.label}: ${k.basis}`) : undefined} />)))}
-        </section>
+                         onSource={k.evidence.length ? () => evidence.open(k.evidence[0], `${k.label}: ${k.basis}`)
+                           : undefined} />))}</div>)}
+        </Section>
+        <HiringHealth sources={sources} loading={srcs.state === "loading"} />
+      </div>
 
+      <div className="dash-row dash-mid">
+        <PeopleCard go={go} />
+        <SourcesCard sources={sources} loading={srcs.state === "loading"} go={go} />
+        <WorrySummary go={go} />
+      </div>
+
+      <div className="dash-row dash-low">
+        <WorkforceCard />
         <Performance charts={charts} loading={srcs.state === "loading"} go={go} />
-        <Attention />
+        <BriefCard />
+      </div>
+
+      <div className="ov-grid">
         <RecentIntelligence go={go} />
-        <DepartmentsCard go={go} />
+        <div className="span-4 dash-side">
+          <Attention />
+          <DepartmentsCard go={go} />
+        </div>
       </div>
     </>
+  );
+}
+
+function HiringHealth({ sources, loading }: { sources: ChartSource[]; loading: boolean }) {
+  const sys = ["recruiting", "hiring_tracker"].find((s) => sources.some((x) => x.system === s));
+  const [s] = useApi((sig) => sys ? product.series({ system: sys, x: "Status", agg: "count" }, sig)
+    : Promise.resolve(null), [sys]);
+  const pts = s.state === "ready" && s.data ? s.data.points : [];
+  const total = pts.reduce((a, p) => a + p.value, 0);
+  const filled = pts.filter((p) => /filled|hired|closed/i.test(p.x)).reduce((a, p) => a + p.value, 0);
+  return (
+    <Section title="Hiring health" aria-label="Hiring health" subtitle="Requisitions by recorded status.">
+      {loading || s.state === "loading" ? <Loading lines={3} /> : !sys || !total
+        ? <Guidance title="No requisition source you may read">Hiring health appears when a recruiting export is
+            admitted and you are authorised to read it.</Guidance>
+        : <>
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <span className="small muted">Filled / all requisitions</span>
+              <strong className="num" style={{ fontSize: 22 }}>{filled}/{total}</strong>
+            </div>
+            <div className="progress" role="img" aria-label={`${filled} of ${total} requisitions filled`}>
+              <span style={{ width: `${(filled / total) * 100}%` }} /></div>
+            <ul className="plain small" style={{ marginTop: 12 }}>{pts.map((p) => (
+              <li key={p.x} className="row" style={{ justifyContent: "space-between" }}><span>{p.x}</span>
+                <span className="num">{p.value}</span></li>))}</ul>
+            {s.state === "ready" && s.data && <p className="chart-foot">{cap(s.data.basis)}.</p>}
+          </>}
+    </Section>
+  );
+}
+
+function PeopleCard({ go }: { go: (r: string) => void }) {
+  const [ppl] = useApi((s) => product.people(s), []);
+  const [tab, setTab] = useState<"all" | "notice">("all");
+  const list = ppl.state === "ready" ? ppl.data.people : [];
+  const notice = list.filter((p) => /notice/i.test(p.status ?? ""));
+  const shown = (tab === "all" ? list : notice).slice(0, 8);
+  return (
+    <Section title="People" aria-label="People overview" subtitle="The people the agents represent, from the HR record."
+             actions={<button className="link small" onClick={() => go("agents")}>View all</button>}>
+      {ppl.state === "loading" ? <Loading lines={4} /> : list.length === 0
+        ? <Guidance title="No people mapped yet">Agents are mapped to people only after an owner-approved decision.</Guidance>
+        : <>
+            <Tabs label="People" value={tab} onChange={setTab} tabs={[{ value: "all", label: "People", count: list.length },
+              { value: "notice", label: "Notice period", count: notice.length }]} />
+            {shown.length === 0 ? <p className="small muted">Nobody is in a notice period in the HR record.</p>
+              : <ul className="plain people-list">{shown.map((p) => (
+                  <li key={p.agent_id}><Avatar name={p.person_record ?? p.agent_id} size={38} />
+                    <span style={{ minWidth: 0 }}><span className="n">{p.name}</span>
+                      <span className="s" style={{ display: "block" }}>{p.title}, {p.department}</span></span></li>))}</ul>}
+          </>}
+    </Section>
+  );
+}
+
+function SourcesCard({ sources, loading, go }: { sources: ChartSource[]; loading: boolean; go: (r: string) => void }) {
+  return (
+    <Section title="Admitted sources" aria-label="Admitted sources" subtitle="Exports you may read, with their row counts."
+             actions={<button className="link small" onClick={() => go("evidence")}>Evidence &amp; Data</button>}>
+      {loading ? <Loading lines={4} /> : sources.length === 0
+        ? <Guidance title="No readable exports">Department contributions appear here once admitted.</Guidance>
+        : <ul className="plain doc-list">{sources.slice(0, 6).map((x) => (
+            <li key={x.system}><span className="ic"><Icon name="evidence" size={18} /></span>
+              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.file}</span>
+              <span className="c">{x.rows} rows</span></li>))}</ul>}
+    </Section>
+  );
+}
+
+function WorrySummary({ go }: { go: (r: string) => void }) {
+  const [w] = useApi((s) => product.worry(undefined, s), []);
+  return (
+    <Section title="What to worry about" aria-label="Worry summary"
+             actions={<button className="link small" onClick={() => go("worry")}>Open</button>}>
+      {w.state === "loading" ? <Loading lines={3} /> : w.state === "error" ? <ErrorState error={w.error} />
+        : w.data.ranking_mode === "pending"
+          ? <Guidance title="Not ranked yet">{w.data.note ?? "The ranking method is not recorded for this company."}</Guidance>
+          : w.data.ranked.length === 0 ? <Guidance title="Nothing ranked">No item meets the evidence gate.</Guidance>
+            : <ul className="plain attention-list">{w.data.ranked.slice(0, 4).map((x) => (
+                <li key={x.item_id}><span className="rank-n" style={{ fontSize: 16 }}>{x.rank}</span>
+                  <span className="what">{x.title}<span className="small muted" style={{ display: "block" }}>
+                    Severity {x.severity.low.toFixed(2)}–{x.severity.high.toFixed(2)}{x.tied ? ", tied" : ""}</span></span>
+                </li>))}</ul>}
+    </Section>
+  );
+}
+
+function WorkforceCard() {
+  const [w] = useApi((s) => product.workforce(s), []);
+  return (
+    <Section title="Workforce by department" aria-label="Workforce by department">
+      {w.state === "loading" ? <Loading lines={5} /> : w.state === "error" ? <ErrorState error={w.error} />
+        : w.data.state !== "ok"
+          ? <Guidance title="Not available">{w.data.state === "denied" ? "You are not authorised to read the HR export."
+              : "No HR export is admitted at this knowledge point."}</Guidance>
+          : <>
+              <Donut data={w.data.by_department ?? []} label="Workforce by department" centreLabel="people" />
+              <p className="chart-foot">{cap(w.data.basis ?? "")}. Status: {(w.data.by_status ?? [])
+                .map((x) => `${x.label} ${x.count}`).join(", ")}.</p>
+            </>}
+    </Section>
+  );
+}
+
+function BriefCard() {
+  const [b] = useApi((s) => product.brief(false, s), []);
+  const [explained, setExplained] = useState<Brief | null>(null);
+  const [busy, setBusy] = useState(false);
+  const w = explained?.wording;
+  return (
+    <Section title="Executive brief" aria-label="Executive brief"
+             subtitle="Each line is a verified figure or registry fact. Nothing here is generated.">
+      {b.state === "loading" ? <Loading lines={4} /> : b.state === "error" ? <ErrorState error={b.error} />
+        : b.data.lines.length === 0 ? <Guidance title="Nothing to brief yet">No admitted evidence you may read.</Guidance>
+          : <>
+              <ul className="plain brief-lines">{b.data.lines.map((l) => <li key={l.text}>{l.text}</li>)}</ul>
+              <div className="row" style={{ marginTop: 10 }}>
+                <Button disabled={busy} onClick={async () => { setBusy(true);
+                  try { setExplained(await product.brief(true)); } finally { setBusy(false); } }}>
+                  {busy ? "Writing…" : "Explain in plain English"}</Button>
+              </div>
+              {w && (w.mode === "experimental_model"
+                ? <div className="experimental" style={{ marginTop: 10 }} role="note">
+                    <p>{w.summary}</p>
+                    <p className="small muted" style={{ marginTop: 6 }}>{w.label} ({w.model}).</p></div>
+                : <p className="small muted" style={{ marginTop: 10 }} role="note">Showing the verified lines only: {w.reason}.</p>)}
+            </>}
+    </Section>
   );
 }
 
@@ -112,7 +259,7 @@ function Performance({ charts, loading, go }: { charts: typeof CHARTS; loading: 
   const c = charts.find((x) => x.system === sel) ?? charts[0];
   return (
     <Section title="Business performance" subtitle={c ? c.title : "Charts from the exports you are authorised to read."}
-             aria-label="Business performance" className="span-8"
+             aria-label="Business performance"
              actions={charts.length > 1 ? (
                <div className="seg" role="group" aria-label="Chart">
                  {charts.slice(0, 5).map((x) => <button key={x.system} aria-pressed={x === c} onClick={() => setSel(x.system)}>
@@ -133,7 +280,7 @@ function Attention() {
   const warnings = deps.state === "ready" ? deps.data.warnings : [];
   const items = today.state === "ready" ? today.data.today.items : [];
   return (
-    <Section title="Needs attention" aria-label="Needs attention" className="span-4"
+    <Section title="Needs attention" aria-label="Needs attention"
              subtitle="Evidence-backed signals, not ranked: ranking waits for the owner's D-15 values.">
       {(deps.state === "loading" || today.state === "loading") && <Loading lines={4} />}
       {deps.state === "error" && <ErrorState error={deps.error} />}
@@ -245,7 +392,7 @@ function DepartmentsCard({ go }: { go: (r: string) => void }) {
   const updates = ups.state === "ready" ? ups.data.updates : [];
   const forDept = (id: string) => updates.filter((u) => u.department === id || (id === "people" && u.department === "people_ops"));
   return (
-    <Section title="Departments" aria-label="Departments overview" className="span-4" subtitle="Latest agent update per department.">
+    <Section title="Departments" aria-label="Departments overview" subtitle="Latest agent update per department.">
       {deps.state === "loading" && <Loading lines={4} />}
       {deps.state === "error" && <ErrorState error={deps.error} />}
       {deps.state === "ready" && (deps.data.departments.length === 0

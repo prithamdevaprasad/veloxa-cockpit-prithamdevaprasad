@@ -12,7 +12,7 @@ build, review or change a page or component in `frontend/`.
 ## Do not use
 
 - Generic AI-chatbot layouts, glowing gradient circles or "AI orbs", sparkles, or robot illustrations.
-- Large purple or blue gradients, gradient text, or glassmorphism on every surface.
+- Large purple or blue gradients, gradient text, or glassmorphism on every surface (the purple header is flat).
 - Corner radii chosen at random. Radii follow the scale in `src/workspace.css`: controls 8px, cards 12px, the Ask
   panel 16px, and pills only for status labels.
 - Pill-shaped elements where a plain button or link does the job.
@@ -33,8 +33,10 @@ build, review or change a page or component in `frontend/`.
   the largest thing in its region.
 - **Typography:** IBM Plex Sans for the interface and IBM Plex Mono only for identifiers (record IDs, batch K,
   hashes). Use tabular numerals for every metric. Keep line length under about 75 characters for prose.
-- **Colour:** dark plum surfaces with restrained lavender. Lavender marks interaction and selection only. Green,
-  amber and red carry status meaning only. Most of the screen is neutral plum.
+- **Colour (owner direction, 18 Nov 2026, inspired by Keka HRMS):** a deep-purple header and dark-purple icon
+  sidebar around light surfaces (very light grey page, white cards, thin borders, subtle shadows). Purple
+  marks interaction and selection only. Green, amber and red carry status meaning only. Do not copy Keka's
+  layout, branding or data; adapt the visual language.
 - **Spacing:** 4px scale (4, 8, 12, 16, 24, 32). Cards in one grid align to the same gutter.
 - **Responsive behaviour:** the layout reorganises on narrow screens; it isn't just shrunk. Tables scroll inside
   their card; the page never scrolls sideways. Ask is full-screen on phones.

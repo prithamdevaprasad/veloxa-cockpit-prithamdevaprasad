@@ -10,7 +10,7 @@ out = Path(sys.argv[1])
 SKIN = ["#F1D2B6", "#E0AF88", "#C38760", "#98633F", "#6B442A"]
 HAIR = ["#2B2030", "#4A3326", "#7A5236", "#B8865A", "#D9D2C9", "#1E1A24"]
 CLOTH = ["#9B7AE8", "#6F8FD6", "#5FA79A", "#C9925A", "#B07AB8", "#7C6CC4", "#8A9AAF"]
-BG = ["#2E2540", "#33294A", "#2A2B45", "#30283F", "#352B43", "#2B2A3E", "#382C47"]
+BG = ["#EDE7FB", "#E4ECF8", "#E3F2EC", "#F8ECE1", "#F4E6F1", "#EAE8F6", "#F0EBF9"]
 
 
 def hair_shape(style: str, c: str) -> tuple[str, str]:
@@ -61,7 +61,7 @@ for i, (style, s, h, cl, bg, glasses) in enumerate(AGENTS, 1):
     (out / "agents" / f"agent-{i:02d}.svg").write_text(svg + "\n", encoding="utf-8")
 
 # Department marks: line art on a plum tile, one lavender accent fill.
-L, A = "#C1A7F5", "#9B7AE8"
+L, A = "#5B3CC4", "#8E74E0"
 STROKE = f'fill="none" stroke="{L}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'
 DEPTS = {
     "engineering": f'<rect x="14" y="17" width="36" height="28" rx="4" fill="{A}" fill-opacity=".22"/>'
@@ -91,6 +91,6 @@ DEPTS = {
 }
 for name, body in DEPTS.items():
     svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img">'
-           f'<rect width="64" height="64" rx="14" fill="#292235"/>{body}</svg>')
+           f'<rect width="64" height="64" rx="14" fill="#F0EBFD"/>{body}</svg>')
     (out / "departments" / f"{name}.svg").write_text(svg + "\n", encoding="utf-8")
 print("ok", len(AGENTS), len(DEPTS))

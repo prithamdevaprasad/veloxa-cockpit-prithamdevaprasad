@@ -25,7 +25,7 @@ def test_unknown_or_incomplete_providers_stay_disabled(monkeypatch):
     monkeypatch.setenv("VELOXA_MODEL_PROVIDER", "some-vendor")
     s = config.status()
     assert s["model"] == "disabled" and "no implemented adapter" in s["reason"]
-    assert s["implemented_adapters"] == ["replay"]
+    assert s["implemented_adapters"] == ["replay", "gemini"]   # gemini: owner-approved synthetic experiment
     monkeypatch.setenv("VELOXA_MODEL_PROVIDER", "replay")
     s = config.status()
     assert s["model"] == "disabled" and "VELOXA_MODEL_NAME" in s["missing"]
