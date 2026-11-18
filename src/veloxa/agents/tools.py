@@ -89,6 +89,7 @@ class ToolOutput(BaseModel):
     evidence: list[EvidenceOut]
     gaps: list[str]
     reason: str | None = None
+    self_records: list[str] = Field(default_factory=list)   # self.profile only: the agent's own HR record (+ manager)
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,7 @@ class ToolContext:
     basis: ReadBasis
     principal: vt.Principal          # the INTERVIEWER: tools run under the interviewer's authorization
     tz: str
+    agent_id: str | None = None      # the agent being interviewed (used only by self.profile)
 
 
 @dataclass(frozen=True)
@@ -185,6 +187,55 @@ def _today(ctx: ToolContext, _: NoArgs) -> dict:
             "gaps": list(today.get("notes", [])) if not facts else [], "reason": None}
 
 
+def _self_profile(ctx: ToolContext, _: NoArgs) -> dict:
+    """The interviewed agent's OWN represented person, from the reviewed mapping (runtime.agent_person, owner-approved
+    by exact employee ID or e-mail). Work facts from the HR record only: title, department, recorded status, join
+    date, reporting line, exit date. No pay, leave or private field exists here; persona assumptions are not facts
+    and are never returned as facts. Another person's record is cited only for the manager's name and title."""
+    from .. import schema
+    from . import people
+
+    out = {"tool": "self.profile", "status": "no_data", "facts": [], "evidence": [], "gaps": [], "reason": None,
+           "self_records": []}
+    if not ctx.agent_id or not ctx.basis.batch_seq or not schema.available(ctx.conn, "company_intelligence"):
+        out["gaps"] = ["this agent is not mapped to a person"]
+        return out
+    from ..db import tenant_tx
+
+    with tenant_tx(ctx.conn, ctx.tenant_id, batch_seq=ctx.basis.batch_seq):     # FORCE RLS: tenant-scoped reads
+        ap = ctx.conn.execute("SELECT person_record FROM runtime.agent_person WHERE agent_id = %s ORDER BY version"
+                              " DESC LIMIT 1", (ctx.agent_id,)).fetchone()
+        staff = people._people_at(ctx.conn, ctx.tenant_id, ctx.basis.batch_seq)
+    me = next((p for p in staff if ap and p["source_record_id"] == ap["person_record"]), None)
+    if me is None:
+        out["gaps"] = ["the represented person's HR record is not visible at this knowledge point"]
+        return out
+    rid, name = me["source_record_id"], me["full_name"]
+    facts = [("self.title", f"My recorded job title is {me['title']} ({name}, HR export)", [rid]),
+             ("self.department", f"My department is {me['department']}", [rid]),
+             ("self.status", f"My recorded employment status is {me['status']} (as at the HR extraction)", [rid]),
+             ("self.join_date", f"I joined on {me['join_date'].isoformat()}", [rid])]
+    mgr_rec = None
+    if me["manager_emp_id"]:
+        mgr = next((p for p in staff if p["emp_id"] == me["manager_emp_id"]), None)
+        if mgr:
+            mgr_rec = mgr["source_record_id"]
+            facts.append(("self.manager", f"I report to {mgr['full_name']} ({mgr['title']})", [rid, mgr_rec]))
+        else:
+            facts.append(("self.manager", f"I report to employee {me['manager_emp_id']}, who is not in this HR extract",
+                          [rid]))
+    if me["exit_date"]:
+        facts.append(("self.exit_date", f"My recorded exit date is {me['exit_date'].isoformat()}", [rid]))
+    ids = sorted({i for _, _, inputs in facts for i in inputs})
+    ev = vt._evidence(ctx.conn, ctx.basis, ids)
+    out.update(status="ok", self_records=[rid] + ([mgr_rec] if mgr_rec else []),
+               facts=[{"fact_id": fid, "display": d, "kind": "record", "inputs": inputs} for fid, d, inputs in facts],
+               evidence=[{"record_id": e.record_id, "kind": e.kind, "system": e.system, "data_class": e.data_class,
+                          "batch_seq": e.batch_seq, "excerpt": e.excerpt} for e in ev],
+               gaps=["personal details in this agent's persona are synthetic assumptions, not facts"])
+    return out
+
+
 def _not_admitted(ctx: ToolContext, _: NoArgs) -> dict:          # never reached: refused by availability
     raise RuntimeError("a tool whose source is not admitted must not run")
 
@@ -204,6 +255,8 @@ REGISTRY: dict[str, ToolSpec] = {s.tool_id: s for s in (
              "conflicts", NoArgs, _conflicts),
     ToolSpec("briefing.today", "At most three evidence-backed attention items (unranked while D-15 is pending)",
              "briefing", NoArgs, _today, timeout_s=30.0),
+    ToolSpec("self.profile", "The interviewed agent's own HR work facts (reviewed mapping; not the directory)",
+             "self_profile", NoArgs, _self_profile),
     ToolSpec("evidence.search", "Lexical search over admitted documents the interviewer may see",
              "evidence_search", SearchIn, _search),
     ToolSpec("coverage.oncall", "Scheduled on-call coverage (its source is not admitted yet)",

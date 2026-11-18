@@ -195,6 +195,31 @@ veloxa status                             # clock, sealed watermark K, each pack
 
 ## 6. Starting Veloxa
 
+### Hackathon submission: one command from a fresh clone
+
+Branch **`feat/veloxa-sprints-7-10`** holds the submitted work (`main` is not updated). From a fresh clone of that
+branch, with Docker running and the release packs extracted locally (never committed):
+
+```bash
+VELOXA_DATA_PATH=/path/to/Veloxa_Hackathon_Release_Packs docker compose --profile hackathon up --build --detach --wait
+```
+
+PowerShell: `$env:VELOXA_DATA_PATH = "C:\path\to\Veloxa_Hackathon_Release_Packs"; docker compose --profile hackathon up --build --detach --wait`
+
+This starts PostgreSQL, runs `init` (migrations and the Day 1 baseline, unchanged), then
+`veloxa hackathon-bootstrap`, which:
+
+- admits each pack **in release order** only if it is **released** (release time has passed) **and authorised
+  source by source** in `config/admission_authorisations.toml` (K-13); an unreleased pack is refused before any of
+  its files is opened, and an unauthorised one is refused and written to the audit log;
+- builds projections and claims, grounds the 14 agents in the HR export (owner-approved mapping by exact employee
+  ID), and records the CEO's explicit company-wide read (from the HR title, server-side, audited);
+- runs the self-check. Re-running it is safe.
+
+The API is on `http://127.0.0.1:8000` (`/health`, `/v1/meta/releases`). To use the cockpit, enable the local
+developer sign-in in `.env` (section 4) and start the frontend (below). The plain `docker compose up` stack keeps
+its general behaviour: it never admits a later pack.
+
 ### Demo (recommended first run): synthetic data, two terminals
 
 ```powershell

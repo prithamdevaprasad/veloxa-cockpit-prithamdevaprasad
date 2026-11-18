@@ -237,6 +237,41 @@ def cases(s: Suite, admin: str, db: str, data: Path, built: dict) -> None:  # no
                     and e4_now.get("title") == "Senior Site Reliability Engineer",
                     [built["profile_k3_eng04"]["title"], e4_now.get("title")]), knowledge_date="Day 3 vs current")
 
+    # ---- Agent self-profile (owner decision 2, 19 Nov 2026): all 14 answer role and manager from their HR record
+    import uuid as _uuid
+
+    def interview(agent_id, message):
+        sess = client.post(f"/v1/agents/{agent_id}/sessions", json={}, headers=H).json()
+        return client.post(f"/v1/sessions/{sess['session_id']}/messages",
+                           json={"message": message, "idempotency_key": str(_uuid.uuid4())}, headers=H).json()
+
+    self_answers = {a: interview(a, "What is your role and who do you report to?") for a in sorted(by)}
+
+    def self_ok(a, t):
+        p = by[a]
+        mgr = next((f["value"].split(" (")[0] for f in p.get("verified_facts", []) if f["fact"] == "Reports to"), None)
+        text = " ".join(c["text"] for c in t.get("claims", []))
+        cited = {r for c in t.get("claims", []) for r in c.get("evidence", [])}
+        persona = [x["value"] for x in p.get("assumptions", [])]
+        return (t.get("status") in ("answered", "qualified") and p["title"] in text and (mgr is None or mgr in text)
+                and p["person_record"] in cited and not any(v in text for v in persona))
+
+    s.case("A6", "agents", "Ask all 14 agents: what is your role and who do you report to?",
+           "Each answers its own recorded title and manager, cites its HR record, and states no persona detail as fact",
+           lambda: (all(self_ok(a, t) for a, t in self_answers.items()) and len(self_answers) == 14,
+                    {a: {"status": t.get("status"), "unknowns": t.get("unknowns"), "excluded": t.get("excluded"),
+                         "tools": [(x.get("tool"), x.get("decision"), x.get("status"), x.get("error"))
+                                   for x in t.get("tools", [])]}
+                     for a, t in self_answers.items() if not self_ok(a, t)} or "14/14"),
+           citations=["keka_hrms"])
+    cfgs = client.get("/v1/agents", headers=H).json()["agents"]
+    s.case("A7", "agents", "Does self-profile grant the employee directory?",
+           "No: every agent has self.profile; only People Ops agents hold the directory tool",
+           lambda: (all("self.profile" in c["tools"] for c in cfgs)
+                    and all(("people.profile" in c["tools"]) == (c["category"] == "people_ops") for c in cfgs),
+                    sorted({(c["category"], "people.profile" in c["tools"]) for c in cfgs})),
+           refusal="no directory access outside People Ops")
+
     # ---- CEO answers, citations and confidence (5)
     hc = ask("What is our headcount?")
     s.case("C1", "answers", "What is our headcount?",

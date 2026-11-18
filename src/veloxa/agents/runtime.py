@@ -67,6 +67,9 @@ _ROUTES = (
 )
 
 
+_SELF = re.compile(r"\b(you|your|yourself|yours)\b", re.IGNORECASE)
+
+
 class AgentError(Exception):
     def __init__(self, code: str, detail: str):
         super().__init__(detail)
@@ -207,7 +210,7 @@ class AgentRuntime:
                                        "alternative": refusal.policy.alternative}}
 
         calls = list(req.tool_calls) if req.tool_calls is not None else self._route(req.message, cfg)
-        facts, evidence = [], {}
+        facts, evidence, own = [], {}, {}
         for call in calls:
             outcome = self._run_tool(req, s, cfg, basis, call)
             base["tools"].append({k: v for k, v in outcome.items() if k not in ("output",)})
@@ -218,8 +221,11 @@ class AgentRuntime:
             facts += out["facts"]
             for e in out["evidence"]:
                 evidence[e["record_id"]] = e
+            if call.tool_id == "self.profile":         # the agent's own HR record, and its manager's for name/title
+                for i, r in enumerate(out.get("self_records", [])):
+                    own[r] = "participant" if i == 0 else "role_plausible"
 
-        permitted, labels, excluded = self._knowledge(req, cfg, basis, evidence)
+        permitted, labels, excluded = self._knowledge(req, cfg, basis, evidence, own)
         base["excluded"] = excluded
         usable = [f for f in facts if f["inputs"] and all(i in permitted for i in f["inputs"])]
         if len(usable) < len(facts):
@@ -277,6 +283,8 @@ class AgentRuntime:
 
     def _route(self, message: str, cfg: registry.AgentConfig) -> list[ToolCall]:
         calls = [ToolCall(t) for t, rx in _ROUTES if t in cfg.tools and re.search(rx, message, re.IGNORECASE)]
+        if "self.profile" in cfg.tools and _SELF.search(message):     # "what is your role", "who do you report to"
+            calls = [ToolCall("self.profile")] + calls
         if not calls and "evidence.search" in cfg.tools:
             q = " ".join(re.findall(r"[A-Za-z][\w-]{2,}", message))[:120]
             if len(q) >= 2:
@@ -310,7 +318,8 @@ class AgentRuntime:
             else:
                 started = time.monotonic()
                 try:
-                    raw = spec.fn(agent_tools.ToolContext(self.conn, req.tenant_id, basis, req.interviewer, self.tz),
+                    raw = spec.fn(agent_tools.ToolContext(self.conn, req.tenant_id, basis, req.interviewer, self.tz,
+                                                          cfg.agent_id),
                                   args)
                 except Exception as e:  # noqa: BLE001 - a tool failure is reported, never the whole turn
                     result |= {"status": "error", "error": type(e).__name__}
@@ -329,7 +338,7 @@ class AgentRuntime:
                           "decision": result["decision"], "reason": result["reason"], "status": result["status"]})
         return result
 
-    def _knowledge(self, req, cfg, basis, evidence: dict) -> tuple[dict, dict, dict]:
+    def _knowledge(self, req, cfg, basis, evidence: dict, own: dict | None = None) -> tuple[dict, dict, dict]:
         """D = KB ∩ AZ ∩ POL over the evidence the tools returned. Returns (permitted, labels, excluded counts)."""
         excluded = {"policy": 0, "authorization": 0, "knowledge": 0}
         pol = {r: e for r, e in evidence.items() if policy_allows(e["data_class"])}
@@ -338,6 +347,9 @@ class AgentRuntime:
               if self.authorizer.allowed(req.tenant_id, req.interviewer.principal_id, e["system"], e["data_class"])[0]}
         excluded["authorization"] = len(pol) - len(az)
         labels = self.kb.labels(cfg, sorted(az), basis) if az else {}
+        for r, lab in (own or {}).items():             # self_profile: only records the self tool returned, and only
+            if r in az and not labels.get(r):          # after policy and the interviewer's authorization allowed them
+                labels[r] = lab
         permitted = {r: e for r, e in az.items() if labels.get(r)}
         excluded["knowledge"] = len(az) - len(permitted)
         from .. import telemetry

@@ -35,11 +35,13 @@ ACTIVATIONS = ("blocked", "synthetic_test", "active")
 
 # Capabilities each category may be configured with. Only capabilities the role documentation supports
 # (department-level work: delivery, ledger, people directory, communications of the company) are listed.
+# `self_profile` (owner decision 2, 19 Nov 2026): every agent may read ITS OWN represented person's HR work facts.
+# It is not directory access: `people_directory` stays with People Ops.
 CATEGORY_CAPABILITIES: dict[str, frozenset[str]] = {
-    "engineering": frozenset({"delivery", "conflicts", "briefing", "evidence_search", "coverage"}),
-    "finance": frozenset({"finance_ledger", "delivery", "conflicts", "briefing", "evidence_search"}),
-    "people_ops": frozenset({"people_directory", "briefing", "evidence_search"}),
-    "marketing": frozenset({"delivery", "conflicts", "briefing", "evidence_search"}),
+    "engineering": frozenset({"delivery", "conflicts", "briefing", "evidence_search", "coverage", "self_profile"}),
+    "finance": frozenset({"finance_ledger", "delivery", "conflicts", "briefing", "evidence_search", "self_profile"}),
+    "people_ops": frozenset({"people_directory", "briefing", "evidence_search", "self_profile"}),
+    "marketing": frozenset({"delivery", "conflicts", "briefing", "evidence_search", "self_profile"}),
 }
 PROPOSED_DISTRIBUTION = {"engineering": 5, "finance": 3, "people_ops": 3, "marketing": 3}
 KNOWLEDGE_SCOPES = frozenset({"company_records", "own_participation", "role_plausible"})

@@ -431,6 +431,82 @@ def cmd_init(args: argparse.Namespace) -> int:
     return cmd_selfcheck(argparse.Namespace(role="ingest"))
 
 
+def cmd_hackathon_bootstrap(args: argparse.Namespace) -> int:
+    """Hackathon one-command start (owner decision 1, 19 Nov 2026). A SEPARATE command: `init` is unchanged and
+    still never admits a later pack.
+
+    In release order, each pack is admitted only if it is RELEASED (release time <= now) AND AUTHORISED source by
+    source (config/admission_authorisations.toml; K-13 `check_sources` runs inside `admit_pack`). An unreleased pack
+    is refused before any of its files is opened, and nothing after it is admitted (batches are sequential). An
+    unauthorised or failing pack is refused and recorded as an audit event; nothing partial is committed. Then:
+    projections, the 14 agents grounded in the HR export (owner-approved mapping by exact employee ID), and the
+    self-check. Re-running it is safe: admitted packs are skipped."""
+    _wait_for_db()
+    cmd_migrate(args)
+    root = _data_root()
+    if root is None:
+        return EXIT_DATA_MISSING
+    schedule = load_schedule()
+    tenant_id = config.tenant_uuid(schedule.tenant_slug)
+    now = current_time()
+    authorised = load_authorisations()
+    rc = EXIT_OK
+    with connect(_dsn("ingest")) as conn:
+        sealed = {b["pack_id"] for b in ledger.batches(conn, tenant_id) if b["sealed"]}
+        for pack in sorted(schedule.packs, key=lambda x: x.batch_seq):
+            if pack.id in sealed:
+                print(f"{pack.id}: already admitted")
+                continue
+            if pack.release_at > now:
+                print(f"{pack.id}: refused, not released until {pack.release_at.isoformat()}; no file was opened. "
+                      "Later packs wait for it.")
+                break
+            try:
+                auth = require_authorised(pack.id, authorised)
+                r = admit_pack(conn, tenant_id, schedule, pack.id, root, now, authorisation=auth)
+            except Exception as exc:  # recorded; nothing partial is ever committed
+                failure = AdmissionFailure(pack.id, exc)
+                record_failure(conn, tenant_id, failure)
+                print(f"{pack.id}: refused ({failure.reason}): {exc}. Nothing from it was admitted; later packs wait.",
+                      file=sys.stderr)
+                rc = EXIT_ADMISSION_FAILED
+                break
+            print(f"{r.pack_id}: {r.status} as batch {r.batch_seq}: {r.file_count} files, {r.record_count} records")
+    cmd_project(argparse.Namespace(rebuild=False))
+    with connect(_admin_dsn()) as a:
+        k = ledger.sealed_watermark(a, tenant_id)
+        if k:
+            from . import knowledge
+            from .agents import people, registry
+
+            registry.seed_slots(a, tenant_id)
+            print("knowledge claims:", knowledge.backfill(a, tenant_id)[-1:] or "up to date")
+            print("agents grounded:", len(people.ground(a, tenant_id, k)) or "already grounded")
+            _ceo_reader(a, tenant_id)
+    sc = cmd_selfcheck(argparse.Namespace(role="ingest"))
+    return rc or sc
+
+
+def _ceo_reader(conn, tenant_id) -> None:
+    """The documented evidence model's explicit company-wide read (authz/evidence.py, rule 3) for the person whose
+    title is exactly "CEO" in the latest sealed HR export. Server-side and audited; never from a browser or token."""
+    from . import tenancy
+    from .db import tenant_tx
+
+    with tenant_tx(conn, tenant_id):
+        ceo = conn.execute("SELECT emp_id FROM projection.person WHERE title = 'CEO' ORDER BY batch_seq DESC LIMIT 1"
+                           ).fetchone()
+        if ceo is None:
+            print("CEO company-wide read: no person titled CEO in the HR export; nothing granted")
+            return
+        has = conn.execute("SELECT 1 FROM policy.live_tuple WHERE resource_type = 'tenant' AND relation ="
+                           " 'company_reader' AND subject_id = %s", (ceo["emp_id"],)).fetchone()
+    if not has:
+        tenancy.grant_as_operator(conn, tenant_id, "tenant", str(tenant_id), "company_reader",
+                                  f"person:{ceo['emp_id']}", "CEO company-wide read (hackathon bootstrap)")
+    print("CEO company-wide read:", "already granted" if has else "granted (operator, audited)")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="veloxa", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -495,6 +571,8 @@ def main(argv: list[str] | None = None) -> int:
     p_sc = sub.add_parser("selfcheck", help="run startup self-checks for a role")
     p_sc.add_argument("--role", choices=("app", "ingest"), default="app")
     p_sc.set_defaults(func=cmd_selfcheck)
+    sub.add_parser("hackathon-bootstrap", help="hackathon one-command start: admit released AND authorised packs "
+                   "in order, project, ground agents, self-check").set_defaults(func=cmd_hackathon_bootstrap)
     p_init = sub.add_parser("init", help="privileged one-shot: migrate; bootstrap a fresh database only")
     p_init.set_defaults(func=cmd_init)
     p_pol = sub.add_parser("policy", help="owner decisions (privileged)")

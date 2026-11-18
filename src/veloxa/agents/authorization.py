@@ -109,8 +109,20 @@ class CurrentAuthorization:
     def allowed(self, tenant_id, interviewer_id, system, data_class):
         key = (tenant_id, interviewer_id, system, data_class)
         if key not in self._memo:
-            d = authorize(self.conn, interviewer_id, tenant_id, "read",
-                          Resource("evidence_source", system, tenant_id, data_class), "interview")
+            res = Resource("evidence_source", system, tenant_id, data_class)
+            d = authorize(self.conn, interviewer_id, tenant_id, "read", res, "interview")
+            if not d.allowed and d.reason == "no_relationship":
+                # The documented evidence model (authz/evidence.py, rule 3): an explicit, admin-granted
+                # tenant#company_reader also reads every source. ABAC (purpose, class, protected) still decides.
+                from ..authz.current import RelationshipStore, abac
+
+                try:
+                    granted, _ = RelationshipStore(self.conn).check(tenant_id, interviewer_id, "company_reader",
+                                                                    "tenant", str(tenant_id))
+                except Exception:  # noqa: BLE001 - an unavailable relationship store denies
+                    granted = False
+                if granted:
+                    d = abac(tenant_id, "read", res, "interview", True)
             self._memo[key] = (d.allowed, d.reason)
         return self._memo[key]
 
