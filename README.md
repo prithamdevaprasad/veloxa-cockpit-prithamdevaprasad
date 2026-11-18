@@ -271,8 +271,8 @@ Use the Demo Lab (section 6) for the fullest tour; the hackathon demo (`demo_env
    - submit for review.
 
    Review and authorisation are separate steps, and nothing is admitted until both happen.
-8. **Agents / Departments:** browse the 14 synthetic agents and their updates. Use **Ask the department** to send a clarification request.
-9. **Intelligence:** conflicts (sources side by side, no side chosen), source coverage, and what to watch (unranked until D-15).
+8. **Agents / Departments:** browse the 14 synthetic agents and their updates.
+9. **Intelligence:** **Ask a department** (a clarification request; Veloxa contacts nobody), conflicts (sources side by side, no side chosen), source coverage, and what to watch (unranked until D-15).
 10. **What-if:** move a commitment by N days. Observed, derived, assumption and unknown stay separate, and no probability is invented.
 11. **Timeline:** record events, with a "known as at" date selector.
 12. **Privacy refusal:** ask *What is Person Beta's salary?* (hackathon demo). It is refused with a policy, a reason and an alternative.
