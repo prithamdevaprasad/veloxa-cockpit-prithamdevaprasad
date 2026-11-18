@@ -208,36 +208,37 @@ const BASIS_WORDS: Record<string, { label: string; title: string }> = {
   possible: { label: "may not have seen it", title: "The record is in their area, but nothing shows they saw it." },
 };
 
+const TURN_TAG: Partial<Record<AgentTurn["status"], string>> = {
+  abstained: "No record", refused: "Not shared", unavailable: "Error", failed: "Error",
+};
+
+/** One agent reply: the plain answer first; where it comes from, gaps and technical detail one click away. */
 function TurnView({ turn }: { turn: AgentTurn }) {
-  const [showEvidence, setShowEvidence] = useState(false);
+  const reply = turn.reply ?? (turn.claims.length ? turn.claims.map((c) => c.text).join(" ")
+    : TURN_LEAD[turn.status] ?? "");
+  const tag = turn.persona ? "Fictional detail" : TURN_TAG[turn.status];
+  const sources = turn.evidence.length;
   return (
     <div className="bubble stack">
-      <div className="row"><Badge value={turn.status} />{turn.replayed && <Badge value="replayed" />}
-        <span className="label-ai">{turn.label}</span></div>
-      {TURN_LEAD[turn.status] && <p className="small">{TURN_LEAD[turn.status]}</p>}
-      {turn.refusal && <div className="callout bad small"><strong>{turn.refusal.policy}</strong> {turn.refusal.reason}</div>}
-      {turn.claims.length > 0 && (
-        <ul className="plain">{turn.claims.map((c) => (
-          <li key={c.fact_id} className="claim">{c.text} <Badge value={c.knowledge_basis} label={BASIS_WORDS[c.knowledge_basis]?.label ?? c.knowledge_basis}
-                                     title={BASIS_WORDS[c.knowledge_basis]?.title ?? "knowledge basis"} /></li>
-        ))}</ul>
-      )}
-      {turn.unknowns.length > 0 && <div className="callout bad small"><strong>
-        {turn.status === "abstained" ? "Why there is no answer" : "What this agent could not establish"}</strong>
-        <ul className="bullets">{turn.unknowns.map((u, i) => <li key={i}>{u}</li>)}</ul></div>}
-      {turn.escalation && <p className="small muted">Escalation: {turn.escalation.to}, through {turn.escalation.how}.</p>}
-      <details className="small">
-        <summary>Tools and boundary</summary>
-        <ul className="bullets">{turn.tools.map((t, i) => (
-          <li key={i}><code>{t.tool}</code> {t.decision}{t.decision === "denied" ? ` (${t.reason})` : t.status ? ` · ${t.status}` : ""}</li>
-        ))}</ul>
-        <p className="muted">Excluded evidence: policy {turn.excluded.policy ?? 0}, authorisation {turn.excluded.authorization ?? 0},
-          knowledge boundary {turn.excluded.knowledge ?? 0}. Execution <code>{turn.execution_id}</code>.</p>
-      </details>
-      {turn.evidence.length > 0 && (
-        <div><Button variant="ghost" onClick={() => setShowEvidence((s) => !s)}>{showEvidence ? "Hide" : "Show"} evidence ({turn.evidence.length})</Button>
-          {showEvidence && <EvidenceList items={turn.evidence} />}</div>
-      )}
+      {tag && <div className="row"><Badge value={turn.persona ? "open" : turn.status} label={tag} />
+        {turn.replayed && <Badge value="replayed" />}</div>}
+      <p className="agent-reply">{reply}</p>
+      {(sources > 0 || turn.claims.length > 0 || turn.unknowns.length > 0 || turn.tools.length > 0 || turn.refusal) && (
+        <details className="small turn-details">
+          <summary>{sources > 0 ? `Where this comes from (${sources} record${sources === 1 ? "" : "s"})`
+            : "Details"}</summary>
+          {turn.claims.length > 0 && <ul className="plain">{turn.claims.map((c) => (
+            <li key={c.fact_id} className="claim">{c.text}{" "}
+              <Badge value={c.knowledge_basis} label={BASIS_WORDS[c.knowledge_basis]?.label ?? c.knowledge_basis}
+                     title={BASIS_WORDS[c.knowledge_basis]?.title ?? "knowledge basis"} /></li>))}</ul>}
+          {sources > 0 && <EvidenceList items={turn.evidence} />}
+          {turn.unknowns.length > 0 && <><strong>Gaps</strong>
+            <ul className="bullets">{turn.unknowns.map((u, i) => <li key={i}>{u}</li>)}</ul></>}
+          {turn.refusal && <p className="muted">Policy {turn.refusal.policy}.</p>}
+          <p className="muted">Tools: {turn.tools.map((t) => `${t.tool} (${t.decision}${t.status ? `, ${t.status}`
+            : ""})`).join("; ") || "none"}. Excluded evidence: policy {turn.excluded.policy ?? 0}, authorisation{" "}
+            {turn.excluded.authorization ?? 0}, knowledge boundary {turn.excluded.knowledge ?? 0}.</p>
+        </details>)}
     </div>
   );
 }

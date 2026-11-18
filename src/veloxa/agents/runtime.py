@@ -183,7 +183,43 @@ class AgentRuntime:
         current = registry.latest(self.conn, req.tenant_id, s["agent_id"])
         basis = self._basis(req.tenant_id, s)
         turn = self._turn(req, s, cfg, current, basis)
+        if "reply" not in turn:                    # one plain reply for every outcome; the claims stay the sources
+            from . import conversation
+
+            kind = conversation.intent(req.message)
+            chosen = (conversation.select(kind, turn["claims"], req.message)
+                      if turn["status"] in ("answered", "qualified") else None)
+            if chosen is not None:                     # keep only what answers the question, and its sources
+                used = {r for c in chosen for r in c["evidence"]}
+                turn |= {"claims": chosen, "evidence": [e for e in turn["evidence"] if e["record_id"] in used],
+                         "_episodic": [r for r in turn.get("_episodic", []) if r in used]}   # memory = what was cited
+                if not chosen:
+                    turn["status"] = "abstained"
+                elif all(c.get("knowledge_basis") == "participant" for c in chosen):
+                    turn["status"] = "answered"
+            turn["reply"] = (conversation.refusal_reply(turn["refusal"]) if turn["status"] == "refused"
+                             and turn.get("refusal") else
+                             "I couldn't put an answer together just now. Nothing was guessed; please ask again."
+                             if turn["status"] in ("unavailable", "failed") else
+                             conversation.reply(kind, turn["claims"], turn["status"]))
         return self._record(req, s, cfg, basis, digest, turn)
+
+    def _history(self, req) -> list[dict]:
+        """This session's earlier turns, oldest first (the interviewer's own session only; RLS applies)."""
+        with tenant_tx(self.conn, req.tenant_id, req.interviewer.principal_id):
+            rows = self.conn.execute("SELECT response FROM runtime.agent_execution WHERE session_id = %s"
+                                     " ORDER BY executed_at, execution_id", (req.session_id,)).fetchall()
+        return [r["response"] for r in rows]
+
+    def _persona(self, tenant_id, agent_id: str) -> list[dict]:
+        from .. import schema
+
+        if not schema.available(self.conn, "company_intelligence"):
+            return []
+        with tenant_tx(self.conn, tenant_id):
+            return [dict(r) for r in self.conn.execute(
+                "SELECT category, value FROM runtime.assumption_current WHERE agent_id = %s AND scope = 'persona'"
+                " ORDER BY category", (agent_id,)).fetchall()]
 
     def _turn(self, req, s, cfg, current, basis) -> dict:
         base = {"label": LABEL, "message": req.message, "agent_id": cfg.agent_id, "config_version": cfg.config_version,
@@ -209,6 +245,21 @@ class AgentRuntime:
                            "refusal": {"policy": refusal.policy.policy_id, "reason": refusal.policy.reason,
                                        "alternative": refusal.policy.alternative}}
 
+        from . import conversation
+
+        kind = conversation.intent(req.message)
+        if req.tool_calls is None and kind in ("memory", "evidence", "simpler", "unknowns", "personal"):
+            history = self._history(req)
+            persona = self._persona(req.tenant_id, cfg.agent_id) if kind == "personal" else None
+            text, ids = conversation.history_reply(kind, history, persona)
+            prior = {e["record_id"]: e for h in history for e in h.get("evidence", [])}
+            permitted, labels, excluded = self._knowledge(req, cfg, basis, {i: prior[i] for i in ids if i in prior},
+                                                          {i: "participant" for i in ids})   # rechecked now
+            return base | {"status": "qualified" if kind == "personal" else "answered", "reply": text,
+                           "conversational": kind, "excluded": excluded,
+                           "evidence": [permitted[i] | {"knowledge_basis": labels[i]} for i in permitted],
+                           "persona": "synthetic assumption, not a fact" if kind == "personal" and persona else None}
+
         calls = list(req.tool_calls) if req.tool_calls is not None else self._route(req.message, cfg)
         facts, evidence, own = [], {}, {}
         for call in calls:
@@ -222,8 +273,8 @@ class AgentRuntime:
             for e in out["evidence"]:
                 evidence[e["record_id"]] = e
             if call.tool_id == "self.profile":         # the agent's own HR record, and its manager's for name/title
-                for i, r in enumerate(out.get("self_records", [])):
-                    own[r] = "participant" if i == 0 else "role_plausible"
+                for r in out.get("self_records", []):
+                    own[r] = "participant"
 
         permitted, labels, excluded = self._knowledge(req, cfg, basis, evidence, own)
         base["excluded"] = excluded
@@ -283,7 +334,10 @@ class AgentRuntime:
 
     def _route(self, message: str, cfg: registry.AgentConfig) -> list[ToolCall]:
         calls = [ToolCall(t) for t, rx in _ROUTES if t in cfg.tools and re.search(rx, message, re.IGNORECASE)]
-        if "self.profile" in cfg.tools and _SELF.search(message):     # "what is your role", "who do you report to"
+        from . import conversation
+
+        if "self.profile" in cfg.tools and (_SELF.search(message)               # "what is your role", "your manager"
+                                            or conversation.intent(message) in conversation.SELF_FACTS):
             calls = [ToolCall("self.profile")] + calls
         if not calls and "evidence.search" in cfg.tools:
             q = " ".join(re.findall(r"[A-Za-z][\w-]{2,}", message))[:120]

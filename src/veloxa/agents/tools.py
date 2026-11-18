@@ -211,28 +211,34 @@ def _self_profile(ctx: ToolContext, _: NoArgs) -> dict:
         out["gaps"] = ["the represented person's HR record is not visible at this knowledge point"]
         return out
     rid, name = me["source_record_id"], me["full_name"]
-    facts = [("self.title", f"My recorded job title is {me['title']} ({name}, HR export)", [rid]),
-             ("self.department", f"My department is {me['department']}", [rid]),
-             ("self.status", f"My recorded employment status is {me['status']} (as at the HR extraction)", [rid]),
-             ("self.join_date", f"I joined on {me['join_date'].isoformat()}", [rid])]
+
+    def day(d) -> str:
+        return f"{d.day} {d.strftime('%B %Y')}"
+
+    facts = [("self.identity", f"I'm the AI representation of {name}, built from their HR record", [rid]),
+             ("self.title", f"My job title is {me['title']}", [rid]),
+             ("self.department", f"I'm part of the {me['department']} department", [rid]),
+             ("self.status", f"My HR record lists my employment status as {me['status']}, as at the export date",
+              [rid]),
+             ("self.join_date", f"I joined on {day(me['join_date'])}", [rid])]
     mgr_rec = None
     if me["manager_emp_id"]:
         mgr = next((p for p in staff if p["emp_id"] == me["manager_emp_id"]), None)
         if mgr:
             mgr_rec = mgr["source_record_id"]
-            facts.append(("self.manager", f"I report to {mgr['full_name']} ({mgr['title']})", [rid, mgr_rec]))
+            facts.append(("self.manager", f"I report to {mgr['full_name']}, the {mgr['title']}", [rid, mgr_rec]))
         else:
             facts.append(("self.manager", f"I report to employee {me['manager_emp_id']}, who is not in this HR extract",
                           [rid]))
     if me["exit_date"]:
-        facts.append(("self.exit_date", f"My recorded exit date is {me['exit_date'].isoformat()}", [rid]))
+        facts.append(("self.exit_date", f"My HR record shows an exit date of {day(me['exit_date'])}", [rid]))
     ids = sorted({i for _, _, inputs in facts for i in inputs})
     ev = vt._evidence(ctx.conn, ctx.basis, ids)
     out.update(status="ok", self_records=[rid] + ([mgr_rec] if mgr_rec else []),
                facts=[{"fact_id": fid, "display": d, "kind": "record", "inputs": inputs} for fid, d, inputs in facts],
                evidence=[{"record_id": e.record_id, "kind": e.kind, "system": e.system, "data_class": e.data_class,
                           "batch_seq": e.batch_seq, "excerpt": e.excerpt} for e in ev],
-               gaps=["personal details in this agent's persona are synthetic assumptions, not facts"])
+               gaps=[])
     return out
 
 

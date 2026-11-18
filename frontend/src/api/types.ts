@@ -180,6 +180,9 @@ export interface AgentTurn {
   excluded: Record<string, number>;
   refusal: Refusal | null;
   escalation: { to: string; how: string } | null;
+  reply?: string;                       // plain-language reply built only from the verified claims and the session
+  conversational?: string | null;       // answered from the conversation itself (memory, evidence, simpler, ...)
+  persona?: string | null;              // set when the reply contains an invented persona detail
   replayed: boolean;
 }
 

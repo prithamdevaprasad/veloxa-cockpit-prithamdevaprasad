@@ -75,11 +75,13 @@ test("Journey C: a synthetic agent interview, memory and close; slots stay close
   await page.getByLabel("Message to the agent").fill("What is our headcount?");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText("People in the HR export: 2").first()).toBeVisible();
-  await page.getByText("Tools and boundary").first().click();
-  await expect(page.getByText("people.headcount").first()).toBeVisible();
+  await page.getByText(/Where this comes from/).first().click();                 // sources one click away
+  await expect(page.getByText(/people\.headcount/).first()).toBeVisible();
   await page.getByLabel("Message to the agent").fill("What is Person Alpha's salary?");
   await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.getByText("POL-PAY-01")).toBeVisible();
+  await expect(page.getByText(/Individual pay is confidential/)).toBeVisible();   // a plain refusal
+  await page.getByText("Details").last().click();
+  await expect(page.getByText(/POL-PAY-01/)).toBeVisible();
   await page.getByRole("button", { name: "Close session" }).click();
   await expect(page.getByText(/Session closed/)).toBeVisible();
   await page.getByRole("button", { name: "My memories" }).click();
