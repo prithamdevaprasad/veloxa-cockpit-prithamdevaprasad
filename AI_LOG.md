@@ -1076,3 +1076,37 @@ The owner asked for the following, local-first, with no push, merge or deploymen
   stay unknown.
 - No company data, transcript or HR record was sent to Gemini; the supplied company is refused by name.
 - No OAuth client ID or secret was invented; single sign-on stays hidden until an administrator configures it.
+
+## 19 Nov 2026 (before the D4 release): owner decisions, access model, interview quality, D2/D3 publication
+
+### Task given to AI
+
+Owner decisions 1-3 (hackathon bootstrap, self-profile for all 14 agents, submission branch); an explicit, audited,
+revocable company-wide read in place of an HR-title grant; a quality review of interviews with all 14 agents; browser
+QA on the real D1-D3 data; publication of the 32 owner-reviewed D2/D3 items.
+
+### Where AI was wrong, and what changed
+
+| # | AI error or weakness | Who caught it | Correction |
+|---|---|---|---|
+| E83 | The bootstrap AI wrote granted company-wide read from the HR title "CEO" | Owner review | Grants only from an owner file or the `veloxa access` command: verified principal, approver, decision, purpose, audit, revocation |
+| E84 | A first self-profile routing change could never work (the published configs lacked the tool) and was reverted | AI, while testing | Implemented after the owner approved the capability |
+| E85 | The new tool queried tenant tables outside a tenant transaction (FORCE RLS refused it), then broke the strict tool-output schema | Acceptance A6 | Tenant-scoped reads; the field declared in the schema rather than loosening it |
+| E86 | The agent runtime ignored the documented explicit company_reader relation, so agents denied what the cockpit allowed | Acceptance A6 | The same rule as `authz/evidence.py`; ABAC still decides |
+| E87 | Interview replies dumped the whole profile for questions no record answers, attached unrelated sources, and crashed (HTTP 500) when pruning left stale memory IDs | Live 14-agent interview QA | Honest abstention, relevant facts only, pruning covers memory; regression tests and acceptance A8 |
+| E88 | A test "proved" payroll was refused with an undeclared class name, so it passed for the wrong reason | AI review | The test now uses the real protected classes |
+| E89 | The owner's draft wording for C-08 said the incident export identifies "the employee SRE"; it records first names only | Checking every conclusion against the records | Wording adjusted to the record and marked as adjusted |
+| E90 | Published text kept two internal Jira identifiers | Safety scan | Replaced by descriptions |
+| E91 | The dashboard asked for a chart column the real incident export does not have (422), and every real person's avatar read "KH" | Browser QA on real data | Charts chosen by actual columns; initials from names |
+
+### Verification actually run
+
+pytest (full suite), acceptance 43/43 (JSON inspected per case), Playwright 78/78, browser QA at 1440 px and phone
+width on the company lab (no overflow, no 5xx), live interviews with all 14 agents (15 checks each), safety and
+public scans, dependency audit, and the fresh-clone one-command start with the real release packs.
+
+### Confirmations
+
+- D4 was not opened, hashed or admitted; it remains refused until 10:00 IST on 19 Nov 2026.
+- The real `veloxa` database stays at migration 0012; `veloxa_demolab` was not touched.
+- No company data reached Gemini; private review files and transcripts stay in `private/`.

@@ -212,9 +212,32 @@ This starts PostgreSQL, runs `init` (migrations and the Day 1 baseline, unchange
 - admits each pack **in release order** only if it is **released** (release time has passed) **and authorised
   source by source** in `config/admission_authorisations.toml` (K-13); an unreleased pack is refused before any of
   its files is opened, and an unauthorised one is refused and written to the audit log;
-- builds projections and claims, grounds the 14 agents in the HR export (owner-approved mapping by exact employee
-  ID), and records the CEO's explicit company-wide read (from the HR title, server-side, audited);
+- builds projections and claims, and grounds the 14 agents in the HR export (owner-approved mapping by exact
+  employee ID);
+- applies explicit company-wide read grants **only** from an owner-provided file outside the repository
+  (`VELOXA_ACCESS_GRANTS`, TOML `[[company_reader]]` with `principal`, `approved_by`, `decision`, `purposes`). An HR
+  job title never grants access; without the file nothing is granted (default deny);
 - runs the self-check. Re-running it is safe.
+
+**Release protection (D4).** Release times come from `config/release_schedule.toml` (D4: 19 Nov 2026, 10:00 IST),
+never from file dates. Before that time the bootstrap prints `D4: refused, not released until ...; no file was
+opened`, and a direct admission is refused with `not_yet_released` and audited. After it, D4 is admitted only once
+its sources are listed in `config/admission_authorisations.toml`.
+
+**Access grants (operator).** `veloxa access grant-company-reader --principal person:<employee ID> --approved-by
+<name> --decision <reference> --purposes interview,cockpit`; `veloxa access revoke --tuple <id> --by <name> --reason
+<text>`; `veloxa access list`. The principal must resolve to exactly one current person in the latest sealed HR
+export; grants and revocations are audited; protected classes (payroll aggregates, sensitive personal records) stay
+refused.
+
+**Agent interviews.** Open **People > Agents**, choose an agent and **Start interview**. Each agent answers from its
+own HR record (title, department, reporting line, start date) through a read-only `self.profile` capability, and
+from the records its tools may use; every factual sentence is checked against a cited record, and sources are one
+click away under each reply. Follow-ups use the session's own history ("what did I ask earlier?", "what supports
+that?"). Workload and other things no record shows are answered honestly as unknown. Pay, private messages and
+other people's performance are refused. Persona details are invented, logged in `ASSUMPTIONS.md` (A-101 to A-114)
+and always labelled as fictional. Sessions persist (the **History** tab). No language model composes interview
+replies for the supplied company; the replies are deterministic.
 
 The API is on `http://127.0.0.1:8000` (`/health`, `/v1/meta/releases`). To use the cockpit, enable the local
 developer sign-in in `.env` (section 4) and start the frontend (below). The plain `docker compose up` stack keeps
@@ -374,7 +397,7 @@ cd frontend
 npm run build                              # type-check + production build; exit 0
 $env:VELOXA_PYTHON = (Resolve-Path ..\.venv\Scripts\python.exe).Path
 npx playwright install chromium            # once
-npx playwright test                        # browser journeys on desktop, tablet, mobile; pass = "60 passed"
+npx playwright test                        # browser journeys on desktop, tablet, mobile; pass = "78 passed"
 cd ..
 ```
 
@@ -385,6 +408,10 @@ cd ..
 | Migrations (idempotent; self-checks) | `python -m pytest -q tests\test_ledger_db.py` |
 | Real-data checks (local only) | Set `VELOXA_DATA_PATH`; `python -m pytest -q -m realdata` |
 | Gold questions (cases are private) | Set `VELOXA_GOLD_PATH`; `python -m pytest -q tests\gold` |
+| Acceptance suite (43 cases, synthetic company dated 2099 on purpose) | `python scripts\run_acceptance.py` (writes `acceptance_report.json`/`.md`; keep them out of the repository) |
+| Agent interviews (unit + 14-agent conversation in acceptance A8) | `python -m pytest -q tests\test_agent_conversation.py` |
+| Bootstrap, release gate and access grants | `python -m pytest -q tests\test_hackathon_bootstrap.py` |
+| Sign-in (fake identity provider) | `python -m pytest -q tests\test_login.py` |
 
 Always read the exit code (`$LASTEXITCODE`). Never judge a run by piping it through a filter.
 
