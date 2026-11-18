@@ -51,7 +51,7 @@ function EvidencePanel({ recordId, why, onClose }: { recordId: string; why?: str
           ? (d.content as { paragraphs: string[] }).paragraphs : null;
         return (
           <div className="stack">
-            {why && <p className="callout info small">Why this supports the answer: {why}</p>}
+            {why && <p className="callout info small">Why this supports the answer: {why.replace(/[⟦⟧]/g, "")}</p>}
             <dl className="meta">
               <dt>Source</dt><dd>{d.system.replace(/_/g, " ")}</dd>
               <dt>Location</dt><dd>{where(d.locator)}</dd>
