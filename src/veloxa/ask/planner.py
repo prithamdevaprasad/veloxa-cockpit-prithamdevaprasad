@@ -134,6 +134,9 @@ def focus_terms(text: str) -> list[str]:
     return [w for w in re.findall(r"[a-z][a-z0-9-]{2,}", text.lower()) if w not in _STOP]
 
 
+IDENTIFIER = re.compile(r"\b[A-Z][A-Z0-9]{1,}-[A-Z0-9]{1,6}\b")
+
+
 def plan(question: str, people: list[dict], default_year: int, tz: str) -> Plan:
     q = question.strip()
     mentions = _mentions(q, people)
@@ -175,6 +178,22 @@ def plan(question: str, people: list[dict], default_year: int, tz: str) -> Plan:
     terms = focus_terms(q)
     if not steps and terms:
         steps.append(Step("text_search", {"query": " OR ".join(dict.fromkeys(terms[:8]))}, "free-text question"))
+    else:
+        # A record identifier (LIN-001, CMP-04, NIM-E1) or, with the generic timeline intent, a named subject
+        # ("What happened to Quartz 2.0?") is looked up directly as well: the intent alone would answer a
+        # different question.
+        used = {str(v) for s in steps for a in s.args.values() for v in (a.values() if isinstance(a, dict) else [a])}
+        ids = [i for i in IDENTIFIER.findall(q) if i not in used]          # not an identifier already a filter
+        named = [w for w in re.findall(r"\b[A-Z][a-zA-Z0-9]{2,}(?:\s+\d+(?:\.\d+)?)?\b", q)[1:]
+                 if not any(w.lower().startswith(m.lower()) for m in mentions)]
+        generic_timeline = any(s.tool == "timeline" and not s.args for s in steps)
+        subject = ids or (named if generic_timeline else [])
+        if subject and not any(s.tool == "text_search" for s in steps):
+            if generic_timeline and not mentions:
+                # "What happened in LIN-001?" is about that record, not the company's whole dated history.
+                steps = [s for s in steps if not (s.tool == "timeline" and not s.args)]
+            steps.append(Step("text_search", {"query": " OR ".join(dict.fromkeys(subject))[:200]},
+                              "a named record or subject"))
     steps = steps[:MAX_STEPS]
     for s in steps:
         validate(s)
