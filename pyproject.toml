@@ -25,6 +25,11 @@ dev = [
   "pytest-timeout>=2.4,<3",    # a hung test fails visibly instead of stalling the run
   "ruff>=0.6,<1",
 ]
+# Owner-approved Gemini experiment (synthetic tenants only). Optional: never installed in CI or production images;
+# the adapter imports it lazily, and the tests use a mocked client.
+gemini = [
+  "google-genai==2.34.0",
+]
 
 [project.scripts]
 veloxa = "veloxa.cli:main"

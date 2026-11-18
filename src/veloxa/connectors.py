@@ -1,0 +1,199 @@
+"""Source connectors (read-only) that feed the GOVERNED data room. Jira first; a reusable contract for the rest.
+
+A connector never writes evidence. It fetches records from an allowlisted scope, writes them as a JSONL export, and
+submits that export through `intake.upload` as a data-room submission (state: pending review). Review, separate
+authorisation, admission, sealing and projection then happen exactly as for a manual upload. Each run is recorded in
+`runtime.connector_run` (scope, cursor before/after, counts, status, error).
+
+Jira (Atlassian Cloud REST v3, basic auth with an API token; read-only):
+- configuration contract (all required, else the connector is DISABLED, never half-enabled):
+  `VELOXA_JIRA_BASE_URL`, `VELOXA_JIRA_EMAIL`, `VELOXA_JIRA_API_TOKEN` (backend only), `VELOXA_JIRA_PROJECTS`
+  (project-key allowlist), `VELOXA_JIRA_FIELDS` (field allowlist); optional `VELOXA_JIRA_WEBHOOK_SECRET`;
+- initial sync (no cursor) and incremental sync (`updated >= cursor`), paginated with `nextPageToken`;
+- HTTP 429/503 honour `Retry-After` with bounded exponential backoff; other errors fail the run (recorded);
+- idempotent: records are keyed by issue key + `updated`; an unchanged record is not resubmitted;
+- a webhook is only a SIGNAL (HMAC-verified) to fetch the authoritative record by key; it is never evidence;
+- fields outside the allowlist are dropped; unknown custom fields are never interpreted (K-09).
+No credentials are configured in this repository: the connector is tested with a mocked transport only.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import os
+import time
+from dataclasses import dataclass, field
+from typing import Protocol
+
+REQUIRED = ("VELOXA_JIRA_BASE_URL", "VELOXA_JIRA_EMAIL", "VELOXA_JIRA_API_TOKEN", "VELOXA_JIRA_PROJECTS",
+            "VELOXA_JIRA_FIELDS")
+
+
+class ConnectorDisabled(Exception):
+    pass
+
+
+class ConnectorFailed(Exception):
+    pass
+
+
+class Connector(Protocol):
+    """The reusable contract (GitHub/GitLab, HRMS, finance, CRM, incident systems implement the same shape)."""
+    name: str
+
+    def status(self) -> dict: ...
+
+    def fetch(self, cursor: str | None) -> tuple[list[dict], str | None]: ...
+
+
+@dataclass
+class JiraConfig:
+    base_url: str
+    email: str
+    token: str = field(repr=False)
+    projects: tuple[str, ...]
+    fields: tuple[str, ...]
+    webhook_secret: str | None = field(default=None, repr=False)
+
+    @staticmethod
+    def from_env(env: dict | None = None) -> JiraConfig:
+        e = env if env is not None else os.environ
+        missing = [k for k in REQUIRED if not str(e.get(k, "")).strip()]
+        if missing:
+            raise ConnectorDisabled(f"Jira connector disabled: missing {', '.join(missing)}")
+        split = lambda k: tuple(x.strip() for x in e[k].split(",") if x.strip())  # noqa: E731
+        return JiraConfig(e["VELOXA_JIRA_BASE_URL"].rstrip("/"), e["VELOXA_JIRA_EMAIL"], e["VELOXA_JIRA_API_TOKEN"],
+                          split("VELOXA_JIRA_PROJECTS"), split("VELOXA_JIRA_FIELDS"),
+                          e.get("VELOXA_JIRA_WEBHOOK_SECRET") or None)
+
+
+def jira_status(env: dict | None = None) -> dict:
+    """Safe diagnostics: never values of credentials."""
+    try:
+        c = JiraConfig.from_env(env)
+    except ConnectorDisabled as e:
+        return {"connector": "jira", "state": "disabled", "reason": str(e)}
+    return {"connector": "jira", "state": "configured (not verified until a connection test passes)",
+            "projects": list(c.projects), "fields": list(c.fields), "webhook": bool(c.webhook_secret)}
+
+
+@dataclass
+class JiraConnector:
+    config: JiraConfig
+    http: object = None                       # an httpx.Client (or a mock with the same .request API)
+    max_retries: int = 4
+    page_size: int = 50
+    sleep: object = time.sleep
+    name: str = "jira"
+
+    def _client(self):
+        if self.http is None:
+            import httpx
+
+            auth = base64.b64encode(f"{self.config.email}:{self.config.token}".encode()).decode()
+            self.http = httpx.Client(base_url=self.config.base_url, timeout=30.0,
+                                     headers={"Authorization": f"Basic {auth}", "Accept": "application/json"})
+        return self.http
+
+    def _request(self, method: str, url: str, **kw):
+        delay = 1.0
+        for attempt in range(self.max_retries + 1):
+            r = self._client().request(method, url, **kw)
+            if r.status_code in (429, 503) and attempt < self.max_retries:
+                wait = float(r.headers.get("Retry-After", delay))
+                self.sleep(min(wait, 60.0))
+                delay = min(delay * 2, 60.0)
+                continue
+            if r.status_code >= 400:
+                raise ConnectorFailed(f"Jira returned HTTP {r.status_code}")
+            return r.json()
+        raise ConnectorFailed("Jira rate limit persisted beyond the retry bound")
+
+    def jql(self, cursor: str | None) -> str:
+        projects = ", ".join(f'"{p}"' for p in self.config.projects)
+        q = f"project in ({projects})"
+        return q + (f' AND updated >= "{cursor}"' if cursor else "") + " ORDER BY updated ASC"
+
+    def _shape(self, issue: dict) -> dict:
+        f = issue.get("fields", {})
+        kept = {k: f.get(k) for k in self.config.fields if k in f}          # allowlist only; nothing interpreted
+        return {"key": issue["key"], "updated": f.get("updated"), "fields": kept}
+
+    def fetch(self, cursor: str | None) -> tuple[list[dict], str | None]:
+        out, token, newest = [], None, cursor
+        while True:
+            body = {"jql": self.jql(cursor), "maxResults": self.page_size,
+                    "fields": list(dict.fromkeys(["updated", *self.config.fields]))}
+            if token:
+                body["nextPageToken"] = token
+            page = self._request("POST", "/rest/api/3/search/jql", json=body)
+            for issue in page.get("issues", []):
+                rec = self._shape(issue)
+                out.append(rec)
+                if rec["updated"] and (newest is None or rec["updated"] > newest):
+                    newest = rec["updated"]
+            token = page.get("nextPageToken")
+            if not token:
+                break
+        return out, newest
+
+    def fetch_one(self, key: str) -> dict:
+        """Webhook follow-up: fetch the authoritative record (the webhook payload itself is never evidence)."""
+        if key.split("-")[0] not in self.config.projects:
+            raise ConnectorFailed("issue is outside the approved project scope")
+        issue = self._request("GET", f"/rest/api/3/issue/{key}", params={"fields": ",".join(self.config.fields)})
+        return self._shape(issue)
+
+    def verify_webhook(self, body: bytes, signature: str | None) -> bool:
+        if not self.config.webhook_secret or not signature:
+            return False
+        want = "sha256=" + hmac.new(self.config.webhook_secret.encode(), body, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(want, signature)
+
+
+def changed(records: list[dict], seen: dict[str, str]) -> list[dict]:
+    """Idempotency: only records whose (key, updated) differs from what was already submitted."""
+    return [r for r in records if seen.get(r["key"]) != r["updated"]]
+
+
+def to_jsonl(records: list[dict]) -> bytes:
+    return "".join(json.dumps(r, sort_keys=True, default=str) + "\n" for r in records).encode("utf-8")
+
+
+def sync(conn, store, tenant_id, connector: JiraConnector, *, actor: str, department_id: str, source_type: str,
+         mode: str = "incremental") -> dict:
+    """One run: fetch since the last cursor, submit changed records to the data room (pending review), record it."""
+    from . import intake
+
+    last = conn.execute("SELECT cursor_after FROM runtime.connector_run WHERE tenant_id = %s AND connector = %s"
+                        " AND status = 'ok' ORDER BY started_at DESC LIMIT 1", (tenant_id, connector.name)).fetchone()
+    cursor = None if mode == "initial" or not last else last["cursor_after"]
+    scope = {"projects": list(connector.config.projects), "fields": list(connector.config.fields)}
+    try:
+        records, newest = connector.fetch(cursor)
+        seen = {}
+        for r in conn.execute("SELECT scope FROM runtime.connector_run WHERE tenant_id = %s AND connector = %s"
+                              " AND status = 'ok'", (tenant_id, connector.name)).fetchall():
+            seen |= r["scope"].get("submitted_versions", {})
+        new = changed(records, seen)
+        sid = None
+        if new:
+            sid = intake.upload(conn, store, tenant_id, actor, department_id, source_type,
+                                f"Jira sync {newest or ''}".strip(),
+                                [intake.Upload("jira_sync.jsonl", to_jsonl(new))])
+        scope["submitted_versions"] = {r["key"]: r["updated"] for r in new}
+        scope["submission_id"] = str(sid) if sid else None
+        conn.execute("INSERT INTO runtime.connector_run (tenant_id, connector, mode, scope, cursor_before,"
+                     " cursor_after, fetched, changed, submitted, status, finished_at)"
+                     " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'ok',now())",
+                     (tenant_id, connector.name, mode, json.dumps(scope), cursor, newest, len(records), len(new),
+                      len(new) if sid else 0))
+        return {"status": "ok", "fetched": len(records), "changed": len(new), "submission_id": sid, "cursor": newest}
+    except ConnectorFailed as e:
+        conn.execute("INSERT INTO runtime.connector_run (tenant_id, connector, mode, scope, cursor_before, status,"
+                     " error, finished_at) VALUES (%s,%s,%s,%s,%s,'failed',%s,now())",
+                     (tenant_id, connector.name, mode, json.dumps(scope), cursor, str(e)))
+        return {"status": "failed", "error": str(e)}

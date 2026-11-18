@@ -19,4 +19,7 @@ def test_the_acceptance_suite_passes_every_case(tmp_path):
                           str(tmp_path / "a.json"), "--md", str(tmp_path / "a.md")],
                          capture_output=True, text=True, timeout=900)
     assert out.returncode == 0, out.stdout[-4000:] + out.stderr[-4000:]
-    assert "32/32 passed" in out.stdout
+    import re
+
+    m = re.search(r"(\d+)/(\d+) passed", out.stdout)
+    assert m and m.group(1) == m.group(2) and int(m.group(2)) >= 32

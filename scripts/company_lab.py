@@ -136,7 +136,7 @@ def create(admin: str, name: str) -> None:
     print(f"{name}: created and migrated")
 
 
-def admit(admin: str, name: str) -> list:
+def admit(admin: str, name: str, args_review: bool = False) -> list:
     from veloxa import config, ledger, projector
     from veloxa.agents import registry
     from veloxa.db import connect
@@ -176,6 +176,32 @@ def admit(admin: str, name: str) -> list:
             from veloxa.agents import people
 
             print("agents grounded in HR records:", people.ground(a, tid, k) or "already grounded")
+            from veloxa import tenancy
+            from veloxa.db import tenant_tx as _tt
+
+            with _tt(a, tid):
+                ceo = a.execute("SELECT emp_id FROM projection.person WHERE title = 'CEO' ORDER BY batch_seq DESC"
+                                " LIMIT 1").fetchone()
+                has = ceo and a.execute("SELECT 1 FROM policy.live_tuple WHERE resource_type = 'tenant'"
+                                        " AND relation = 'company_reader' AND subject_id = %s",
+                                        (ceo["emp_id"],)).fetchone()
+                if ceo and not has:      # the pre-workspace tenant's CEO already reads tenant-wide; make it explicit
+                    tenancy.grant_as_operator(a, tid, "tenant", str(tid), "company_reader", f"person:{ceo['emp_id']}",
+                                              "CEO company-wide read (pre-workspace tenant; lab only)")
+            if args_review:
+                from veloxa import findings
+                from veloxa.risk import governance
+                from veloxa.signals.registry import assessment_date
+                from veloxa.temporal import Mode, resolve_basis
+
+                pol = governance.current_policy(a, tid)
+                with _tt(a, tid):
+                    content = a.execute("SELECT content FROM policy.ranking_decision WHERE version = %s",
+                                        (pol.version,)).fetchone()["content"] if pol.status == "approved" else None
+                    basis = resolve_basis(tid, ledger.sealed_releases(a, tid), Mode.CURRENT, None, "Asia/Kolkata",
+                                          datetime.now(UTC))
+                    print("daily review:", findings.daily_review(a, tid, k, assessment_date(basis, "Asia/Kolkata"),
+                                                                 content))
     print("sealed batches:", [(b["pack_id"], b["batch_seq"]) for b in batches if b["sealed"]])
     return results
 
@@ -197,6 +223,7 @@ def main() -> int:
     ap.add_argument("--db")
     ap.add_argument("--create", action="store_true")
     ap.add_argument("--admit", action="store_true")
+    ap.add_argument("--review", action="store_true", help="run the findings daily review after admission")
     ap.add_argument("--migrate", action="store_true", help="apply new migrations to THIS lab database only")
     ap.add_argument("--dry-run", metavar="PACK")
     ap.add_argument("--inventory", metavar="JSON")
@@ -225,8 +252,8 @@ def main() -> int:
             os.environ.setdefault(f"VELOXA_{role}_PASSWORD", pw)
         migrate(_dsn(admin, args.db), _dsn(admin, args.db, "migrator"), args.db)
         print(f"{args.db}: migrated")
-    if args.admit:
-        admit(admin, args.db)
+    if args.admit or args.review:
+        admit(admin, args.db, args.review)
     if args.serve:
         import uvicorn
 

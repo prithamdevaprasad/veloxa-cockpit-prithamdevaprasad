@@ -93,7 +93,7 @@ test("Department views show governed figures only", async ({ page }) => {
 
 test("the layout has no horizontal page scroll", async ({ page }) => {
   await signIn(page);
-  for (const r of ["overview", "today", "ask", "conflicts", "agents", "departments", "evidence", "intelligence",
+  for (const r of ["overview", "worry", "today", "ask", "conflicts", "agents", "departments", "evidence", "intelligence",
                    "whatif", "timeline", "admin"]) {
     await page.goto(`/#/${r}`);
     await page.waitForLoadState("networkidle");
@@ -293,4 +293,19 @@ test("an answer separates the direct answer, figures, caveats and evidence", asy
   await expect(answer.getByText(/contractors are not included/i)).toBeVisible();          // the scope caveat is kept
   await answer.getByRole("button", { name: "Show source 1" }).first().click();
   await expect(page.getByRole("dialog", { name: "Employee_Master.xlsx" })).toBeVisible();
+});
+
+test("the worry view states it is unranked while D-15 is not recorded, and lists findings", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/worry");
+  await expect(page.getByRole("heading", { name: "What should I worry about?" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Ranked worries" })).toContainText(/Not ranked yet|Nothing to rank/);
+  await expect(page.getByRole("region", { name: "Findings" })).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("probability of");             // severity is never a probability
+});
+
+test("Agents shows the people section honestly when no owner-approved mapping exists", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/agents");
+  await expect(page.getByRole("region", { name: "People" })).toContainText("No people mapped yet");
 });

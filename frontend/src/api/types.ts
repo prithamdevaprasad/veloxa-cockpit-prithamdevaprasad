@@ -22,6 +22,7 @@ export interface Evidence {
 }
 
 export interface Claim {
+  confidence?: { level: string; label: string; reason: string };
   text: string;
   kind?: string;
   evidence: string[];
@@ -60,6 +61,10 @@ export interface Answer {
   evidence: Evidence[];
   audit_id: string;
   pipeline_version: string;
+  confidence?: { level: "high" | "moderate" | "low" | "unknown" | "conflicting"; label: string; reason: string;
+                 method?: string };
+  follow_ups?: string[];
+  specialists?: { agent_id: string; name: string | null; department: string; reason: string }[];
 }
 
 export interface TodayItem {

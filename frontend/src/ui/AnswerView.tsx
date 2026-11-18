@@ -4,6 +4,7 @@
 // added, inferred or dropped: each claim keeps its citations, and the full claim text stays in the accessible text.
 import { useState } from "react";
 import type { Answer, Claim, Evidence } from "../api/types";
+import { useAsk } from "./Ask";
 import { useEvidence } from "./EvidenceDrawer";
 import { BarChart } from "./kit";
 import { Badge, Drawer } from "./index";
@@ -121,6 +122,10 @@ export function AnswerView({ answer }: { answer: Answer }) {
     <article className="brief" aria-label="Answer">
       <div className="brief-status">
         <Badge value={answer.status} label={st.label} />
+        {answer.confidence && (
+          <span className={`conf conf-${answer.confidence.level}`} title={`${answer.confidence.reason}. `
+            + "Deterministic: based on source authority, corroboration and conflicts; not a probability."}>
+            Confidence: {answer.confidence.label}</span>)}
         {partial && <Badge value="open" label="Partial" title="Some matching information is not shown" />}
         <Badge value={answer.grade.value} label={`Grade ${answer.grade.value}`}
                title={`${answer.grade.label}: ${answer.grade.reasons.join("; ")}`} />
@@ -225,6 +230,14 @@ export function AnswerView({ answer }: { answer: Answer }) {
         </div>
       )}
 
+      {(answer.specialists?.length ?? 0) > 0 && (
+        <p className="small muted specialists">
+          Specialist areas consulted: {[...new Set(answer.specialists!.map((x) => x.department.replace("_", " ")))]
+            .join(", ")}. Why: {answer.specialists![0].reason}.
+        </p>
+      )}
+      {(answer.follow_ups?.length ?? 0) > 0 && <FollowUps items={answer.follow_ups!} />}
+
       <footer className="brief-foot">
         {answer.evidence.length > 0 && (
           <button className="btn" onClick={() => setOpen(true)}>Evidence ({answer.evidence.length})</button>)}
@@ -261,4 +274,13 @@ export function Highlighted({ text }: { text: string }) {
   const parts = text.split(/(⟦[^⟧]*⟧)/g);
   return <>{parts.map((p, i) => p.startsWith("⟦")
     ? <mark key={i} className="hl">{p.slice(1, -1)}</mark> : <span key={i}>{p}</span>)}</>;
+}
+
+function FollowUps({ items }: { items: string[] }) {
+  const ask = useAsk();
+  return (
+    <div className="follow-ups" role="group" aria-label="Suggested follow-ups">
+      {items.map((q) => <button key={q} className="chip" onClick={() => ask.ask(q)}>{q}</button>)}
+    </div>
+  );
 }

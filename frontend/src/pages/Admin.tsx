@@ -15,6 +15,7 @@ export function AdminPage({ onAuthChange }: { onAuthChange: () => void }) {
       <SignIn signedIn={signedIn} onChange={onAuthChange} />
       {signedIn && <WhoAmI />}
       {signedIn && <Workspace />}
+      {signedIn && <Connectors />}
     </>
   );
 }
@@ -91,5 +92,36 @@ function Workspace() {
         {err && <ErrorState error={err} />}
       </Section>
     </>
+  );
+}
+
+function Connectors() {
+  const [c, reload] = useApi((s) => product.connectors(s), []);
+  return (
+    <Section title="Connectors and model experiment" subtitle="Configured is not connected until a live test passes;
+      synchronised records are pending review until they are admitted. No credential is ever shown.">
+      {c.state === "loading" && <Loading lines={3} />}
+      {c.state === "error" && <ErrorState error={c.error} onRetry={reload} />}
+      {c.state === "ready" && (
+        <div className="stack">
+          <div className="table-wrap"><table>
+            <thead><tr><th>Application</th><th>State</th></tr></thead>
+            <tbody>{c.data.connectors.map((x) => (
+              <tr key={x.connector}><td>{x.connector}</td><td className="small">{x.state}
+                {x.reason && <div className="muted">{x.reason}</div>}</td></tr>))}</tbody>
+          </table></div>
+          {c.data.runs.length === 0 ? <p className="small muted">No synchronisation has run.</p> : (
+            <div className="table-wrap"><table>
+              <thead><tr><th>Run</th><th>Status</th><th>Fetched</th><th>Changed</th><th>Submitted for review</th></tr></thead>
+              <tbody>{c.data.runs.map((r) => (
+                <tr key={r.started_at}><td>{r.connector} {r.mode}<div className="small muted">{r.started_at}</div></td>
+                  <td><Badge value={r.status === "ok" ? "active" : "failed"} label={r.status} /></td>
+                  <td>{r.fetched}</td><td>{r.changed}</td><td>{r.submitted}</td></tr>))}</tbody>
+            </table></div>)}
+          <p className="small">Model: {String(c.data.model.model)} ({String(c.data.model.reason ?? c.data.model.provider ?? "")}).
+            Gemini experiment: key {c.data.gemini_experiment.key_configured ? "configured on the backend" : "not configured"};
+            {" "}{c.data.gemini_experiment.scope}.</p>
+        </div>)}
+    </Section>
   );
 }

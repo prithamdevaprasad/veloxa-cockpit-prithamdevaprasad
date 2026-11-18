@@ -50,3 +50,33 @@ export interface Clarification { request_id: string; department_id: string; ques
   suggested_recipient: string | null; created_by: string; created_at: string }
 export interface ClarificationCreated { request_id: string; state: string;
   suggested_recipient: { principal_id: string; display_name: string } | null; delivery: string }
+
+// Company intelligence (0021): the 14 agent people, the ranked worry list, findings, conflicts, connectors.
+export interface Person {
+  agent_id: string; grounded: boolean; person_record?: string; name?: string; title?: string; department?: string;
+  status?: string; verified_facts?: { fact: string; value: string; record: string }[];
+  workload?: { open_tasks: number | null; open_points: number | null; repositories: { repo: string; first: string;
+    last: string }[]; tasks: { key: string; summary: string | null; status: string | null }[]; rota_weeks: string[];
+    incidents_responded: string[]; requisitions_owned: string[]; basis: string };
+  assumptions?: { assumption_id: string; category: string; value: string; label: string }[];
+  unknowns: string[]; knowledge_point?: number;
+}
+export interface Criterion { status: string; measure: string | null; low: number | null; high: number | null;
+  v_low: number; v_high: number; weight: number; contribution_low: number; contribution_high: number; reason: string }
+export interface WorryItem { rank: number; tied: boolean; item_id: string; title: string; department: string | null;
+  project: string | null; severity: { low: number; high: number; measured_weight: number;
+    criteria: Record<string, Criterion> }; confidence: string; evidence: string[]; unknowns: string[];
+  sensitive: boolean; follow_up: string; why: string }
+export interface Worry { ranking_mode: "weighted" | "pending"; policy: Record<string, unknown>;
+  read_basis: { batch_seq: number; banner: string }; ranked: WorryItem[];
+  unrankable?: { item_id: string; title: string; reasons: string[]; evidence: string[]; unknowns: string[] }[];
+  unranked?: { item_id: string; title: string; evidence: string[] }[]; hidden_for_access: number; note?: string }
+export interface Finding { finding_id: string; title: string; description: string; department: string | null;
+  project: string | null; trigger: string; evidence: string[]; confidence: string; unknowns: string[]; state: string;
+  created_at: string; updated_at: string; history: { state: string; actor: string; note: string | null; at: string }[];
+  notified: { recipient: string; basis: string; delivered_at: string }[] }
+export interface ConnectorStatus { connectors: { connector: string; state: string; reason?: string }[];
+  runs: { connector: string; mode: string; status: string; fetched: number; changed: number; submitted: number;
+    error: string | null; started_at: string }[];
+  model: Record<string, unknown>; gemini_experiment: { key_configured: boolean; synthetic_tenants: string[];
+    scope: string } }

@@ -9,11 +9,20 @@ from __future__ import annotations
 
 from fastapi import Header
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import ledger, tools
 from .ask import timeparse
 from .db import connect, tenant_tx
 from .temporal import resolve_basis
+
+
+class FindingEvent(BaseModel):
+    """A human lifecycle event on a finding (the actor is always the authenticated principal)."""
+    model_config = ConfigDict(extra="forbid")
+    state: str = Field(pattern="^(acknowledged|investigating|resolved|dismissed)$")
+    note: str | None = Field(default=None, max_length=2000)
+    ref: str | None = Field(default=None, max_length=200)
 
 
 def register(app, *, state, principal_of, now_fn, tz_of) -> None:
@@ -127,3 +136,73 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
                 for c in f["claims"]:
                     c.pop("tenant_id", None)
             return {"read_basis": basis_json(basis), "conflicts": shown, "hidden_for_access": len(found) - len(shown)}
+
+    @app.get("/v1/findings")
+    def findings_list(authorization: str | None = Header(default=None)):
+        """Findings the principal may see (database policy) AND whose every cited record they may read (rechecked
+        now, never cached), with lifecycle history and notifications."""
+        with connect(state["dsn"]) as conn:
+            p, basis, _ = ctx(conn, authorization, None)
+            if basis is None:
+                return p
+            with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
+                rows = [dict(r) for r in conn.execute(
+                    "SELECT finding_id, title, description, department, project, trigger, evidence, ranking,"
+                    " confidence, unknowns, batch_seq, created_at, state, updated_at FROM runtime.finding_current"
+                    " ORDER BY created_at DESC").fetchall()]
+                events = [dict(r) for r in conn.execute(
+                    "SELECT finding_id, state, actor, note, ref, at FROM runtime.finding_event ORDER BY at").fetchall()]
+                notes = [dict(r) for r in conn.execute(
+                    "SELECT finding_id, recipient, basis, delivered_at FROM runtime.notification").fetchall()]
+            ok = readable(conn, p, basis, [r for f in rows for r in f["evidence"]])
+            shown = [f for f in rows if set(f["evidence"]) <= ok]
+            for f in shown:
+                f["history"] = [{**e, "at": e["at"].isoformat()} for e in events if e["finding_id"] == f["finding_id"]]
+                f["notified"] = [{**n, "delivered_at": n["delivered_at"].isoformat()} for n in notes
+                                 if n["finding_id"] == f["finding_id"]]
+                f["created_at"], f["updated_at"] = f["created_at"].isoformat(), f["updated_at"].isoformat()
+            return {"findings": shown, "hidden_for_access": len(rows) - len(shown)}
+
+    @app.post("/v1/findings/{finding_id}/events")
+    def findings_event(finding_id: str, body: FindingEvent, authorization: str | None = Header(default=None)):
+        from . import findings
+
+        with connect(state["dsn"]) as conn:
+            p, basis, _ = ctx(conn, authorization, None)
+            if basis is None:
+                return p
+            with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
+                if not conn.execute("SELECT 1 FROM runtime.finding WHERE finding_id = %s", (finding_id,)).fetchone():
+                    return JSONResponse(status_code=404, content={"error": "not_found"})   # or not visible to you
+                findings.record_human_event(conn, p.tenant_id, finding_id, body.state, p.principal_id, body.note,
+                                            body.ref)
+            return {"finding_id": finding_id, "state": body.state}
+
+    @app.get("/v1/admin/connectors")
+    def connectors_status(authorization: str | None = Header(default=None)):
+        """Connector and model-experiment diagnostics. Never a credential value; 'configured' is not 'connected'
+        (a live connection test must pass), and 'synchronised' is not 'admitted' or 'queryable'."""
+        import os as _os
+
+        from . import connectors
+        from .llm import config as llm_config
+
+        with connect(state["dsn"]) as conn:
+            p, basis, _ = ctx(conn, authorization, None)
+            if basis is None:
+                return p
+            with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
+                runs = [dict(r) for r in conn.execute(
+                    "SELECT connector, mode, status, fetched, changed, submitted, error, started_at, finished_at"
+                    " FROM runtime.connector_run ORDER BY started_at DESC LIMIT 20").fetchall()]
+        for r in runs:
+            r["started_at"] = r["started_at"].isoformat()
+            r["finished_at"] = r["finished_at"].isoformat() if r["finished_at"] else None
+        planned = [{"connector": n, "state": "not implemented (interface defined: veloxa.connectors.Connector)"}
+                   for n in ("github", "gitlab", "hrms", "finance", "crm", "incidents")]
+        return {"connectors": [connectors.jira_status()] + planned, "runs": runs,
+                "model": llm_config.status(),
+                "gemini_experiment": {"key_configured": bool(_os.environ.get("GEMINI_API_KEY")),
+                                      "synthetic_tenants": [x for x in _os.environ.get("VELOXA_GEMINI_TENANTS",
+                                                                                       "").split(",") if x],
+                                      "scope": "synthetic Lumora data only; the supplied company is refused"}}

@@ -100,6 +100,12 @@ def build(admin: str, db: str, data: Path, cfg: Path) -> dict:
             registry.seed_slots(a, tid)
             out["grounded_at_k3"] = people.ground(a, tid, 3)
             out["profile_k3_eng04"] = people.profile(a, tid, 3, "agent-eng-04")
+            from veloxa import tenancy
+            from veloxa.db import tenant_tx
+
+            with tenant_tx(a, tid):
+                tenancy.grant_as_operator(a, tid, "tenant", str(tid), "company_reader", f"person:{CEO}",
+                                          "synthetic CEO company-wide read")
         r = admit_pack(conn, tid, schedule, "D4", data, T["d4"], authorisation=auth["D4"])
         out["admitted"]["D4"] = (r.status, r.batch_seq, r.file_count, r.record_count)
     with connect(_dsn(admin, db, "projection")) as pc:
@@ -282,6 +288,30 @@ def cases(s: Suite, admin: str, db: str, data: Path, built: dict) -> None:  # no
            lambda: (any(u["item_id"].startswith("notice:") and u["reasons"] for u in wr["unrankable"])
                     and not any(x["item_id"].startswith("notice:") for x in wr["ranked"]),
                     [u["title"] for u in wr["unrankable"]]), refusal="unsupported risk not ranked")
+
+    # ---- Findings workflow (2, beyond the 32 required)
+    from datetime import date
+
+    from veloxa import findings
+
+    pol = {k: v for k, v in __import__("tomllib").loads((ROOT / "tests/fixtures/d15_test_policy.toml").read_text(
+        encoding="utf-8"))["content"].items()}
+    with connect(_dsn(admin, db)) as c, tenant_tx(c, tid):
+        first = findings.daily_review(c, tid, 4, date(2099, 3, 1), pol)
+        second = findings.daily_review(c, tid, 4, date(2099, 3, 1), pol)
+    fl = client.get("/v1/findings", headers=H).json()
+    s.case("F1", "workflow", "Daily review: detect, verify and notify findings without duplicates",
+           "First review creates verified, notified findings (CEO + department queue when no head is known); "
+           "a second review creates none",
+           lambda: (first["created"] and second["created"] == []
+                    and all(f["state"] == "notified" for f in fl["findings"])
+                    and any(n["recipient"] == "queue:engineering" for f in fl["findings"] for n in f["notified"]),
+                    {"created": len(first["created"]), "again": len(second["created"])}))
+    fid = fl["findings"][0]["finding_id"] if fl.get("findings") else "none"
+    ackr = client.post(f"/v1/findings/{fid}/events", json={"state": "acknowledged", "note": "seen"}, headers=H)
+    after = {f["finding_id"]: f["state"] for f in client.get("/v1/findings", headers=H).json()["findings"]}
+    s.case("F2", "workflow", "The CEO acknowledges a finding", "Recorded as an append-only event; state acknowledged",
+           lambda: (ackr.status_code == 200 and after.get(fid) == "acknowledged", after.get(fid)))
 
     # ---- Point-in-time answers (5)
     k17, k18, k19 = (ask("What is our headcount?", d)["read_basis"]["batch_seq"]

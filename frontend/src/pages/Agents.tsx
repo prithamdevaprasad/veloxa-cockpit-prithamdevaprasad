@@ -3,6 +3,7 @@ import { api, ApiError, newIdempotencyKey } from "../api/client";
 import { useApi } from "../api/useApi";
 import type { AgentSession, AgentSummary, AgentTurn, SessionDetail } from "../api/types";
 import { AgentAvatar } from "../ui/art";
+import { PeopleSection } from "./People";
 import { Badge, Button, EmptyState, ErrorState, EvidenceList, Loading, PageHead, Section, Segmented } from "../ui";
 
 type Cat = "all" | AgentSummary["category"];
@@ -28,6 +29,8 @@ export function AgentsPage() {
     <>
       <PageHead title="Agents" intro="One shared runtime. Each agent answers only from evidence that is in its
         knowledge boundary, that you are authorised to see, and that interview policy allows. Agents take no action." />
+      <PeopleSection />
+      <h2 style={{ margin: "8px 0 10px" }}>Agent configuration and interviews</h2>
       <div className="row" style={{ marginBottom: 12 }}>
         <Segmented label="Category" value={cat} options={CATS} onChange={(c) => { setCat(c); setDirPage(0); }} />
       </div>

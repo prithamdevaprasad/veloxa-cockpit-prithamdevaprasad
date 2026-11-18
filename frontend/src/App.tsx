@@ -12,6 +12,7 @@ import { OverviewPage } from "./pages/Overview";
 import { ScenariosPage } from "./pages/Scenarios";
 import { TimelinePage } from "./pages/Timeline";
 import { TodayPage } from "./pages/Today";
+import { WorryPage } from "./pages/Worry";
 import { AskProvider, useAsk } from "./ui/Ask";
 import { EvidenceProvider } from "./ui/EvidenceDrawer";
 import { Avatar, BrandMark, DemoBadge, Icon } from "./ui/kit";
@@ -20,6 +21,7 @@ import { EmptyState } from "./ui";
 const NAV = [
   { route: "overview", label: "Overview", icon: "overview" },
   { route: "ask", label: "Ask Veloxa", icon: "ask" },
+  { route: "worry", label: "What to worry about", icon: "alert" },
   { route: "agents", label: "Agents", icon: "agents" },
   { route: "departments", label: "Departments", icon: "departments" },
   { route: "evidence", label: "Evidence & Data", icon: "evidence" },
@@ -101,6 +103,7 @@ function Shell() {
           {route === "ask" && !getToken() && (
             <EmptyState title="Sign in to ask Veloxa">Open Administration &amp; Access and use your token.</EmptyState>)}
           {route === "conflicts" && <ConflictsPage />}
+          {route === "worry" && <WorryPage />}
           {route === "agents" && <AgentsPage />}
           {route === "departments" && <DepartmentsPage go={go} />}
           {route === "evidence" && <EvidenceDataPage />}

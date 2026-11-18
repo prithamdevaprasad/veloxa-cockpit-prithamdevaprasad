@@ -349,3 +349,39 @@ mark.hl { background: rgba(232, 187, 108, 0.22); color: var(--text); padding: 0 
   .update { grid-template-columns: auto minmax(0, 1fr); }
   .update-side { grid-column: 2; justify-items: start; grid-auto-flow: column; }
 }
+
+/* Confidence (deterministic; never a probability) */
+.conf { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border-strong);
+  color: var(--text-2); white-space: nowrap; }
+.conf-high { color: var(--ok); border-color: rgba(130, 207, 163, 0.35); }
+.conf-moderate { color: var(--lavender); border-color: rgba(193, 167, 245, 0.35); }
+.conf-low, .conf-conflicting { color: var(--warn); border-color: rgba(232, 187, 108, 0.35); }
+.follow-ups { display: flex; flex-wrap: wrap; gap: 6px; }
+.follow-ups .chip { font-size: 12.5px; padding: 6px 10px; }
+.specialists { max-width: 72ch; }
+
+/* Worry ranking */
+.worry-item { border-top: 1px solid var(--border); padding: 14px 0; display: grid; gap: 8px; }
+.worry-item:first-child { border-top: 0; padding-top: 4px; }
+.worry-head { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 12px; align-items: start; }
+.rank-n { font: 600 20px/1 var(--font); font-variant-numeric: tabular-nums; color: var(--lavender); }
+.rank-n small { display: block; font-size: 11px; font-weight: 400; color: var(--text-3); margin-top: 4px; }
+.sev { text-align: right; font-variant-numeric: tabular-nums; }
+.sev strong { font-size: 16px; }
+.sev-bar { position: relative; height: 6px; width: 140px; background: var(--surface-2); border-radius: 3px; margin-top: 6px; }
+.sev-bar span { position: absolute; top: 0; bottom: 0; background: var(--accent); border-radius: 3px; opacity: 0.85; }
+.crit-table { width: 100%; font-size: 12.5px; }
+.crit-table td, .crit-table th { padding: 6px 8px; }
+.person-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 12px; }
+.person-card { all: unset; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px;
+  padding: 14px; border: 1px solid var(--border); border-radius: var(--r-card); background: var(--surface);
+  transition: border-color var(--t-fast) var(--ease); box-sizing: border-box; }
+.person-card:hover { border-color: var(--border-strong); }
+.person-card:focus-visible { outline: 2px solid var(--focus); }
+.person-card .t { font-size: 12.5px; color: var(--text-2); }
+.person-card .w { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+.assume { border-left: 2px solid var(--warn); padding-left: 10px; }
+@media (max-width: 720px) {
+  .worry-head { grid-template-columns: 36px minmax(0, 1fr); }
+  .worry-head .sev { grid-column: 2; text-align: left; }
+}

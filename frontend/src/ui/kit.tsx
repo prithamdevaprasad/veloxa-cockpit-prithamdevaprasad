@@ -24,6 +24,7 @@ const PATHS: Record<string, string> = {
   chat: "M5 5h14v10H9l-4 4V5z",
   upload: "M12 15V4m-5 5 5-5 5 5M4 20h16",
   back: "M15 6l-6 6 6 6",
+  alert: "M12 4l9 16H3L12 4zm0 6v4m0 3v.5",
 };
 
 export function Icon({ name, size = 18, label }: { name: keyof typeof PATHS | string; size?: number; label?: string }) {
