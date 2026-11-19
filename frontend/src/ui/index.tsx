@@ -104,7 +104,8 @@ export function Segmented<T extends string>({ value, options, onChange, label }:
   );
 }
 
-export function Drawer({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Drawer({ title, onClose, children, modal, header }: { title: string; onClose: () => void;
+  children: ReactNode; modal?: boolean; header?: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
@@ -119,9 +120,9 @@ export function Drawer({ title, onClose, children }: { title: string; onClose: (
   return (
     <>
       <div className="drawer-backdrop" onClick={onClose} />
-      <div className="drawer" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref}>
+      <div className={modal ? "drawer modal" : "drawer"} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref}>
         <header>
-          <h2>{title}</h2>
+          {header ?? <h2>{title}</h2>}
           <Button variant="ghost" onClick={onClose} aria-label="Close">Close</Button>
         </header>
         <div className="body">{children}</div>

@@ -194,16 +194,16 @@ class Router:
         recs = w["recs"]
         if w["mode"] == "pending":
             return self.unrankable(q)
+        from ..explain import group_label
+
         claims = [c for x in w["ranked"][:5] if (c := self.claim(
-            f"Rank {x['rank']}{' (tied)' if x['tied'] else ''}: {x['title']}. Exposure {x['severity']['low']:.2f} to "
-            f"{x['severity']['high']:.2f} on a 0 to 1 scale (an ordering, not a probability).", x["evidence"], recs,
-            "derived"))]
+            f"{group_label(x['rank'])}: {x['title']}.", x["evidence"], recs, "derived"))]
         n_un = len(w.get("unrankable", []))
         return _result(self.basis_json, "qualified", "I read this as: the ranked list of concerns (approved D-15 "
                        "method).", f"{len(claims)} ranked concern{'s' if len(claims) != 1 else ''}"
                        + (f", plus {n_un} that cannot be ranked yet" if n_un else "") + ".",
                        claims, [recs[i] for c in claims for i in c["evidence"]],
-                       ["tied items cannot be separated by the evidence"]
+                       ["concerns in the same attention group cannot be ordered individually by the evidence"]
                        if any(x["tied"] for x in w["ranked"]) else [])
 
     def topic_risk(self, q):

@@ -13,45 +13,55 @@ import { Badge, Button, ErrorState, Loading, PageHead, Section } from "../ui";
 const CRIT: Record<string, string> = { C1: "Delivery", C2: "Financial", C3: "Continuity", C4: "Reporting integrity" };
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
-function Item({ x }: { x: WorryItem }) {
-  const [open, setOpen] = useState(false);
+const NO_MEASURE = "no evidence-backed measure";       // a criterion this concern never declared (not its unknown)
+const WHY: Record<string, string> = {
+  C1: "A committed delivery date has moved.", C2: "Revenue or contract value is exposed.",
+  C3: "The work depends on very few people.",
+  C4: "Reported figures disagree, so decisions may rest on an unconfirmed number.",
+};
+export const groupLabel = (rank: number) =>
+  rank === 1 ? "Highest attention group" : rank === 2 ? "Next attention group" : "Further attention";
+
+/** One concern: the executive view first; the D-15 calculation one click away. */
+function Item({ x, groupSize }: { x: WorryItem; groupSize: number }) {
+  const [explain, setExplain] = useState(false);
   const evidence = useEvidence();
-  const ex = useExplanation(async () => (await product.explainWorry(x.item_id)).explanation, [x.item_id]);
+  const ex = useExplanation(async () => (await product.explainWorry(x.item_id)).explanation, [x.item_id], explain);
   const s = x.severity;
+  const crit = Object.entries(s.criteria);
+  const established = crit.filter(([, v]) => v.status === "measured").map(([, v]) => v.reason);
+  const why = crit.filter(([, v]) => v.status === "measured").map(([c]) => WHY[c]).filter(Boolean);
+  const unknown = [...x.unknowns, ...crit.filter(([, v]) => ["missing", "unquantified", "unmapped"].includes(v.status)
+    && v.reason !== NO_MEASURE).map(([, v]) => v.reason)];
   return (
-    <li className="worry-item" id={`worry-${x.item_id}`}>
-      <div className="worry-head">
-        <div className="rank-n" aria-label={`Rank ${x.rank}${x.tied ? ", tied" : ""}`}>{x.rank}
-          {x.tied && <small>tied</small>}</div>
-        <div>
-          <strong>{x.title}</strong>
-          <div className="small muted">{[x.department, x.project].filter(Boolean).join(", ")}
-            {x.sensitive && <> <Badge value="open" label="Sensitive to weights" title="A ±5 point change in the weights
-              moves this item between ranks" /></>}</div>
-        </div>
-        <div className="sev">
-          <span className="small muted" title="An ordering of exposure on a 0 to 1 scale, never a probability">Exposure (not a probability)</span>
-          <div><strong>{s.low.toFixed(2)}–{s.high.toFixed(2)}</strong></div>
-          <div className="sev-bar" aria-hidden="true"><span style={{ left: `${s.low * 100}%`,
-            width: `${Math.max(2, (s.high - s.low) * 100)}%` }} /></div>
-        </div>
-      </div>
-      <ExplanationView ex={ex} />
-      <div className="row">
-        <Button variant="ghost" onClick={() => setOpen(!open)} aria-expanded={open}>
-          {open ? "Hide the calculation" : "Show the calculation"}</Button>
+    <li className="worry-item concern" id={`worry-${x.item_id}`}>
+      <strong className="concern-title">{x.title}</strong>
+      {(x.department || x.project) && <div className="small muted">{[x.department, x.project].filter(Boolean).join(" · ")}</div>}
+      {established.length > 0 && <p className="small">{established.map((t) => t.charAt(0).toUpperCase() + t.slice(1)).join(". ")}.</p>}
+      {why.length > 0 && <><h4>Why it matters</h4><p className="small">{why.join(" ")}</p></>}
+      {unknown.length > 0 && <><h4>What remains unknown</h4>
+        <ul className="bullets small">{[...new Set(unknown)].map((u) => <li key={u}>{u.charAt(0).toUpperCase() + u.slice(1)}</li>)}</ul></>}
+      {x.follow_up && <><h4>Suggested next step</h4><p className="small">{x.follow_up}</p></>}
+      <div className="row" style={{ gap: 8 }}>
+        <Button onClick={() => setExplain(!explain)} aria-expanded={explain}>{explain ? "Hide explanation" : "Explain concern"}</Button>
         <Button variant="ghost" disabled={!x.evidence.length} onClick={() => evidence.open(x.evidence[0], x.title)}>
           View evidence ({x.evidence.length})</Button>
       </div>
-      {open && (
+      {explain && <ExplanationView ex={ex} />}
+      <details className="small assess">
+        <summary>How Veloxa assessed this</summary>
+        <p>Assessed with the approved D-15 method: four criteria with explicit weights. D-15 position {x.rank}
+          {groupSize > 1 ? `, shared with ${groupSize - 1} other concern${groupSize > 2 ? "s" : ""} whose exposure ranges overlap, so the evidence cannot order them` : ""}.
+          Exposure range {s.low.toFixed(2)} to {s.high.toFixed(2)} on a 0 to 1 scale: an ordering of exposure, not a probability.
+          {` ${pct(s.measured_weight)} of the method's weight is measured or not applicable.`}
+          {x.sensitive ? " Its position changes if the weights move by 5 points." : ""}</p>
         <div className="table-wrap"><table className="crit-table">
           <thead><tr><th>Criterion</th><th>State</th><th>Measure</th><th>Value</th><th>Weight</th>
             <th>Contribution</th><th>Why</th></tr></thead>
-          <tbody>{Object.entries(s.criteria).map(([c, v]) => (
+          <tbody>{crit.map(([c, v]) => (
             <tr key={c}>
               <td>{c} {CRIT[c]}</td>
-              <td><Badge value={v.status === "measured" ? "active" : v.status === "not_applicable" ? "" : "open"}
-                         label={v.status.replace(/_/g, " ")} /></td>
+              <td>{v.reason === NO_MEASURE ? "not declared" : v.status.replace(/_/g, " ")}</td>
               <td className="mono small">{v.measure ?? "—"}</td>
               <td>{v.status === "measured" ? `${v.low}${v.high !== v.low ? `–${v.high}` : ""}`
                 : v.status === "not_applicable" ? "n/a" : "unknown"}</td>
@@ -59,14 +69,27 @@ function Item({ x }: { x: WorryItem }) {
               <td>{v.contribution_low.toFixed(2)}–{v.contribution_high.toFixed(2)}</td>
               <td className="small muted">{v.reason}</td>
             </tr>))}</tbody>
-        </table>
-        <p className="small muted" style={{ marginTop: 6 }}>Unknown criteria count as the whole range (0 to their
-          weight), never as zero. Measured or not-applicable weight: {pct(s.measured_weight)}.</p>
-        {x.unknowns.length > 0 && <ul className="bullets small">{x.unknowns.map((u) => <li key={u}>{u}</li>)}</ul>}
-        {x.follow_up && <p className="small" style={{ marginTop: 6 }}>Suggested follow-up: {x.follow_up}</p>}
-        </div>
-      )}
+        </table></div>
+        <p className="muted">Unknown criteria count as their whole range (0 to their weight), never as zero.</p>
+      </details>
     </li>
+  );
+}
+
+/** Ranked concerns grouped by D-15 band: concerns in one band are presented together, never as "1 tied" each. */
+function Groups({ items }: { items: WorryItem[] }) {
+  const bands = [...new Set(items.map((x) => x.rank))].sort((a, b) => a - b);
+  return (
+    <div className="stack">{bands.map((r) => {
+      const group = items.filter((x) => x.rank === r);
+      return (
+        <section key={r} aria-label={groupLabel(r)} className="attention-group">
+          <h3>{groupLabel(r)} · {group.length} concern{group.length === 1 ? "" : "s"}</h3>
+          {group.length > 1 && <p className="small muted">Current evidence does not allow Veloxa to reliably order these
+            concerns individually.</p>}
+          <ol className="plain">{group.map((x) => <Item key={x.item_id} x={x} groupSize={group.length} />)}</ol>
+        </section>);
+    })}</div>
   );
 }
 
@@ -107,23 +130,22 @@ export function WorryPage() {
   useScrollToItem(w.state === "ready");
   return (
     <>
-      <PageHead title="What should I worry about?" intro="Ranked by evidence-backed severity under the completed D-15
-        method: four criteria with explicit weights. Unknowns widen an item's range instead of lowering it, and items
-        whose ranges overlap share a rank." />
+      <PageHead title="What should I worry about?" intro="The concerns the company records support, grouped by how
+        much attention they need. Each one shows what is recorded, why it matters and what is still unknown." />
       <div className="ov-grid">
-        <Section title="Ranked" className="span-8" aria-label="Ranked worries">
+        <Section title="Needs attention" className="span-8" aria-label="Ranked worries">
           {w.state === "loading" && <Loading lines={5} />}
           {w.state === "error" && <ErrorState error={w.error} onRetry={reload} />}
           {w.state === "ready" && (w.data.ranking_mode === "pending"
             ? <Guidance title="Not ranked yet">{w.data.note}</Guidance>
             : w.data.ranked.length === 0 ? <Guidance title="Nothing to rank">No item meets the evidence gate.</Guidance>
-              : <ol className="plain">{w.data.ranked.map((x) => <Item key={x.item_id} x={x} />)}</ol>)}
+              : <Groups items={w.data.ranked} />)}
           {w.state === "ready" && <p className="small muted" style={{ marginTop: 8 }}>{w.data.read_basis.banner}.
             Weights: {Object.entries((w.data.policy as { weights?: Record<string, number> }).weights ?? {})
               .map(([k, v]) => `${k} ${CRIT[k]} ${pct(v)}`).join(", ") || "not recorded"}. Probabilities are disabled.</p>}
         </Section>
-        <Section title="Cannot be ranked yet" className="span-4" aria-label="Unrankable"
-                 subtitle="Visible, with the reason, so nothing is hidden by the ranking.">
+        <Section title="Not enough evidence to assess" className="span-4" aria-label="Unrankable"
+                 subtitle="Unassessed does not mean unimportant or safe: the records lack what is needed to judge it.">
           {w.state === "ready" && ((w.data.unrankable ?? w.data.unranked ?? []).length === 0
             ? <p className="small muted">None.</p>
             : <ul className="plain">{(w.data.unrankable ?? []).map((u) => <Unranked key={u.item_id} u={u} />)}
@@ -137,12 +159,19 @@ export function WorryPage() {
   );
 }
 
-function Unranked({ u }: { u: { item_id: string; title: string; reasons: string[] } }) {
-  const ex = useExplanation(async () => (await product.explainWorry(u.item_id)).explanation, [u.item_id]);
+function Unranked({ u }: { u: { item_id: string; title: string; reasons: string[]; evidence: string[];
+                                  unknowns: string[]; follow_up?: string } }) {
+  const [more, setMore] = useState(false);
+  const ex = useExplanation(async () => (await product.explainWorry(u.item_id)).explanation, [u.item_id], more);
   return (
-    <li className="worry-item" id={`worry-${u.item_id}`}>
-      <span className="status-tag">Unranked: information missing</span> <strong>{u.title}</strong>
-      <ExplanationView ex={ex} />
+    <li className="worry-item concern compact" id={`worry-${u.item_id}`}>
+      <strong>{u.title}</strong>
+      <p className="small muted">Recorded in {u.evidence.length} record{u.evidence.length === 1 ? "" : "s"}.{" "}
+        {u.unknowns[0] ?? "The records do not establish enough information to assess this concern."}</p>
+      {u.follow_up && <p className="small"><strong>What would help:</strong> {u.follow_up}</p>}
+      <button className="link small" aria-expanded={more} onClick={() => setMore(!more)}>
+        {more ? "Hide explanation" : "Why it can't be assessed"}</button>
+      {more && <><p className="small muted">{u.reasons.join("; ")}.</p><ExplanationView ex={ex} /></>}
     </li>
   );
 }

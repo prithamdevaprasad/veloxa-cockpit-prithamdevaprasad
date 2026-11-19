@@ -130,17 +130,25 @@ def worry(item: dict, *, ranked: bool, total_ranked: int = 0) -> dict:
     sev = item.get("severity") or {}
     crit = sev.get("criteria", {})
     recorded, calc, unknown = [], [], []
+    from .risk.ranking import NO_MEASURE
+
     for c, v in sorted(crit.items()):
         name = CRITERION.get(c, c)
+        if v.get("reason") == NO_MEASURE:            # never declared for this concern: not one of ITS unknowns
+            continue
         if v["status"] == "measured":
             recorded.append(_item("", f"{_cap(name)}: {v['reason']}", item.get("evidence")))
         elif v["status"] in ("missing", "unquantified", "unmapped"):
             unknown.append(_item("", f"{_cap(name)} is not known: {v['reason']}. Veloxa counts this as anywhere "
                                  "from no exposure to the maximum, never as zero"))
+    if not recorded and item.get("evidence"):        # every concern cites the records it comes from
+        n = len(item["evidence"])
+        recorded.append(_item("", f"The concern is recorded in {n} company record{'s' if n != 1 else ''}",
+                              item["evidence"]))
     if ranked:
-        band = f"rank {item['rank']}" + (" (tied: the records cannot separate it from others at this rank)"
-                                         if item.get("tied") else "")
-        calc.append(_item("", f"Placed at {band} of {total_ranked} ranked item(s) by the approved D-15 method"))
+        calc.append(_item("", f"In the {group_label(item['rank']).lower()} by the approved D-15 method"
+                          + (". The evidence does not allow these concerns to be ordered individually"
+                             if item.get("tied") else ""), detail=f"D-15 position {item['rank']} of {total_ranked}"))
         calc.append(_item("", f"Exposure range {sev['low']:.2f} to {sev['high']:.2f} on a 0 to 1 scale; this is an "
                           "ordering of exposure, not a probability",
                           detail=f"{round(sev.get('measured_weight', 0) * 100)}% of the method's weight is measured"))
@@ -151,14 +159,21 @@ def worry(item: dict, *, ranked: bool, total_ranked: int = 0) -> dict:
             unknown.append(_item("", f"Not ranked: {r}"))
     for u in item.get("unknowns", []):
         unknown.append(_item("", _cap(u)))
+    if not ranked and not item.get("unknowns"):
+        unknown.append(_item("", "The records do not establish enough information to assess this concern"))
     follow = [_item("", item["follow_up"])] if item.get("follow_up") else []
     headline = (f"{item['title']}." if ranked else f"{item['title']}: recorded, but not enough is measured to rank it.")
     return _explanation("worry", headline, [
         _section("recorded", "What the records show", "recorded", recorded),
-        _section("ranking", "How it was ranked", "calculated", calc),
+        _section("ranking", "How Veloxa assessed this", "calculated", calc),
         _section("unknown", "What is not known", "unknown", unknown),
-        _section("next", "Question the method suggests asking (from the ranking rules)", "calculated", follow),
+        _section("next", "Suggested next step (from the ranking rules)", "calculated", follow),
     ], confidence=item.get("confidence"))
+
+
+def group_label(rank: int) -> str:
+    """Executive wording for a D-15 rank band (the band number itself stays in the technical details)."""
+    return {1: "Highest attention group", 2: "Next attention group"}.get(rank, "Further attention group")
 
 
 # ---------------------------------------------------------------- conflicts

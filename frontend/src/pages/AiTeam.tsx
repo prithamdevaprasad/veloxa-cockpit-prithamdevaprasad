@@ -130,13 +130,19 @@ export function InterviewDrawer({ person, agent, onClose }: { person: Person; ag
     try { setSession(await api.openSession(person.agent_id)); }
     catch (e) { setError(e instanceof ApiError ? e : new ApiError(0, "unknown", String(e))); }
   }
+  // One click opens the interview: the session starts as soon as the modal mounts (no second button).
+  const ok = canInterview(agent);
+  useEffect(() => { if (ok && !session) void start(); }, [person.agent_id, ok]); // eslint-disable-line react-hooks/exhaustive-deps
+  const opening = `Hello, I'm the AI representation of ${person.name ?? "this team member"}`
+    + `${person.title ? `, ${person.title}` : ""}${person.department ? ` in ${person.department}` : ""}. I answer from `
+    + "approved company records only. Ask me about my role, my work, or what the records do and don't show.";
   return (
-    <Drawer title={`Interview: ${person.name ?? "AI representation"}`} onClose={onClose}>
-      <div className="stack">
-        <div className="row" style={{ flexWrap: "nowrap", gap: 12 }}>
-          <AgentAvatar id={person.name ?? person.agent_id} size={44} />
-          <div><strong>{person.name}</strong><div className="small muted">{person.title}, {person.department}</div></div>
-        </div>
+    <Drawer modal title={`Interview: ${person.name ?? "AI representation"}`} onClose={onClose}
+            header={<div className="row" style={{ flexWrap: "nowrap", gap: 12 }}>
+              <AgentAvatar id={person.name ?? person.agent_id} size={44} />
+              <div><h2>{person.name}</h2><div className="small muted">{person.title}, {person.department}</div></div>
+            </div>}>
+      <div className="interview">
         <p className="callout info small" role="note">{DISCLOSURE}</p>
         <Segmented label="View" value={tab} onChange={setTab}
                    options={[{ value: "interview", label: "Interview" }, { value: "history", label: "Earlier interviews" }]} />
@@ -149,10 +155,10 @@ export function InterviewDrawer({ person, agent, onClose }: { person: Person; ag
           : !canInterview(agent) ? <p className="callout small">Interviews with this AI representation are not available
               to you.</p>
           : session ? <Conversation key={session.session_id} session={session} history={resume}
-                                    onClosed={() => { setSession(null); setResume(null); }} />
-          : <>{error && <ErrorState error={error} />}
-              <Button variant="primary" onClick={start}>Start interview</Button>
-              <p className="small muted">Try: “Tell me about yourself”, “Who do you report to?”, “What do you not know?”</p></>}
+                                    opening={resume ? undefined : opening}
+                                    onClosed={() => { setSession(null); setResume(null); void start(); }} />
+          : error ? <><ErrorState error={error} /><Button onClick={start}>Try again</Button></>
+          : <Loading lines={3} />}
       </div>
     </Drawer>
   );

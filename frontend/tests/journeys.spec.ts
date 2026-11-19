@@ -322,7 +322,11 @@ test("AI team: no HR mapping here, so only labelled synthetic agents appear, wit
   await card.getByRole("button", { name: "Start interview" }).click();
   const drawer = page.getByRole("dialog");
   await expect(drawer.getByRole("note")).toContainText("It is not the actual employee.");
-  await drawer.getByRole("button", { name: "Start interview" }).click();
+  await expect(drawer.getByRole("button", { name: "Start interview" })).toHaveCount(0);   // one click: already started
+  await expect(drawer.getByText(/I'm the AI representation of/)).toBeVisible();            // the agent's opening
+  const box = (await drawer.boundingBox())!, vp = page.viewportSize()!;                    // centred modal, not a drawer
+  expect(Math.abs(box.x + box.width / 2 - vp.width / 2)).toBeLessThan(4);
+  expect(box.width / vp.width).toBeGreaterThan(0.6);
   await drawer.getByLabel("Message to the agent").fill("What do you not know?");
   await drawer.getByRole("button", { name: "Send" }).click();
   await expect(drawer.getByText(/My records cover/).first()).toBeVisible();
@@ -340,6 +344,9 @@ test("Overview: what needs attention and the AI team come right after the busine
   expect(box!.y).toBeGreaterThan(figures!.y);
   expect(box!.y).toBeLessThan(brief!.y);                                         // above the lower dashboard rows
   await expect(attn).not.toContainText("[object Object]");
+  await expect(attn).not.toContainText(/tied|Ranked #/);                       // attention groups, no jargon
+  const warn = await page.getByRole("region", { name: "Early warnings" }).boundingBox();
+  expect(warn!.y).toBeLessThan(brief!.y);                                        // early warnings right after it
   await attn.getByRole("button", { name: "View all concerns" }).click();
   await expect(page.getByRole("heading", { name: "What should I worry about?" })).toBeVisible();
 });

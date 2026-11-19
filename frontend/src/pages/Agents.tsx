@@ -126,8 +126,8 @@ function AgentDetail({ agent }: { agent: AgentSummary }) {
 
 type Entry = { q: string; key: string; turn?: AgentTurn; error?: ApiError; cancelled?: boolean };
 
-export function Conversation({ session, history, onClosed }: { session: AgentSession; history: SessionDetail | null;
-                                                          onClosed: () => void }) {
+export function Conversation({ session, history, onClosed, opening }: { session: AgentSession;
+  history: SessionDetail | null; onClosed: () => void; opening?: string }) {
   const [msg, setMsg] = useState("");
   const [log, setLog] = useState<Entry[]>(() => (history?.turns ?? []).map((t) => ({
     q: t.message ?? "(question not recorded)", key: "", turn: t })));
@@ -163,9 +163,10 @@ export function Conversation({ session, history, onClosed }: { session: AgentSes
   }
 
   return (
-    <div className="stack">
+    <div className="interview">
       <p className="label-ai">{session.label} Session at K={session.batch_seq}, configuration v{session.config_version}.</p>
       <div className="chat" aria-live="polite">
+        {opening && <div className="bubble agent">{opening}</div>}
         {log.map((l, i) => (
           <div key={i} className="stack">
             <div className="bubble me">{l.q}</div>
@@ -178,9 +179,11 @@ export function Conversation({ session, history, onClosed }: { session: AgentSes
         ))}
       </div>
       {closed === null ? (
-        <form onSubmit={send} className="row">
-          <input className="input" style={{ flex: 1 }} value={msg} maxLength={2000} onChange={(e) => setMsg(e.target.value)}
-                 placeholder="Ask the agent about the work" aria-label="Message to the agent" />
+        <form onSubmit={send} className="composer">
+          <textarea className="input" value={msg} maxLength={2000} onChange={(e) => setMsg(e.target.value)} autoFocus
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(e); } }}
+                    placeholder="Ask about their role, work or what the records show (Enter sends, Shift+Enter adds a line)"
+                    aria-label="Message to the agent" />
           {busy ? <Button type="button" onClick={() => ctrl.current?.abort()}>Cancel</Button>
             : <Button variant="primary" type="submit" disabled={!msg.trim()}>Send</Button>}
           <Button onClick={close} disabled={busy}>Close session</Button>

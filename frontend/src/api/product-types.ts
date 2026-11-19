@@ -69,7 +69,8 @@ export interface WorryItem { rank: number; tied: boolean; item_id: string; title
   sensitive: boolean; follow_up: string; why: string }
 export interface Worry { ranking_mode: "weighted" | "pending"; policy: Record<string, unknown>;
   read_basis: { batch_seq: number; banner: string }; ranked: WorryItem[];
-  unrankable?: { item_id: string; title: string; reasons: string[]; evidence: string[]; unknowns: string[] }[];
+  unrankable?: { item_id: string; title: string; reasons: string[]; evidence: string[]; unknowns: string[];
+    follow_up?: string; department?: string | null; project?: string | null }[];
   unranked?: { item_id: string; title: string; evidence: string[] }[]; hidden_for_access: number; note?: string }
 export interface Finding { finding_id: string; title: string; description: string; department: string | null;
   project: string | null; trigger: string; evidence: string[]; confidence: string; unknowns: string[]; state: string;

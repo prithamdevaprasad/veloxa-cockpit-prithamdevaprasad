@@ -10,7 +10,8 @@ import { DeptArt } from "../ui/art";
 import { useAsk } from "../ui/Ask";
 import { useEvidence } from "../ui/EvidenceDrawer";
 import { ExplanationView } from "../ui/Explanation";
-import { MeetYourAiTeam } from "./AiTeam";
+import { MeetYourAiTeam, useTeam } from "./AiTeam";
+import { groupLabel } from "./Worry";
 import { Avatar, BarChart, DemoBadge, Donut, Guidance, Icon, KpiCard, LineChart, Tabs } from "../ui/kit";
 import { Badge, Button, Drawer, ErrorState, Loading, Section } from "../ui";
 
@@ -113,6 +114,11 @@ export function OverviewPage({ go }: { go: (r: string) => void }) {
 
       <div className="dash-row dash-attn">
         <WorrySummary go={go} />
+        <Attention />
+      </div>
+
+      <div className="dash-row dash-attn">
+        <RecentIntelligence go={go} />
         <MeetYourAiTeam go={go} />
       </div>
 
@@ -127,12 +133,8 @@ export function OverviewPage({ go }: { go: (r: string) => void }) {
         <SourcesCard sources={sources} loading={srcs.state === "loading"} go={go} />
       </div>
 
-      <div className="ov-grid">
-        <RecentIntelligence go={go} />
-        <div className="span-4 dash-side">
-          <Attention />
-          <DepartmentsCard go={go} />
-        </div>
+      <div className="dash-row dash-attn">
+        <DepartmentsCard go={go} />
       </div>
     </>
   );
@@ -211,16 +213,16 @@ function WorrySummary({ go }: { go: (r: string) => void }) {
   const open = (id: string) => { window.location.hash = `/worry?item=${encodeURIComponent(id)}`; };
   return (
     <Section title="What needs attention" aria-label="What needs attention"
-             subtitle="Concerns backed by company records. Ranked ones use the approved method; unranked ones lack the
-               measurements needed to rank them."
+             subtitle="Concerns backed by company records, grouped by how much attention they need."
              actions={<button className="link small" onClick={() => go("worry")}>View all concerns</button>}>
       {w.state === "loading" ? <Loading lines={3} /> : w.state === "error" ? <ErrorState error={w.error} />
         : (() => {
             const ranked = w.data.ranking_mode === "pending" ? [] : w.data.ranked;
             const unranked = [...(w.data.unrankable ?? []).map((u) => ({ id: u.item_id, title: u.title,
-                                status: "Unranked: information missing", why: u.reasons[0] ?? "" })),
+                                status: "Not enough evidence to assess", why: u.unknowns[0] ?? u.follow_up ?? "",
+                                n: u.evidence.length })),
                               ...(w.data.unranked ?? []).map((u) => ({ id: u.item_id, title: u.title,
-                                status: "Unranked: needs review", why: w.data.note ?? "" }))];
+                                status: "Needs review", why: w.data.note ?? "", n: 0 }))];
             if (!ranked.length && !unranked.length) {
               return <Guidance title="Nothing needs attention">No concern is supported by the records you may read.</Guidance>;
             }
@@ -228,18 +230,18 @@ function WorrySummary({ go }: { go: (r: string) => void }) {
               <ul className="plain attention-list">
                 {ranked.slice(0, 4).map((x) => (
                   <li key={x.item_id}>
-                    <span className="status-tag ranked">Ranked #{x.rank}{x.tied ? " (tied)" : ""}</span>
+                    <span className="status-tag ranked">{groupLabel(x.rank)}</span>
                     <span className="what">{x.title}<span className="small muted" style={{ display: "block" }}>
                       {(x.severity.criteria.C1?.status === "measured" ? x.severity.criteria.C1.reason
                         : Object.values(x.severity.criteria).find((c) => c.status === "measured")?.reason) ?? ""}
-                      {" "}Exposure {x.severity.low.toFixed(2)}–{x.severity.high.toFixed(2)}, an ordering, not a probability.
                       {x.evidence.length ? ` ${x.evidence.length} supporting record${x.evidence.length === 1 ? "" : "s"}.` : ""}</span></span>
                     <button className="link small" onClick={() => open(x.item_id)}>Explain</button>
                   </li>))}
                 {unranked.slice(0, 3).map((u) => (
                   <li key={u.id}>
                     <span className="status-tag">{u.status}</span>
-                    <span className="what">{u.title}<span className="small muted" style={{ display: "block" }}>{u.why}</span></span>
+                    <span className="what">{u.title}<span className="small muted" style={{ display: "block" }}>{u.why}
+                      {u.n ? ` ${u.n} record${u.n === 1 ? "" : "s"}.` : ""}</span></span>
                     <button className="link small" onClick={() => open(u.id)}>Explain</button>
                   </li>))}
               </ul>);
@@ -315,7 +317,9 @@ function Attention() {
             {warnings.slice(0, 5).map((w, i) => (
               <li key={i}>
                 <span className="sig" aria-hidden="true" />
-                <span className="what">{cap(w.statement)}</span>
+                <span className="what">{cap(w.statement)}
+                  <span className="small muted" style={{ display: "block" }}>Detected in the admitted records. It may
+                    affect a commitment; the records do not establish the impact.</span></span>
                 <span className="acts"><Badge value="open" label={w.kind.replace(/_/g, " ")} />
                   <button className="link small" onClick={() => ask.ask(`What do we know about ${w.commitment}?`)}>
                     Ask about this</button></span>
@@ -340,7 +344,7 @@ function RecentIntelligence({ go }: { go: (r: string) => void }) {
   const ask = useAsk();
   const evidence = useEvidence();
   return (
-    <Section title="Recent intelligence" aria-label="Recent intelligence" className="span-8"
+    <Section title="Recent intelligence" aria-label="Recent intelligence"
              subtitle="What changed: agent updates from recorded sessions, clarification requests and new evidence.">
       <Tabs label="Recent intelligence" value={tab} onChange={setTab} tabs={[
         { value: "agents", label: "Agent updates", count: ups.state === "ready" ? ups.data.updates.length : undefined },
@@ -348,8 +352,8 @@ function RecentIntelligence({ go }: { go: (r: string) => void }) {
         { value: "activity", label: "New evidence", count: subs.state === "ready" ? subs.data.submissions.length : undefined }]} />
       {tab === "agents" && (ups.state === "loading" ? <Loading /> : ups.state === "error" ? <ErrorState error={ups.error} />
         : ups.data.updates.length === 0
-          ? <Guidance title="No agent updates yet">An update is published from a completed agent interview. Open an
-              agent, interview it, then publish its update.</Guidance>
+          ? <Guidance title="No agent updates yet">Updates appear after an interview is published.{" "}
+              <button className="link" onClick={() => go("agents")}>Interview an agent</button></Guidance>
           : <ul className="plain updates">{ups.data.updates.slice(0, 6).map((u) => (
               <li key={u.update_id}>
                 <button className="update" onClick={() => setOpen(u)}>
@@ -413,6 +417,8 @@ function RecentIntelligence({ go }: { go: (r: string) => void }) {
 function DepartmentsCard({ go }: { go: (r: string) => void }) {
   const [deps] = useApi((s) => product.departments(s), []);
   const [ups] = useApi((s) => product.updates(undefined, s), []);
+  const team = useTeam();
+  const peopleDepts = [...new Set(team.people.map((p) => p.department).filter(Boolean))] as string[];
   const updates = ups.state === "ready" ? ups.data.updates : [];
   const forDept = (id: string) => updates.filter((u) => u.department === id || (id === "people" && u.department === "people_ops"));
   return (
@@ -420,7 +426,15 @@ function DepartmentsCard({ go }: { go: (r: string) => void }) {
       {deps.state === "loading" && <Loading lines={4} />}
       {deps.state === "error" && <ErrorState error={deps.error} />}
       {deps.state === "ready" && (deps.data.departments.length === 0
-        ? <Guidance title="No departments yet">An administrator adds departments in Administration.</Guidance>
+        ? (peopleDepts.length
+            ? <><p className="small muted">From the HR export (People). No workspace departments are configured in
+                Administration yet, so updates are not grouped by department.</p>
+                <ul className="plain dept-list">{peopleDepts.map((d) => (
+                  <li key={d}><button className="dept-row" onClick={() => go("agents")}>
+                    <span style={{ minWidth: 0 }}><span className="name">{d}</span>
+                      <span className="sub" style={{ display: "block" }}>
+                        {team.people.filter((p) => p.department === d).length} people</span></span></button></li>))}</ul></>
+            : <Guidance title="No departments yet">An administrator adds departments in Administration.</Guidance>)
         : <ul className="plain dept-list">{deps.data.departments.map((d) => {
             const u = forDept(d.department_id);
             return (

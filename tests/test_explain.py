@@ -144,7 +144,8 @@ def test_a_scenario_without_a_date_says_it_cannot_calculate():
 def test_worry_explains_ranking_without_raw_jargon_and_keeps_unknowns():
     e = explain.worry(WORRY, ranked=True, total_ranked=3)
     text = " ".join(it["text"] for _, it in explain.items_of(e))
-    assert "rank 1" in text and "tied" in text and "not a probability" in text and "0.30 to 0.65" in text
+    assert "highest attention group" in text and "to be ordered individually" in text
+    assert "tied" not in text and "not a probability" in text and "0.30 to 0.65" in text
     assert "revenue or contract value exposed is not known" in text.lower() and "never as zero" in text
     unranked = explain.worry({**WORRY, "reasons": ["only 35% of the weight is measured"]}, ranked=False)
     assert "not enough is measured to rank" in unranked["headline"]
@@ -279,3 +280,24 @@ def test_readers_get_a_plain_notice_and_diagnostics_stay_separate(monkeypatch):
     assert bad["wording"]["notice"] == x.NOT_USED and "ModelUnavailable" in bad["wording"]["diagnostic"]
     abst = x.answer({"status": "abstained", "claims": [], "unknowns": ["no forecast is admitted"]})
     assert "cannot answer" in abst["summary"] and "no forecast" in abst["summary"].lower()
+
+
+def test_an_unrankable_concern_shows_only_its_own_unknowns():
+    """Regression: a paused-hiring concern declared no criteria; the ranker fills each with a default (the whole
+    range in the maths). Those fillers must not appear as this concern's unknowns (slip days, revenue, ...)."""
+    from veloxa.risk.ranking import NO_MEASURE
+
+    filler = {c: {"status": "missing", "reason": NO_MEASURE} for c in ("C1", "C2", "C3", "C4")}
+    hiring = {"item_id": "hiring:example-hold", "title": "Hiring for a role is on hold", "evidence": ["hire#1"],
+              "severity": {"low": 0.0, "high": 1.0, "measured_weight": 0.0, "criteria": filler},
+              "reasons": ["too little of its exposure can be measured from the records"],
+              "unknowns": ["No approved measure turns a paused requisition into exposure."],
+              "follow_up": "Ask the hiring manager what the pause delays."}
+    e = explain.worry(hiring, ranked=False)
+    text = " ".join(it["text"] for _, it in explain.items_of(e)).lower()
+    for generic in ("delivery date has slipped", "revenue or contract", "small number of people", "reported figures"):
+        assert generic not in text
+    assert "paused requisition" in text and "ask the hiring manager" in text
+    assert any("hire#1" in (it.get("evidence") or []) for _, it in explain.items_of(e))   # its record is still cited
+    bare =explain.worry({**hiring, "unknowns": []}, ranked=False)
+    assert "do not establish enough information" in " ".join(i["text"] for _, i in explain.items_of(bare))

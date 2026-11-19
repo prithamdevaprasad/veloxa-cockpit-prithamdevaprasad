@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 CRITERIA = ("C1", "C2", "C3", "C4")
+NO_MEASURE = "no evidence-backed measure"   # a criterion the item never declared: counted as the whole range in the
+                                            # maths, but it is NOT an item-specific unknown and is not presented as one
 POLICY_ENV = "VELOXA_D15_POLICY"     # path to the D-15 decision file; it stays PRIVATE (its C2 anchor derives from
                                      # board-reported figures), never in the public repository
 
@@ -93,7 +95,7 @@ def score(policy: dict, item: Item, weights: dict[str, float] | None = None) -> 
     w = weights or policy["weights"]
     parts, lo, hi, measured_w = {}, 0.0, 0.0, 0.0
     for c in CRITERIA:
-        m = item.measures.get(c, Measure("missing", reason="no evidence-backed measure"))
+        m = item.measures.get(c, Measure("missing", reason=NO_MEASURE))      # maths: the whole range
         vlo, vhi, counted = criterion_value(policy, c, m)
         lo += w[c] * vlo
         hi += w[c] * vhi
@@ -172,7 +174,8 @@ def rank(items: list[Item], policy: dict | None = None) -> dict:
     return {"policy": {"weights": policy["weights"], "method": policy["method"], "probabilities": "disabled"},
             "ranked": ranked,
             "unrankable": [{"item_id": it.item_id, "title": it.title, "severity": s, "reasons": why,
-                            "evidence": it.evidence, "confidence": it.confidence, "unknowns": it.unknowns}
+                            "evidence": it.evidence, "confidence": it.confidence, "unknowns": it.unknowns,
+                            "follow_up": it.follow_up, "department": it.department, "project": it.project}
                            for it, s, why in unrankable]}
 
 

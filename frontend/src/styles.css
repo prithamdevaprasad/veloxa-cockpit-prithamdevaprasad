@@ -187,3 +187,18 @@ details > summary:hover { color: var(--text); }
 input[type="file"] { color: var(--text-2); }
 input[type="file"]::file-selector-button { font: 500 13px var(--font); margin-right: 10px; padding: 6px 12px; cursor: pointer;
   border: 1px solid var(--border-strong); border-radius: var(--r-control); background: var(--surface-3); color: var(--text); }
+
+/* Centred modal (interviews) */
+.drawer.modal { top: 50%; left: 50%; right: auto; bottom: auto; transform: translate(-50%, -50%); width: min(76vw, 1100px);
+  height: 80vh; border: 1px solid var(--border); border-radius: 16px; animation: modal-in var(--t-med) var(--ease); }
+.drawer.modal .body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+@keyframes modal-in { from { opacity: 0; transform: translate(-50%, -48%); } to { opacity: 1; transform: translate(-50%, -50%); } }
+.interview { flex: 1; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.interview .chat { flex: 1; overflow-y: auto; padding: 4px 2px; gap: 16px; }
+.interview .bubble { line-height: 1.55; }
+.bubble.agent { align-self: flex-start; }
+.composer { display: flex; gap: 8px; align-items: flex-end; }
+.composer textarea { flex: 1; min-height: 64px; max-height: 200px; resize: vertical; font: inherit; }
+.interview .composer { width: 100%; max-width: none; align-self: stretch; }
+.interview .composer textarea { min-width: 0; }
+.bubble.me { white-space: pre-wrap; }

@@ -484,3 +484,11 @@ mark.hl { background: #fdeccb; color: var(--text); padding: 0 2px; border-radius
 .status-tag.ranked { border-color: var(--accent); color: var(--accent); }
 .attention-list li { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 .attention-list li .what { flex: 1; min-width: 200px; }
+
+/* Concerns: executive view first */
+.attention-group h3 { font-size: 15px; margin: 4px 0 2px; }
+.concern { display: grid; gap: 6px; }
+.concern h4 { font-size: 13px; margin: 6px 0 0; }
+.concern-title { font-size: 15px; }
+.concern.compact { gap: 4px; }
+.assess summary { cursor: pointer; color: var(--accent); }
