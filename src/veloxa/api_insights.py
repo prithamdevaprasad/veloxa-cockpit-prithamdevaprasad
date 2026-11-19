@@ -27,6 +27,10 @@ from .db import connect, tenant_tx
 from .temporal import Mode, resolve_basis
 
 SERIES_CLASSES = ("internal", "confidential")
+# Privacy-safe aggregates over PERSONAL sources: counts only, by columns that never identify a person. A requisition
+# status or team is about a role opening, not an individual; names, notes and pipeline columns are never grouped.
+# Proposed 19 Nov 2026 for owner confirmation.
+PERSONAL_COUNT_COLUMNS = {"hiring_tracker": {"Status", "Team"}, "recruiting": {"Status", "Department"}}
 _NUM = re.compile(r"^-?\d+(\.\d+)?$")
 
 
@@ -114,9 +118,19 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
                     "SELECT system, data_class, count(DISTINCT record_id) AS n, min(source_path) AS file,"
                     " (array_agg(payload))[1] AS sample FROM ledger.visible_source_record WHERE kind = 'export'"
                     " GROUP BY system, data_class ORDER BY system").fetchall()
-        return {"sources": [{"system": r["system"], "rows": r["n"], "file": r["file"].rsplit("/", 1)[-1],
-                             "columns": list(r["sample"].keys())} for r in rows
-                            if r["data_class"] in SERIES_CLASSES and allowed(p, r["system"], r["data_class"])]}
+        out = []
+        for r in rows:
+            if not allowed(p, r["system"], r["data_class"]):
+                continue
+            if r["data_class"] in SERIES_CLASSES:
+                cols = list(r["sample"].keys())
+            elif r["data_class"] == "personal" and r["system"] in PERSONAL_COUNT_COLUMNS:
+                cols = [c for c in r["sample"] if c in PERSONAL_COUNT_COLUMNS[r["system"]]]   # counts by these only
+            else:
+                continue
+            out.append({"system": r["system"], "rows": r["n"], "file": r["file"].rsplit("/", 1)[-1], "columns": cols,
+                        **({"counts_only": True} if r["data_class"] == "personal" else {})})
+        return {"sources": out}
 
     @app.get("/v1/analytics/series")
     def series(system: str = Query(pattern=r"^[a-z][a-z0-9_]{1,39}$"), x: str = Query(max_length=60),
@@ -136,7 +150,9 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
         if not rows:
             return JSONResponse(status_code=404, content={"error": "not_found", "detail": "no admitted rows"})
         cls = {r["data_class"] for r in rows}
-        if not cls <= set(SERIES_CLASSES) or not all(allowed(p, system, c) for c in cls):
+        safe_personal = (cls == {"personal"} and agg == "count" and x in PERSONAL_COUNT_COLUMNS.get(system, set())
+                         and (split is None or split in PERSONAL_COUNT_COLUMNS[system]))
+        if (not (cls <= set(SERIES_CLASSES) or safe_personal)) or not all(allowed(p, system, c) for c in cls):
             return JSONResponse(status_code=403, content={"error": "not_permitted",
                                                           "detail": "this source is not chartable for you"})
         if agg == "sum" and not y:
@@ -161,4 +177,4 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
         return {"system": system, "x": x, "y": y, "agg": agg, "split": split, "points": points,
                 "records": len(rows), "skipped_non_numeric": skipped,
                 "sources": sorted({r["source_path"].rsplit("/", 1)[-1] for r in rows}),
-                "basis": f"computed from {len(rows)} admitted rows at K={basis.batch_seq}"}
+                "basis": f"computed from {len(rows)} admitted rows (records up to release {basis.batch_seq})"}

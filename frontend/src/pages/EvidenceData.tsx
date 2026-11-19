@@ -100,8 +100,13 @@ function UploadForm({ onDone }: { onDone: () => void }) {
       {types.state === "loading" && <Loading lines={2} />}
       {types.state === "error" && <ErrorState error={types.error} />}
       {types.state === "ready" && (types.data.source_types.length === 0
-        ? <Guidance title="No approved source types">An admission authoriser approves each source type (its
-            department and data classification) before anyone can contribute it.</Guidance>
+        ? <Guidance title="Uploads are not set up for this workspace">
+            {(types.data.release_packs?.sealed_releases ?? 0) > 0
+              ? <>This workspace's records ({types.data.release_packs!.sealed_releases} releases) were admitted from
+                  release packs under the governed catalogue ({types.data.release_packs!.catalogue_rules} source rules).
+                  {" "}</> : null}
+            To contribute new files here, an admission authoriser first approves each upload source type (its
+            department and data classification) in Administration.</Guidance>
         : <form className="stack" onSubmit={submit}>
             <div className="row">
               <label className="field">Source type

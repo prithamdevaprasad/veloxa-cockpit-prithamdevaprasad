@@ -1,65 +1,95 @@
 import { useState } from "react";
-import { api, ApiError } from "../api/client";
-import { product } from "../api/product";
-import type { Explanation } from "../api/product-types";
-import { ExplanationView } from "../ui/Explanation";
-import type { Scenario } from "../api/types";
+import { api, ApiError, get, request } from "../api/client";
 import { useApi } from "../api/useApi";
 import { Badge, Button, EmptyState, ErrorState, Loading, PageHead, Section } from "../ui";
 
 
-/** Deterministic "what if" analysis: observed facts, derived implications, the assumption and the unknowns are
- * shown separately. No probability, score or ranking exists to show. */
-export function ScenariosPage() {
-  const [list, reload] = useApi((s) => api.scenarioSubjects(s), []);
-  const [object, setObject] = useState("");
-  const [shift, setShift] = useState(30);
-  const [result, setResult] = useState<Scenario | null>(null);
-  const [ex, setEx] = useState<Explanation | null>(null);
-  const [error, setError] = useState<ApiError | null>(null);
+interface Subject { name: string; kind: string; date: string | null; original_date: string | null; status: string | null }
+interface ChangeOut {
+  subject: string; kind: string; baseline: { date: string | null; original_date: string | null; status: string | null };
+  assumption: string; new_date: string | null; calculations: string[];
+  affected_issues: { total: number; open: number; by_status: Record<string, number> };
+  dependencies: { blocked_by: string; issues: number }[]; evidence: string[];
+}
+interface RunOut { changes: ChangeOut[]; order_after_changes: string | null; unknowns: string[]; isolated: boolean }
+const day = (d: string | null) => (d ? new Date(d + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }) : "no recorded date");
 
+/** What-if analysis over every release and named commitment in the admitted evidence. Several changes at once, by
+ * free text or by rows; read-only and isolated: nothing is saved to company records or Jira; no probability. */
+export function ScenariosPage() {
+  const [subs, reload] = useApi((s) => get<{ subjects: Subject[] }>("/v1/scenarios/subjects", s), []);
+  const [text, setText] = useState("");
+  const [rows, setRows] = useState<{ subject: string; shift_days: number }[]>([]);
+  const [out, setOut] = useState<RunOut | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
-  async function run(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null); setBusy(true); setResult(null); setEx(null);
-    try { const r = await product.explainScenario(object, shift); setResult(r.scenario); setEx(r.explanation); }
+
+  async function run(body: object) {
+    setError(null); setBusy(true); setOut(null);
+    try { setOut(await request<RunOut>("POST", "/v1/scenarios/run", body)); }
     catch (err) { setError(err instanceof ApiError ? err : new ApiError(0, "unknown", String(err))); }
     finally { setBusy(false); }
   }
-
+  const list = subs.state === "ready" ? subs.data.subjects : [];
   return (
     <>
-      <PageHead title="What-if Analysis" intro="Test what happens if a commitment moves. Veloxa explains what was
-        committed, the change you are testing, what it can calculate and what the records cannot tell you. It does not
-        predict and gives no probability." />
-      <Section title="Move a commitment" subtitle={list.state === "ready" ? list.data.read_basis.banner : undefined}>
-        {list.state === "loading" && <Loading lines={2} />}
-        {list.state === "error" && <ErrorState error={list.error} onRetry={reload} />}
-        {list.state === "ready" && (list.data.commitments.length === 0 ? (
-          <EmptyState title="No named commitments">The admitted evidence names no commitment to analyse.</EmptyState>
-        ) : (
-          <form className="row" style={{ alignItems: "flex-end" }} onSubmit={run}>
-            <label className="field">Commitment
-              <select className="input" value={object} onChange={(e) => setObject(e.target.value)} required>
-                <option value="" disabled>Select</option>
-                {list.data.commitments.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </label>
-            <label className="field">Shift (days)
-              <input className="input" type="number" min={-730} max={730} value={shift}
-                     onChange={(e) => setShift(Number(e.target.value))} />
-            </label>
-            <Button variant="primary" type="submit" disabled={!object || busy}>{busy ? "Analysing…" : "Analyse"}</Button>
-          </form>
-        ))}
+      <PageHead title="What-if Analysis" intro="Test what happens if one or more releases or commitments move. Veloxa
+        shows the baseline, your assumption, the work and dependencies affected, what it can calculate and what the
+        records cannot tell you. Nothing is saved to company records or Jira, and nothing is predicted." />
+      <Section title="Describe a scenario" subtitle="For example: move Orbit Core 3.0 by 3 weeks and Pulse 1.5 earlier by 5 days.">
+        {subs.state === "loading" && <Loading lines={2} />}
+        {subs.state === "error" && <ErrorState error={subs.error} onRetry={reload} />}
+        {subs.state === "ready" && (list.length === 0
+          ? <EmptyState title="Nothing to analyse">The admitted evidence names no release or commitment.</EmptyState>
+          : <div className="stack">
+              <form className="row" onSubmit={(e) => { e.preventDefault(); if (text.trim()) void run({ text }); }}>
+                <input className="input" style={{ flex: 1 }} value={text} onChange={(e) => setText(e.target.value)}
+                       aria-label="Scenario" placeholder={`e.g. move ${list[0].name} by 2 weeks`} />
+                <Button variant="primary" type="submit" disabled={!text.trim() || busy}>{busy ? "Analysing…" : "Analyse"}</Button>
+              </form>
+              <div className="small muted">Releases and commitments in the records (click to add a change):</div>
+              <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>{list.map((s) => (
+                <button key={s.name} className="chip" title={s.date ? `Due ${day(s.date)}` : "No recorded date"}
+                        onClick={() => setRows((r) => r.some((x) => x.subject === s.name) || r.length >= 6 ? r
+                          : [...r, { subject: s.name, shift_days: 14 }])}>{s.name}</button>))}</div>
+              {rows.length > 0 && <div className="stack">
+                {rows.map((r, i) => (
+                  <div key={r.subject} className="row" style={{ alignItems: "center" }}>
+                    <span style={{ minWidth: 180 }}>{r.subject}</span>
+                    <label className="small">Shift (days, minus = earlier){" "}
+                      <input className="input" type="number" min={-730} max={730} value={r.shift_days} style={{ width: 110 }}
+                             onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, shift_days: Number(e.target.value) } : x))} /></label>
+                    <button className="link small" onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
+                  </div>))}
+                <div><Button variant="primary" disabled={busy} onClick={() => run({ changes: rows })}>Analyse these changes</Button></div>
+              </div>}
+            </div>)}
       </Section>
       {error && <Section><ErrorState error={error} /></Section>}
-      {result && ex && (
-        <Section title={result.business_object} subtitle={result.read_basis.banner}>
-          <ExplanationView ex={{ e: ex, error: null, loading: false, retry: () => undefined }} />
-        </Section>
-      )}
-
+      {out && (
+        <Section title="Scenario result" subtitle="A hypothesis, isolated from real commitments.">
+          <div className="stack">
+            {out.changes.map((c) => (
+              <article key={c.subject} className="concern" aria-label={`Scenario for ${c.subject}`}>
+                <strong className="concern-title">{c.subject}</strong>
+                <p className="small"><strong>Baseline:</strong> due {day(c.baseline.date)}
+                  {c.baseline.original_date && c.baseline.original_date !== c.baseline.date ? ` (originally ${day(c.baseline.original_date)})` : ""}
+                  {c.baseline.status ? `; status: ${c.baseline.status}` : ""}.</p>
+                <p className="small"><strong>Assumption:</strong> {c.assumption}</p>
+                {c.calculations.length > 0 && <><h4>What Veloxa can calculate</h4>
+                  <ul className="bullets small">{c.calculations.map((x) => <li key={x}>{x}</li>)}</ul></>}
+                <h4>Affected work</h4>
+                <p className="small">{c.affected_issues.total
+                  ? `${c.affected_issues.open} of ${c.affected_issues.total} tracker issues are still open (${Object.entries(c.affected_issues.by_status).map(([k, v]) => `${v} ${k}`).join(", ")}).`
+                  : "No tracker issues are linked to this subject."}</p>
+                {c.dependencies.length > 0 && <><h4>Recorded dependencies</h4>
+                  <ul className="bullets small">{c.dependencies.map((d) => <li key={d.blocked_by}>{d.blocked_by}: blocks {d.issues} issue{d.issues === 1 ? "" : "s"}</li>)}</ul></>}
+              </article>))}
+            {out.order_after_changes && <p className="small"><strong>Order after the changes:</strong> {out.order_after_changes}.</p>}
+            <h4>What the records cannot tell you</h4>
+            <ul className="bullets small muted">{out.unknowns.map((u) => <li key={u}>{u}</li>)}</ul>
+          </div>
+        </Section>)}
     </>
   );
 }

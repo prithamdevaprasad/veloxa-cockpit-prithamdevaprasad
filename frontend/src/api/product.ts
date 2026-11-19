@@ -30,7 +30,7 @@ export const product = {
     request("POST", `/v1/threads/${enc(id)}/${archive ? "archive" : "restore"}`),
   evidence: (recordId: string, s?: AbortSignal) => get<P.EvidenceDetail>(`/v1/evidence/${enc(recordId)}`, s),
   departments: (s?: AbortSignal) => get<{ departments: P.Department[] }>("/v1/departments", s),
-  sourceTypes: (s?: AbortSignal) => get<{ source_types: P.SourceType[] }>("/v1/source-types", s),
+  sourceTypes: (s?: AbortSignal) => get<{ source_types: P.SourceType[]; release_packs?: { sealed_releases: number; catalogue_rules: number } }>("/v1/source-types", s),
   submissions: (state?: string, s?: AbortSignal) => get<P.SubmissionList>("/v1/submissions" + qs({ state }), s),
   submission: (id: string, s?: AbortSignal) => get<P.SubmissionDetail>(`/v1/submissions/${enc(id)}`, s),
   submit: (body: { department_id: string; source_type: string; title: string; data_period?: string;

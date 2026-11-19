@@ -52,6 +52,14 @@ def assert_unprivileged(env: Mapping[str, str] | None = None) -> None:
         )
 
 
+class ScenarioRun(BaseModel):
+    """One or more what-if changes, structured or as free text (read-only; nothing is saved)."""
+    model_config = ConfigDict(extra="forbid")
+    text: str | None = Field(default=None, max_length=500)
+    changes: list[dict] | None = Field(default=None, max_length=6)
+    as_known_at: str | None = None
+
+
 class AskRequest(BaseModel):
     """The client never passes a tenant or a principal (§19.1); unknown fields are rejected."""
     model_config = ConfigDict(extra="forbid")
@@ -434,6 +442,44 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             except ValueError as e:
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
             return graph.build(conn, basis, tz)
+
+    @app.get("/v1/scenarios/subjects")
+    def scenario_subjects_all(as_known_at: str | None = None, authorization: str | None = Header(default=None)):
+        """Every release and named commitment in the admitted evidence (scenario subjects), discovered at the basis."""
+        from .risk import scenario_engine
+
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
+            try:
+                basis = _scenario_basis(conn, as_known_at, tenant_id, tz)
+            except ValueError as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
+            return {"subjects": scenario_engine.subjects(conn, basis, tz) if basis.batch_seq else [],
+                    "read_basis": {"batch_seq": basis.batch_seq}}
+
+    @app.post("/v1/scenarios/run")
+    def scenario_run(body: ScenarioRun, authorization: str | None = Header(default=None)):
+        """One or more simultaneous changes (structured or free text). Read-only and isolated: nothing is saved to
+        company records or Jira; no probability or forecast."""
+        from .risk import scenario_engine
+
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
+            try:
+                basis = _scenario_basis(conn, body.as_known_at, tenant_id, tz)
+                changes = body.changes
+                if not changes and body.text:
+                    names = [s["name"] for s in scenario_engine.subjects(conn, basis, tz)]
+                    changes = scenario_engine.parse(body.text, names)
+                return scenario_engine.run(conn, basis, tz, changes or [])
+            except (ValueError, scenario_engine.ScenarioError) as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_scenario", "detail": str(e)})
 
     @app.post("/v1/scenarios/commitment-shift")
     def scenario_shift(body: ShiftRequest, authorization: str | None = Header(default=None)):

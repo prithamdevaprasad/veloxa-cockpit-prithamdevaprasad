@@ -403,7 +403,8 @@ def _refused(p: policy.Policy, basis: ReadBasis, interpretation: str) -> dict:
 _GENERIC = {"version", "engineering", "company", "update", "updates", "status", "team", "teams", "people", "morning",
             "today", "week", "month", "year", "one", "two", "three", "data", "report", "record", "records", "thing",
             "things", "work", "news", "latest", "new", "time", "board", "call", "said", "say", "know", "mean",
-            "means", "veloxa", "information", "details", "question", "please", "tell", "show", "give"}
+            "means", "veloxa", "information", "details", "question", "please", "tell", "show", "give", "says", "saying",
+            "still", "unknown", "known", "anything", "something", "about", "what", "which"}
 _FORECAST_WORDS = re.compile(r"\b(forecast\w*|project(?:ed|ion)s?|predict\w*)\b", re.I)
 _QUANTITY = re.compile(r"^\s*(what(?:'s| is| was| will)?\b|how (?:much|many)\b)", re.I)
 _FUTURE = re.compile(r"\b(will\b|going to\b|next (?:year|quarter|month|fy)\b|expected to\b|by (?:the )?end of next)",

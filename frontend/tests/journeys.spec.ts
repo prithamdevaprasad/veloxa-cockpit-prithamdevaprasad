@@ -118,7 +118,7 @@ test("Scenarios never predict and say when the evidence names nothing", async ({
   await signIn(page);
   await page.goto("/#/scenarios");                                               // the old route still works
   await expect(page.getByRole("heading", { name: "What-if Analysis" })).toBeVisible();
-  await expect(page.getByText("No named commitments")).toBeVisible();          // the synthetic D1 states none
+  await expect(page.getByText("Nothing to analyse")).toBeVisible();            // the synthetic D1 states none
   await page.goto("/#/intelligence");
   await page.getByRole("tab", { name: "Dependencies & warnings" }).click();
   const deps = page.getByRole("region", { name: "Dependencies" });

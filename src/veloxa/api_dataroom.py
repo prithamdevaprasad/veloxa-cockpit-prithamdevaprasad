@@ -123,7 +123,19 @@ def register(app, *, state, principal_of, now_fn, store_factory=LocalContentStor
                                     " records, file_glob, key_columns, contract, decision_record, approved_by,"
                                     " created_at FROM policy.catalogue_rule_current WHERE tenant_id = %s AND active"
                                     " ORDER BY department_id, title", (p.tenant_id,)).fetchall()
-        return {"source_types": [_jsonable(dict(r)) for r in rows]}
+            from . import ledger
+
+            releases = len(ledger.sealed_releases(conn, p.tenant_id))
+        from .catalogue import load_catalogue
+
+        try:
+            pack_rules = len(load_catalogue())
+        except Exception:  # noqa: BLE001 - no file catalogue in this deployment
+            pack_rules = 0
+        # Two governed intake paths: data-room uploads need approved source types (above); release packs are admitted
+        # under the file catalogue by an operator. Saying which one this workspace uses avoids a misleading "empty".
+        return {"source_types": [_jsonable(dict(r)) for r in rows],
+                "release_packs": {"sealed_releases": releases, "catalogue_rules": pack_rules}}
 
     @app.post("/v1/admin/source-types")
     def approve_source_type(body: SourceTypeIn, authorization: str | None = Header(default=None)):

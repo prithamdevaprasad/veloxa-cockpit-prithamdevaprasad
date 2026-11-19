@@ -100,10 +100,21 @@ def _time(ft) -> dict | None:
             "valid_basis": str(ft.valid_basis), "extracted_at": ft.extracted_at.isoformat()}
 
 
+def _grouped(found: list[dict]) -> list[dict]:
+    """One conflict per subject: pairwise disagreements about the same figure become one entry listing every source
+    value once (each keeps its own period and provenance). No value is chosen."""
+    out: dict[str, dict] = {}
+    for d in found:
+        g = out.setdefault(d["subject"], {**d, "claims": []})
+        seen = {(c["record_id"], str(c["value"])) for c in g["claims"]}
+        g["claims"] += [c for c in d["claims"] if (c["record_id"], str(c["value"])) not in seen]
+    return list(out.values())
+
+
 def register(conn, basis, tz: str) -> list[dict]:
     """Every disagreement visible at `basis`, with per-side provenance and time. Deterministic order."""
     formal, spoken, unparsed = _observations(conn, basis, tz)
-    found = disagreements(formal, spoken, unparsed, None)
+    found = _grouped(disagreements(formal, spoken, unparsed, None))
     times = {o.record_id: o.fact_time for o in formal + spoken}
     ids = sorted({c["record_id"] for d in found for c in d["claims"]})
     with tenant_tx(conn, basis.tenant_id, batch_seq=basis.batch_seq):

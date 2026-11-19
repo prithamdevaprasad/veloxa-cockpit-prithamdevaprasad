@@ -31,6 +31,9 @@ class ScenarioError(ValueError):
     pass
 
 
+from .graph import UNNAMED  # noqa: E402
+
+
 def _c1(conn: psycopg.Connection, basis: ReadBasis, tz: str):
     result = registry.run(conn, basis, registry.context_for(basis, tz, [], []))
     return [s for s in result.signals if s.criterion == Criterion.C1]
@@ -38,7 +41,7 @@ def _c1(conn: psycopg.Connection, basis: ReadBasis, tz: str):
 
 def commitments(conn: psycopg.Connection, basis: ReadBasis, tz: str) -> list[str]:
     """Named commitments the evidence states at this basis (unresolved subjects are never offered)."""
-    return sorted({s.subject for s in _c1(conn, basis, tz) if s.subject and s.subject != "unresolved"
+    return sorted({s.subject for s in _c1(conn, basis, tz) if s.subject and s.subject not in UNNAMED
                    and s.signal_type in (SignalType.COMMITMENT, SignalType.DELIVERY_DELAY,
                                          SignalType.COMMITMENT_STATUS)})
 

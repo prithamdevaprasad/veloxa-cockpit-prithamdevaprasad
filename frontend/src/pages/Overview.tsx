@@ -146,12 +146,13 @@ function HiringHealth({ sources, loading }: { sources: ChartSource[]; loading: b
     : Promise.resolve(null), [sys]);
   const pts = s.state === "ready" && s.data ? s.data.points : [];
   const total = pts.reduce((a, p) => a + p.value, 0);
-  const filled = pts.filter((p) => /filled|hired|closed/i.test(p.x)).reduce((a, p) => a + p.value, 0);
+  const filled = pts.filter((p) => /^(filled|hired)$/i.test(p.x.trim())).reduce((a, p) => a + p.value, 0);
   return (
-    <Section title="Hiring health" aria-label="Hiring health" subtitle="Requisitions by recorded status.">
+    <Section title="Hiring health" aria-label="Hiring health"
+             subtitle="Requisition counts by recorded status (counts only; no names or notes).">
       {loading || s.state === "loading" ? <Loading lines={3} /> : !sys || !total
-        ? <Guidance title="Not charted">Requisition records are personal data, so they are never charted. Ask
-            Veloxa about hiring to get answers with their sources.</Guidance>
+        ? <Guidance title="Not charted">No requisition counts are available to you. Ask Veloxa about hiring to get
+            answers with their sources.</Guidance>
         : <>
             <div className="row" style={{ justifyContent: "space-between" }}>
               <span className="small muted">Filled / all requisitions</span>

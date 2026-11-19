@@ -42,6 +42,9 @@ HIDDEN = ("sensitive_personal", "payroll_aggregate")
 C1_TYPES = (SignalType.COMMITMENT, SignalType.COMMITMENT_STATUS, SignalType.DELIVERY_DELAY)
 
 
+UNNAMED = ("unresolved", "unresolved commitment")      # detector placeholders: not a real commitment
+
+
 def _day(s) -> date:
     return s.recorded_on or s.valid_from or date.min
 
@@ -69,7 +72,8 @@ def build(conn: psycopg.Connection, basis: ReadBasis, tz: str) -> dict:
             records.setdefault(e.record_id, {"id": e.record_id, "type": "record", "kind": e.kind,
                                              "system": e.system, "data_class": e.data_class,
                                              "batch_seq": e.batch_seq, "source_path": e.source_path})
-        if s.criterion == Criterion.C1 and s.signal_type in C1_TYPES and s.subject and s.subject != "unresolved":
+        if s.criterion == Criterion.C1 and s.signal_type in C1_TYPES and s.subject \
+                and s.subject not in UNNAMED:
             by_commitment[s.subject].append(s)
             for rid in rows:
                 edges.append({"from": f"commitment:{s.subject}", "to": rid, "relation": "stated_in",
