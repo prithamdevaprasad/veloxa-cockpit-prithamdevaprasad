@@ -131,8 +131,11 @@ type Entry = { q: string; key: string; turn?: AgentTurn; error?: ApiError; cance
 const TASK = /\b(task|ticket|jira|todo|to-do)\b/i;
 const DO = /\b(add|create|give|assign|make|need|open|log|raise|put|set up|update|change|move)\b/i;
 
-export function Conversation({ session, history, onClosed, opening }: { session: AgentSession;
-  history: SessionDetail | null; onClosed: () => void; opening?: string }) {
+export interface TestProposal { summary: string; description: string; project: string; assignee_account_id?: string;
+  assignee_basis?: string }
+
+export function Conversation({ session, history, onClosed, opening, proposal }: { session: AgentSession;
+  history: SessionDetail | null; onClosed: () => void; opening?: string; proposal?: TestProposal }) {
   const [msg, setMsg] = useState("");
   const [log, setLog] = useState<Entry[]>(() => (history?.turns ?? []).map((t) => ({
     q: t.message ?? "(question not recorded)", key: "", turn: t })));
@@ -178,9 +181,15 @@ export function Conversation({ session, history, onClosed, opening }: { session:
           <div key={i} className="stack">
             <div className="bubble me">{l.q}</div>
             {l.task ? <>
-                <div className="bubble agent">I can't act for anyone, but you can create or update the Jira task
-                  right here. Fill in what you need and check the preview before it is written.</div>
-                <JiraTaskCard draft={{ description: `Requested in a Veloxa interview: “${l.q}”` }} />
+                {proposal ? <div className="bubble agent">I've prepared the task below for {proposal.project}. Check the
+                  title, description and assignee, then preview it. Nothing is written to Jira until you confirm.</div>
+                  : <div className="bubble agent">I can't act for anyone, but I've filled in the Jira task from what you
+                  wrote. Check it, then preview it. Nothing is written until you confirm.</div>}
+                <JiraTaskCard draft={proposal
+                  ? { summary: proposal.summary, description: proposal.description, project: proposal.project,
+                      assigneeAccountId: proposal.assignee_account_id, assigneeBasis: proposal.assignee_basis,
+                      source: "Proposed by a test-only agent. It represents no employee." }
+                  : { request: l.q, description: `Requested in a Veloxa interview: “${l.q}”` }} />
               </> : l.cancelled ? (
               <div className="callout warn small">Cancelled. The server may still finish this turn; Retry sends the
                 same request, which returns that turn instead of creating a new one.

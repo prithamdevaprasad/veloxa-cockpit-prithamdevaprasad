@@ -17,11 +17,13 @@ by default they FAIL CLOSED with 401; only the explicit local development fixtur
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from collections.abc import Callable, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import FastAPI, Header, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -753,6 +755,27 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
                 "agents": [{"agent_id": a.agent_id, "category": a.category, "activation": a.activation,
                             "config_version": a.config_version, "assigned": a.represented_person is not None,
                             "tools": list(a.tools)} for a in agents]}
+
+    @app.get("/v1/agents/test-fixtures")
+    def agent_test_fixtures(authorization: str | None = Header(default=None)):
+        """Removable test-only agents (reserved syn- namespace, synthetic_test activation) and their task proposals,
+        read from a deployment-local file outside the repository (VELOXA_TEST_AGENTS_FILE). They are never counted
+        among the 14 agents and represent no employee."""
+        from .agents import registry
+
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            live = {a.agent_id for a in registry.listing(conn, principal.tenant_id)
+                    if a.agent_id.startswith("syn-") and a.activation == "synthetic_test"}
+        path = os.environ.get("VELOXA_TEST_AGENTS_FILE")
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8")) if path else {}
+        except (OSError, ValueError):
+            data = {}
+        return {"agents": [{"agent_id": k, "name": str(v.get("name") or k), "note": v.get("note"),
+                            "proposal": v.get("proposal")} for k, v in data.items() if k in live]}
 
     @app.post("/v1/agents/{agent_id}/sessions")
     def open_agent_session(agent_id: str, body: SessionRequest, authorization: str | None = Header(default=None)):

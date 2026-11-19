@@ -446,3 +446,36 @@ test("People is the HR directory; AI assistants are a separate, disclosed sectio
   await expect(page.getByRole("region", { name: "People overview" })).toHaveCount(0);     // no second roster
   await expect(page.getByRole("region", { name: "Meet your AI team" })).toContainText("not the employees");
 });
+
+test("the Jira task card fills from plain words, uses Jira's own people and dates, and writes nothing unconfirmed",
+  async ({ page }) => {
+  const json = (body: unknown) => ({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  const writes: string[] = [];
+  await page.route("**/v1/integrations/jira/**", (r) => {
+    const u = r.request().url();
+    if (r.request().method() === "POST") { writes.push(u); return r.fulfill(json({})); }
+    if (u.includes("/projects/VIT/issue-types/10016/date-fields"))
+      return r.fulfill(json({ due: true, start_field: "customfield_10015", start_name: "Start date" }));
+    if (u.includes("/projects/VIT/issue-types")) return r.fulfill(json({ issue_types: [{ id: "10016", name: "Task" }] }));
+    if (u.includes("/projects/VIT/assignable"))
+      return r.fulfill(json({ users: [{ account_id: "acc-1", name: "Alex Example" }, { account_id: "acc-2", name: "Sam Sample" }] }));
+    if (u.endsWith("/projects")) return r.fulfill(json({ projects: [{ key: "VIT", name: "Veloxa IT" }] }));
+    return r.fulfill(json({}));
+  });
+  await signIn(page);
+  await page.getByRole("button", { name: "Ask Veloxa (Ctrl+K)" }).click();
+  await page.getByRole("dialog", { name: "Ask Veloxa" }).getByRole("button", { name: "Jira task" }).click();
+  const card = page.getByRole("region", { name: "Jira task" });
+  await card.getByLabel("Describe it in your own words").fill(
+    "Create a task to confirm the GA date with the release owner, assign it to Alex, due 2099-03-01, starting 2099-02-20");
+  await card.getByRole("button", { name: "Fill the form" }).click();
+  await expect(card.getByLabel("Title")).toHaveValue("Confirm the GA date with the release owner");
+  await expect(card.getByLabel("Due date")).toHaveValue("2099-03-01");
+  await expect(card.getByLabel("Start date")).toHaveValue("2099-02-20");        // only because Jira reports the field
+  await expect(card.getByLabel("Assignee")).toHaveValue("acc-1");               // from Jira's own assignable list
+  await expect(card).toContainText("Dates to write: due 2099-03-01 and start 2099-02-20");
+  await card.getByLabel("Describe it in your own words").fill("Create a task to check backups, assign it to me");
+  await card.getByRole("button", { name: "Fill the form" }).click();
+  await expect(card).toContainText("doesn't assume which Jira account is yours");  // "me" is never guessed
+  expect(writes).toEqual([]);                                                    // nothing previewed or written
+});

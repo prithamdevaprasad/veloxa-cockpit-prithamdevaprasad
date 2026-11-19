@@ -363,6 +363,7 @@ class Jira:
         name = lambda x: (x or {}).get("displayName") or (x or {}).get("name")  # noqa: E731
         return {"key": i["key"], "url": f"{site}/browse/{i['key']}" if site else None,
                 "summary": f.get("summary"), "status": name(f.get("status")), "assignee": name(f.get("assignee")),
+                "assignee_account_id": (f.get("assignee") or {}).get("accountId"),
                 "due_date": f.get("duedate"), "issue_type": name(f.get("issuetype")),
                 "project": (f.get("project") or {}).get("key"), "priority": name(f.get("priority")),
                 "description": _plain(f.get("description")), "created": f.get("created"),
@@ -409,7 +410,7 @@ class Jira:
         names only to the UI)."""
         scope = {"project": project} if project else {"issueKey": key}
         r = self.call(tenant, "GET", "/rest/api/3/user/assignable/search",
-                      params={**scope, "query": query[:60], "maxResults": 10})
+                      params={**scope, "query": query[:60], "maxResults": 50})
         return [{"account_id": u["accountId"], "name": u.get("displayName")} for u in (r if isinstance(r, list) else [])
                 if u.get("accountId") and u.get("active", True)]
 
@@ -429,6 +430,33 @@ class Jira:
                 break
             start += 100
         return out
+
+    def lookup_user(self, tenant: str, query: str, project: str | None = None) -> list[dict]:
+        """Exact lookup on the connected site. Jira's /user/search matches the query against display name and
+        e-mail; we only report an e-mail match when Jira returned the address and it is exactly equal (case
+        insensitive). Never guesses an account; the caller sees what Jira returned."""
+        q = query.strip()[:120]
+        r = self.call(tenant, "GET", "/rest/api/3/user/search", params={"query": q, "maxResults": 20})
+        assignable = ({u["account_id"] for u in self.assignable(tenant, "", q, project=project)} if project
+                      else set())
+        out = []
+        for u in r if isinstance(r, list) else []:
+            if not u.get("accountId"):
+                continue
+            mail = u.get("emailAddress")
+            out.append({"account_id": u["accountId"], "name": u.get("displayName"), "active": u.get("active"),
+                        "account_type": u.get("accountType"), "email_visible": bool(mail),
+                        "email_exact_match": bool(mail) and mail.strip().lower() == q.lower(),
+                        "assignable_in_project": (u["accountId"] in assignable) if project else None})
+        return out
+
+    def date_fields(self, tenant: str, project: str, type_id: str) -> dict:
+        """Which date fields the site really lets us set on create: Jira's system `duedate`, and a start-date
+        field only when this site's create screen exposes one (it is a custom field whose ID varies by site)."""
+        meta = self.create_fields(tenant, project, type_id)
+        start = next((k for k, m in meta.items() if (m.get("name") or "").strip().lower() == "start date"), None)
+        return {"due": "duedate" in meta, "start_field": start,
+                "start_name": meta[start]["name"] if start else None}
 
     def overdue(self, tenant: str, project: str | None = None, limit: int = 25) -> list[dict]:
         scope = f'project = "{project}" AND ' if project else ""
@@ -469,6 +497,13 @@ class Jira:
                             409, "duplicate")
         show = {"Project": project, "Issue type": types[issue_type_id], "Summary": summary.strip(),
                 **{meta[k]["name"] or k: v for k, v in extra.items()}}
+        if "assignee" in extra:                            # only a user Jira lists as assignable in this project
+            acc = (extra["assignee"] or {}).get("accountId")
+            names = {u["account_id"]: u["name"] for u in self.assignable(tenant, "", "", project=project)}
+            if not acc or acc not in names:
+                raise JiraError("That person is not an assignable user in this project in Jira.", 422,
+                                "not_assignable")
+            show[meta["assignee"]["name"] or "Assignee"] = f"{names[acc]} (Jira account {acc})"
         pid = self.previews.put({"tenant": tenant, "principal": principal, "op": "create", "fields": fields})
         return {"preview_id": pid, "operation": "create", "project": project, "issue_type": types[issue_type_id],
                 "fields": show, "description": description.strip() or None, "expires_in_s": PREVIEW_TTL,
@@ -513,10 +548,32 @@ class Jira:
         site = self._site_url(tenant)
         if p["op"] == "create":
             r = self.call(tenant, "POST", "/rest/api/3/issue", json={"fields": p["fields"]})
-            return {"operation": "create", "key": r.get("key"), "url": f"{site}/browse/{r.get('key')}"}
+            out = {"operation": "create", "key": r.get("key"), "url": f"{site}/browse/{r.get('key')}"}
+            return {**out, "read_back": self._read_back(tenant, r.get("key"), p["fields"])}
         if p["fields"]:
             self.call(tenant, "PUT", f"/rest/api/3/issue/{p['key']}", json={"fields": p["fields"]})
         if p["comment"]:
             self.call(tenant, "POST", f"/rest/api/3/issue/{p['key']}/comment", json={"body": _adf(p["comment"])})
         return {"operation": "update", "key": p["key"], "url": f"{site}/browse/{p['key']}",
-                "changed": sorted(p["fields"]), "commented": bool(p["comment"])}
+                "changed": sorted(p["fields"]), "commented": bool(p["comment"]),
+                "read_back": self._read_back(tenant, p["key"], p["fields"])}
+
+    def _read_back(self, tenant: str, key: str | None, sent: dict) -> dict:
+        """Read the issue back from Jira and compare what we sent with what Jira now holds. Success is reported
+        per field only when Jira's own value matches."""
+        if not key:
+            return {"verified": False, "fields": {}}
+        custom = [k for k in sent if k.startswith("customfield_")]
+        i = self.call(tenant, "GET", f"/rest/api/3/issue/{key}",
+                      params={"fields": ",".join(["assignee", "duedate", "summary", *custom])})
+        f = i.get("fields", {})
+        checks: dict[str, dict] = {}
+        if "assignee" in sent:
+            want = (sent["assignee"] or {}).get("accountId")
+            got = (f.get("assignee") or {}).get("accountId")
+            checks["assignee"] = {"sent": want, "jira": got, "name": (f.get("assignee") or {}).get("displayName"),
+                                  "ok": want == got}
+        for k in ("duedate", "summary", *custom):
+            if k in sent:
+                checks[k] = {"sent": sent[k], "jira": f.get(k), "ok": sent[k] == f.get(k)}
+        return {"verified": all(c["ok"] for c in checks.values()), "fields": checks}

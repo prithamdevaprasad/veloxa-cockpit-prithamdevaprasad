@@ -68,8 +68,15 @@ export const product = {
   people: (s?: AbortSignal) => get<{ people: P.Person[]; count: number }>("/v1/people", s),
   worry: (asKnownAt?: string, s?: AbortSignal) => get<P.Worry>("/v1/worry" + qs({ as_known_at: asKnownAt }), s),
   findings: (s?: AbortSignal) => get<{ findings: P.Finding[]; hidden_for_access: number }>("/v1/findings", s),
-  findingEvent: (id: string, state: string, note?: string) =>
-    request<{ state: string }>("POST", `/v1/findings/${enc(id)}/events`, { state, ...(note ? { note } : {}) }),
+  findingEvent: (id: string, state: string, note?: string, responsible?: string) =>
+    request<{ state: string }>("POST", `/v1/findings/${enc(id)}/events`,
+      { state, ...(note ? { note } : {}), ...(responsible ? { responsible } : {}) }),
+  ackNotification: (nid: string) =>
+    request<{ at: string; already: boolean }>("POST", `/v1/notifications/${enc(nid)}/ack`),
+  followUps: (s?: AbortSignal) => get<{ follow_ups: P.FollowUp[] }>("/v1/follow-ups", s),
+  recordFollowUp: (body: { item_id: string; recommendation: string; status: P.FollowUp["status"]; action_id?: string;
+                           finding_id?: string; jira_key?: string; jira_assignee?: string; note?: string }) =>
+    request<{ action_id: string; status: string }>("POST", "/v1/follow-ups", body),
   connectors: (s?: AbortSignal) => get<P.ConnectorStatus>("/v1/admin/connectors", s),
   clarify: (department_id: string, question: string, context: Record<string, unknown>, submit: boolean) =>
     request<P.ClarificationCreated>("POST", "/v1/clarifications", { department_id, question, context, submit }),

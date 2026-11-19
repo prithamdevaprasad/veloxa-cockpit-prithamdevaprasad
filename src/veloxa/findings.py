@@ -22,8 +22,11 @@ import psycopg
 
 from .risk import ranking, worry
 
-STATES = ("detected", "verified", "notified", "acknowledged", "investigating", "resolved", "dismissed", "reassessed")
-HUMAN_STATES = {"acknowledged", "investigating", "resolved", "dismissed"}
+STATES = ("detected", "verified", "notified", "acknowledged", "investigating", "resolved", "dismissed", "reassessed",
+          "reopened")
+HUMAN_STATES = {"investigating", "resolved", "dismissed", "reopened"}
+NEEDS_OUTCOME = {"resolved", "dismissed", "reopened"}
+CLOSED = {"resolved", "dismissed", "reassessed"}
 DEPT_ID = {"Engineering": "engineering", "Finance": "finance", "Marketing": "marketing", "People & Ops": "people",
            "Sales": "sales"}
 
@@ -115,21 +118,100 @@ def daily_review(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int, assesse
     items, scored = _items(conn, tenant_id, k, assessed_on, policy)
     created = [f for i in items if (f := _create(conn, tenant_id, k, i, scored.get(i.item_id), "daily", actor))]
     current = {_dedup(i) for i in items}
-    reassessed = []
+    reassessed, reopened = [], []
     for r in conn.execute("SELECT finding_id, dedup_key, state FROM runtime.finding_current WHERE tenant_id = %s",
                           (tenant_id,)).fetchall():
-        if r["dedup_key"] not in current and r["state"] not in ("resolved", "dismissed", "reassessed"):
+        if r["dedup_key"] in current and r["state"] == "reassessed":
+            # the premise that had disappeared is supported again: reopen (never a second, duplicate finding)
+            conn.execute("INSERT INTO runtime.finding_event (tenant_id, finding_id, state, actor, note) VALUES"
+                         " (%s,%s,'reopened',%s,'the same evidence supports this concern again')",
+                         (tenant_id, r["finding_id"], actor))
+            reopened.append(r["finding_id"])
+        elif r["dedup_key"] not in current and r["state"] not in ("resolved", "dismissed", "reassessed"):
             conn.execute("INSERT INTO runtime.finding_event (tenant_id, finding_id, state, actor, note) VALUES"
                          " (%s,%s,'reassessed',%s,'the premise is no longer supported by the current evidence')",
                          (tenant_id, r["finding_id"], actor))
             reassessed.append(r["finding_id"])
-    return {"created": created, "reassessed": reassessed, "considered": len(items)}
+    return {"created": created, "reassessed": reassessed, "reopened": reopened, "considered": len(items)}
+
+
+class WorkflowError(ValueError):
+    pass
 
 
 def record_human_event(conn, tenant_id, finding_id: str, state: str, actor: str, note: str | None = None,
-                       ref: str | None = None) -> None:
-    """Acknowledge / investigate / resolve / dismiss (append-only, audited by the event row)."""
+                       ref: str | None = None, responsible: str | None = None) -> None:
+    """Investigate / resolve / dismiss / reopen (append-only). Resolution, dismissal and reopening need a stated
+    outcome or reason. `responsible` is recorded only when given: the person clicking is never assumed to be the
+    person who will fix the problem. Acknowledging is about a notification (see `acknowledge`)."""
     if state not in HUMAN_STATES:
-        raise ValueError(f"state must be one of {sorted(HUMAN_STATES)}")
-    conn.execute("INSERT INTO runtime.finding_event (tenant_id, finding_id, state, actor, note, ref) VALUES"
-                 " (%s,%s,%s,%s,%s,%s)", (tenant_id, finding_id, state, actor, note, ref))
+        raise WorkflowError(f"state must be one of {sorted(HUMAN_STATES)}")
+    note = (note or "").strip() or None
+    if state in NEEDS_OUTCOME and (not note or len(note) < 5):
+        raise WorkflowError({"resolved": "Say what resolved it (the outcome or the evidence).",
+                             "dismissed": "Say why it is being dismissed.",
+                             "reopened": "Say what shows the concern has returned."}[state])
+    cur = conn.execute("SELECT state FROM runtime.finding_current WHERE tenant_id = %s AND finding_id = %s",
+                       (tenant_id, finding_id)).fetchone()
+    now = cur["state"] if cur else None
+    if state == "reopened" and now not in CLOSED:
+        raise WorkflowError("Only a resolved, dismissed or reassessed finding can be reopened.")
+    if state in ("investigating", "resolved", "dismissed") and now in CLOSED:
+        raise WorkflowError("This finding is closed. Reopen it first, with what shows the concern has returned.")
+    conn.execute("INSERT INTO runtime.finding_event (tenant_id, finding_id, state, actor, note, ref, responsible)"
+                 " VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                 (tenant_id, finding_id, state, actor, note, ref, (responsible or "").strip()[:200] or None))
+
+
+def acknowledge(conn, tenant_id, notification_id: str, actor: str) -> dict:
+    """Someone saw the alert. Idempotent per (notification, person); it does not change the finding's state."""
+    n = conn.execute("SELECT finding_id FROM runtime.notification WHERE tenant_id = %s AND notification_id = %s",
+                     (tenant_id, notification_id)).fetchone()
+    if not n:
+        raise LookupError("notification")
+    row = conn.execute(
+        "INSERT INTO runtime.notification_ack (tenant_id, notification_id, finding_id, actor) VALUES (%s,%s,%s,%s)"
+        " ON CONFLICT DO NOTHING RETURNING at", (tenant_id, notification_id, n["finding_id"], actor)).fetchone()
+    if row is None:
+        row = conn.execute("SELECT at FROM runtime.notification_ack WHERE tenant_id = %s AND notification_id = %s"
+                           " AND actor = %s", (tenant_id, notification_id, actor)).fetchone()
+        return {"notification_id": notification_id, "finding_id": n["finding_id"], "at": row["at"].isoformat(),
+                "already": True}
+    return {"notification_id": notification_id, "finding_id": n["finding_id"], "at": row["at"].isoformat(),
+            "already": False}
+
+
+FOLLOW_UP_STATUSES = ("created", "assigned", "in_progress", "completed", "blocked")
+
+
+def record_follow_up(conn, tenant_id, actor: str, item_id: str, recommendation: str, status: str,
+                     action_id: str | None = None, finding_id: str | None = None, jira_key: str | None = None,
+                     jira_assignee: str | None = None, note: str | None = None) -> str:
+    """A follow-up action's next state (append-only). Linking a Jira issue records `created` or `assigned`; it never
+    marks the action completed, and completing an action never resolves the finding."""
+    if status not in FOLLOW_UP_STATUSES:
+        raise WorkflowError(f"status must be one of {list(FOLLOW_UP_STATUSES)}")
+    if status in ("completed", "blocked") and not jira_key and len((note or "").strip()) < 5:
+        raise WorkflowError("Say what completed or blocked it.")
+    aid = action_id or str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO runtime.follow_up_event (tenant_id, action_id, item_id, finding_id, recommendation, status,"
+        " jira_key, jira_assignee, actor, note) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (tenant_id, aid, item_id[:200], finding_id, recommendation.strip()[:2000], status, jira_key,
+         (jira_assignee or "")[:200] or None, actor, (note or "").strip() or None))
+    return aid
+
+
+def follow_ups(conn, tenant_id) -> list[dict]:
+    """Each action's latest state, with its full history."""
+    rows = [dict(r) for r in conn.execute(
+        "SELECT action_id, item_id, finding_id, recommendation, status, jira_key, jira_assignee, actor, note, at"
+        " FROM runtime.follow_up_event WHERE tenant_id = %s ORDER BY at, event_id", (tenant_id,)).fetchall()]
+    out: dict[str, dict] = {}
+    for r in rows:
+        r["at"] = r["at"].isoformat()
+        aid = str(r.pop("action_id"))
+        cur = out.setdefault(aid, {"action_id": aid, "history": []})
+        cur["history"].append({k: r[k] for k in ("status", "jira_key", "actor", "note", "at")})
+        cur.update({k: v for k, v in r.items() if v is not None or k not in ("jira_key", "jira_assignee")})
+    return list(out.values())

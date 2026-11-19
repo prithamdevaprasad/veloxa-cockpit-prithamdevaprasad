@@ -69,13 +69,19 @@ export interface WorryItem { rank: number; tied: boolean; item_id: string; title
   sensitive: boolean; follow_up: string; why: string }
 export interface Worry { ranking_mode: "weighted" | "pending"; policy: Record<string, unknown>;
   read_basis: { batch_seq: number; banner: string }; ranked: WorryItem[];
-  unrankable?: { item_id: string; title: string; reasons: string[]; evidence: string[]; unknowns: string[];
+  unrankable?: { item_id: string; title: string; reasons: string[]; evidence: string[]; unknowns: string[]; confidence: string;
     follow_up?: string; department?: string | null; project?: string | null }[];
   unranked?: { item_id: string; title: string; evidence: string[] }[]; hidden_for_access: number; note?: string }
-export interface Finding { finding_id: string; title: string; description: string; department: string | null;
+export interface Finding { finding_id: string; item_id: string; title: string; description: string; department: string | null;
   project: string | null; trigger: string; evidence: string[]; confidence: string; unknowns: string[]; state: string;
-  created_at: string; updated_at: string; history: { state: string; actor: string; note: string | null; at: string }[];
-  notified: { recipient: string; basis: string; delivered_at: string }[] }
+  created_at: string; updated_at: string; ranking?: Record<string, unknown> | null;
+  history: { state: string; actor: string; note: string | null; responsible?: string | null; at: string }[];
+  notified: { notification_id: string; recipient: string; basis: string; channel: "in_app"; created_at: string;
+    delivered_at: null; delivery: string; acknowledged: { actor: string; at: string }[] }[] }
+export interface FollowUp { action_id: string; item_id: string; finding_id: string | null; recommendation: string;
+  status: "created" | "assigned" | "in_progress" | "completed" | "blocked"; jira_key?: string | null;
+  jira_assignee?: string | null; actor: string; note: string | null; at: string;
+  history: { status: string; jira_key: string | null; actor: string; note: string | null; at: string }[] }
 export interface AiWording { active: boolean; provider?: string | null; model?: string | null; workspace: string;
   workspace_synthetic: boolean; workspace_in_scope: boolean; scope_reason: string;
   configuration: Record<string, unknown>; what_it_does: string }

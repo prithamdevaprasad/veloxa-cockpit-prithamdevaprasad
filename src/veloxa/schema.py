@@ -19,6 +19,11 @@ FEATURES: dict[str, tuple[str, str, tuple[str, ...]]] = {
         ("runtime.agent_person", "runtime.assumption_current", "runtime.finding_current", "runtime.notification",
          "runtime.connector_run", "knowledge.claim", "knowledge.conflict"),
     ),
+    "finding_workflow": (
+        "0024_finding_workflow",
+        "notification acknowledgements, investigations and follow-up actions",
+        ("runtime.notification_ack", "runtime.follow_up_event"),
+    ),
 }
 
 _CHECK = (

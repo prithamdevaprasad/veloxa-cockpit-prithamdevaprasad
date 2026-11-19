@@ -7,6 +7,8 @@ an item or conflict citing a record the principal may not read is hidden and cou
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import Header, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,9 +22,23 @@ from .temporal import resolve_basis
 class FindingEvent(BaseModel):
     """A human lifecycle event on a finding (the actor is always the authenticated principal)."""
     model_config = ConfigDict(extra="forbid")
-    state: str = Field(pattern="^(acknowledged|investigating|resolved|dismissed)$")
+    state: str = Field(pattern="^(investigating|resolved|dismissed|reopened)$")
     note: str | None = Field(default=None, max_length=2000)
     ref: str | None = Field(default=None, max_length=200)
+    responsible: str | None = Field(default=None, max_length=200)
+
+
+class FollowUpIn(BaseModel):
+    """The next state of a follow-up action (a recommendation turned into work)."""
+    model_config = ConfigDict(extra="forbid")
+    item_id: str = Field(min_length=1, max_length=200)
+    recommendation: str = Field(min_length=1, max_length=2000)
+    status: str = Field(pattern="^(created|assigned|in_progress|completed|blocked)$")
+    action_id: str | None = Field(default=None, max_length=64)
+    finding_id: str | None = Field(default=None, pattern="^FD-[0-9a-f]{12}$")
+    jira_key: str | None = Field(default=None, pattern="^[A-Z][A-Z0-9_]{0,19}-[0-9]{1,9}$")
+    jira_assignee: str | None = Field(default=None, max_length=200)
+    note: str | None = Field(default=None, max_length=2000)
 
 
 def register(app, *, state, principal_of, now_fn, tz_of) -> None:
@@ -203,21 +219,31 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
             if basis is None:
                 return p
             schema.require(conn, "company_intelligence")   # authenticated: 503, not 500
+            schema.require(conn, "finding_workflow")
             with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
                 rows = [dict(r) for r in conn.execute(
-                    "SELECT finding_id, title, description, department, project, trigger, evidence, ranking,"
-                    " confidence, unknowns, batch_seq, created_at, state, updated_at FROM runtime.finding_current"
+                    "SELECT finding_id, split_part(dedup_key, '|', 1) AS item_id, title, description, department,"
+                    " project, trigger, evidence, ranking, confidence, unknowns, batch_seq, created_at, state,"
+                    " updated_at FROM runtime.finding_current"
                     " ORDER BY created_at DESC").fetchall()]
                 events = [dict(r) for r in conn.execute(
-                    "SELECT finding_id, state, actor, note, ref, at FROM runtime.finding_event ORDER BY at").fetchall()]
+                    "SELECT finding_id, state, actor, note, ref, responsible, at FROM runtime.finding_event"
+                    " ORDER BY at").fetchall()]
                 notes = [dict(r) for r in conn.execute(
-                    "SELECT finding_id, recipient, basis, delivered_at FROM runtime.notification").fetchall()]
+                    "SELECT notification_id, finding_id, recipient, basis, channel, delivered_at"
+                    " FROM runtime.notification").fetchall()]
+                acks = [dict(r) for r in conn.execute(
+                    "SELECT notification_id, actor, at FROM runtime.notification_ack").fetchall()]
             ok = readable(conn, p, basis, [r for f in rows for r in f["evidence"]])
             shown = [f for f in rows if set(f["evidence"]) <= ok]
             for f in shown:
                 f["history"] = [{**e, "at": e["at"].isoformat()} for e in events if e["finding_id"] == f["finding_id"]]
-                f["notified"] = [{**n, "delivered_at": n["delivered_at"].isoformat()} for n in notes
-                                 if n["finding_id"] == f["finding_id"]]
+                f["notified"] = [{**n, "notification_id": str(n["notification_id"]),
+                                  "created_at": n["delivered_at"].isoformat(), "delivered_at": None,
+                                  "delivery": "in-app record only: no e-mail or chat channel is configured",
+                                  "acknowledged": [{"actor": a["actor"], "at": a["at"].isoformat()} for a in acks
+                                                   if a["notification_id"] == n["notification_id"]]}
+                                 for n in notes if n["finding_id"] == f["finding_id"]]
                 f["created_at"], f["updated_at"] = f["created_at"].isoformat(), f["updated_at"].isoformat()
             return {"findings": shown, "hidden_for_access": len(rows) - len(shown)}
 
@@ -233,9 +259,61 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
             with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
                 if not conn.execute("SELECT 1 FROM runtime.finding WHERE finding_id = %s", (finding_id,)).fetchone():
                     return JSONResponse(status_code=404, content={"error": "not_found"})   # or not visible to you
-                findings.record_human_event(conn, p.tenant_id, finding_id, body.state, p.principal_id, body.note,
-                                            body.ref)
+                try:
+                    findings.record_human_event(conn, p.tenant_id, finding_id, body.state, p.principal_id, body.note,
+                                                body.ref, body.responsible)
+                except findings.WorkflowError as e:
+                    return JSONResponse(status_code=422, content={"error": "invalid_transition", "detail": str(e)})
             return {"finding_id": finding_id, "state": body.state}
+
+    @app.post("/v1/notifications/{notification_id}/ack")
+    def notification_ack(notification_id: uuid.UUID, authorization: str | None = Header(default=None)):
+        """The signed-in person has seen this alert. It does not change the finding's state."""
+        from . import findings
+
+        with connect(state["dsn"]) as conn:
+            p, basis, _ = ctx(conn, authorization, None)
+            if basis is None:
+                return p
+            schema.require(conn, "finding_workflow")
+            with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
+                try:
+                    return findings.acknowledge(conn, p.tenant_id, str(notification_id), p.principal_id)
+                except LookupError:
+                    return JSONResponse(status_code=404, content={"error": "not_found"})
+
+    @app.get("/v1/follow-ups")
+    def follow_ups_list(authorization: str | None = Header(default=None)):
+        from . import findings
+
+        with connect(state["dsn"]) as conn:
+            p, basis, _ = ctx(conn, authorization, None)
+            if basis is None:
+                return p
+            schema.require(conn, "finding_workflow")
+            with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
+                return {"follow_ups": findings.follow_ups(conn, p.tenant_id)}
+
+    @app.post("/v1/follow-ups")
+    def follow_up_record(body: FollowUpIn, authorization: str | None = Header(default=None)):
+        from . import findings
+
+        with connect(state["dsn"]) as conn:
+            p, basis, _ = ctx(conn, authorization, None)
+            if basis is None:
+                return p
+            schema.require(conn, "finding_workflow")
+            with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
+                if body.finding_id and not conn.execute("SELECT 1 FROM runtime.finding WHERE finding_id = %s",
+                                                        (body.finding_id,)).fetchone():
+                    return JSONResponse(status_code=404, content={"error": "not_found"})
+                try:
+                    aid = findings.record_follow_up(conn, p.tenant_id, p.principal_id, body.item_id,
+                                                    body.recommendation, body.status, body.action_id,
+                                                    body.finding_id, body.jira_key, body.jira_assignee, body.note)
+                except findings.WorkflowError as e:
+                    return JSONResponse(status_code=422, content={"error": "invalid_transition", "detail": str(e)})
+            return {"action_id": aid, "status": body.status}
 
     @app.get("/v1/admin/connectors")
     def connectors_status(authorization: str | None = Header(default=None)):

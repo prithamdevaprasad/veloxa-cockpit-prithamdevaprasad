@@ -354,37 +354,58 @@ function RequestConfirm({ p }: { p: InternalRequest }) {
 }
 
 /** A Jira write preview: every proposed value is shown; the write needs an explicit tick and a click. */
-export function JiraConfirm({ p }: { p: JiraPreview }) {
+export interface JiraWriteResult { operation: string; key: string; url: string;
+  read_back?: { verified: boolean; fields: Record<string, { sent: unknown; jira: unknown; name?: string | null; ok: boolean }> } }
+
+export function JiraConfirm({ p, onDone }: { p: JiraPreview; onDone?: (r: JiraWriteResult) => void }) {
   const [ok, setOk] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState<{ key: string; url: string } | null>(null);
+  const [done, setDone] = useState<JiraWriteResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   async function write() {
     setBusy(true); setError(null);
-    try { setDone(await request("POST", "/v1/integrations/jira/commit", { preview_id: p.preview_id, confirm: true })); }
+    try {
+      const r = await request<JiraWriteResult>("POST", "/v1/integrations/jira/commit", { preview_id: p.preview_id, confirm: true });
+      setDone(r); onDone?.(r);
+    }
     catch (e) { setError(e instanceof ApiError ? e.message : String(e)); }
     finally { setBusy(false); }
   }
-  if (done) return <p className="callout ok small" role="status">Written to Jira:{" "}
-    {done.url ? <a href={done.url} target="_blank" rel="noreferrer">{done.key}</a> : done.key}.</p>;
+  if (done) {
+    const rb = done.read_back;
+    const link = done.url ? <a href={done.url} target="_blank" rel="noreferrer">{done.key}</a> : done.key;
+    return (
+      <div className={`callout ${rb?.verified ? "ok" : "warn"} small stack`} role="status">
+        <strong>{rb?.verified ? <>{done.operation === "create" ? "Created" : "Updated"} {link} and checked in Jira</>
+          : <>{done.operation === "create" ? "Created" : "Sent changes to"} {link}, but Jira's copy doesn't match everything</>}</strong>
+        {rb && Object.keys(rb.fields).length > 0 && <dl className="meta">{Object.entries(rb.fields).map(([k, v]) => (
+          <Fragment key={k}><dt>{FIELD[k] ?? (k.startsWith("customfield_") ? "Start date" : k)}</dt>
+            <dd>{k === "assignee" ? `${v.name ?? "unassigned"}${v.jira ? ` (Jira account ${String(v.jira)})` : ""}` : show(v.jira)}
+              {v.ok ? " \u2713 matches what was sent" : ` \u2717 Jira holds this, not ${show(v.sent)}`}</dd></Fragment>))}</dl>}
+      </div>);
+  }
+  const entries = Object.entries(p.fields);
+  const changes = entries.filter(([, v]) => v && typeof v === "object" && "proposed" in (v as object));
+  const plain = entries.filter(([, v]) => !(v && typeof v === "object" && "proposed" in (v as object)));
   return (
     <div className="callout warn stack small" aria-label="Jira change to confirm">
-      <strong>{p.operation === "create" ? `Create in ${p.project} (${p.issue_type})` : `Update ${p.key}`}</strong>
-      <dl className="meta">{Object.entries(p.fields).map(([k, v]) => (
-        <Fragment key={k}><dt>{FIELD[k] ?? k}</dt><dd>{v && typeof v === "object" && "proposed" in (v as object)
-          ? `${show((v as { current: unknown }).current)} \u2192 ${show((v as { proposed: unknown }).proposed)}`
-          : show(v)}</dd></Fragment>))}</dl>
+      <strong>{p.operation === "create" ? `Create a new ${p.issue_type} in ${p.project}` : `Change ${p.key}`}</strong>
+      {plain.length > 0 && <dl className="meta">{plain.map(([k, v]) => (
+        <Fragment key={k}><dt>{FIELD[k] ?? k}</dt><dd>{show(v)}</dd></Fragment>))}</dl>}
+      {changes.length > 0 && <table className="diff-table"><thead><tr><th>Field</th><th>Now in Jira</th><th>After this change</th></tr></thead>
+        <tbody>{changes.map(([k, v]) => { const c = v as { current: unknown; proposed: unknown };
+          return <tr key={k}><td>{FIELD[k] ?? k}</td><td className="muted">{show(c.current)}</td><td><strong>{show(c.proposed)}</strong></td></tr>; })}</tbody></table>}
       {p.description && <><strong>Description</strong><p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{p.description}</p></>}
-      {p.comment && <><strong>Comment</strong><p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{p.comment}</p></>}
+      {p.comment && <><strong>New comment</strong><p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{p.comment}</p></>}
       <label><input type="checkbox" checked={ok} onChange={(e) => setOk(e.target.checked)} /> I confirm this exact
         change should be written to Jira.</label>
       {error && <p className="callout bad">{error}</p>}
-      <div><Button variant="primary" disabled={!ok || busy} onClick={write}>Write to Jira</Button></div>
+      <div><Button variant="primary" disabled={!ok || busy} onClick={write}>{busy ? "Writing…" : "Write to Jira"}</Button></div>
     </div>
   );
 }
 
-const FIELD: Record<string, string> = { summary: "Title", duedate: "Due date", assignee: "Assignee",
+const FIELD: Record<string, string> = { summary: "Title", duedate: "Due date", assignee: "Assignee", Summary: "Title",
   issuetype: "Type", project: "Project", description: "Description" };
 function show(v: unknown): string {
   if (v === null || v === undefined || v === "") return "none";

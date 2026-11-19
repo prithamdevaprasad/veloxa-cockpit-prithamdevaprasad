@@ -308,6 +308,15 @@ def register(app, *, state, principal_of, now_fn, jira_factory=None) -> None:
         return run(authorization, lambda j, t, pr: {"users": j.assignable(t, "", query, project=project[:20])},
                    "jira.read", {"op": "assignable", "project": project[:20]})
 
+    @app.get("/v1/integrations/jira/users/lookup")
+    def lookup_user(query: str, project: str | None = None, authorization: str | None = Header(default=None)):
+        return run(authorization, lambda j, t, pr: {"users": j.lookup_user(t, query, project and project[:20])},
+                   "jira.read", {"op": "user_lookup", "project": project}, relations=("admin",))
+
+    @app.get("/v1/integrations/jira/projects/{project}/issue-types/{type_id}/date-fields")
+    def date_fields(project: str, type_id: str, authorization: str | None = Header(default=None)):
+        return run(authorization, lambda j, t, pr: j.date_fields(t, project[:20], type_id[:20]))
+
     @app.get("/v1/integrations/jira/search")
     def search(jql: str, limit: int = 20, authorization: str | None = Header(default=None)):
         return run(authorization, lambda j, t, pr: {"issues": j.search(t, jql[:2000], limit)}, "jira.read",

@@ -201,7 +201,11 @@ def test_create_is_previewed_against_metadata_and_needs_explicit_confirmation():
         j.commit("tenant-a", "someone-else", p["preview_id"], True)               # bound to the previewer
     p = j.preview_create("tenant-a", "admin-1", "ENG", "10001", "New task")
     http.on("POST", "/rest/api/3/issue", R(201, {"key": "ENG-9"}))
-    assert j.commit("tenant-a", "admin-1", p["preview_id"], True)["key"] == "ENG-9"
+    http.on("GET", "/rest/api/3/issue/ENG-9", R(200, {"key": "ENG-9", "fields": {"summary": "New task"}}))
+    out = j.commit("tenant-a", "admin-1", p["preview_id"], True)
+    assert out["key"] == "ENG-9"
+    assert out["read_back"] == {"verified": True, "fields": {"summary": {"sent": "New task", "jira": "New task",
+                                                                        "ok": True}}}   # Jira's own value
     with pytest.raises(jo.JiraError):
         j.commit("tenant-a", "admin-1", p["preview_id"], True)                    # one-time
 
@@ -219,8 +223,11 @@ def test_update_preview_shows_current_and_proposed_and_commits_edit_and_comment(
     http.on("PUT", "/rest/api/3/issue/ENG-7", R(204))
     http.on("POST", "/rest/api/3/issue/ENG-7/comment", R(201, {"id": "1"}))
     out = j.commit("tenant-a", "admin-1", p["preview_id"], True)
+    read_back = out.pop("read_back")
     assert out == {"operation": "update", "key": "ENG-7", "url": "https://example.atlassian.net/browse/ENG-7",
                    "changed": ["summary"], "commented": True}
+    assert read_back["verified"] is False             # the fake Jira still holds "Old": never reported as saved
+    assert read_back["fields"]["summary"] == {"sent": "New", "jira": "Old", "ok": False}
     assert not any(m == "DELETE" for m, _, _ in http.calls)
 
 
@@ -288,3 +295,24 @@ def test_the_overdue_report_is_a_read_with_a_due_date_query():
     assert j.overdue("tenant-a", "ENG") == []
     jql = http.calls[-1][2]["json"]["jql"]
     assert 'project = "ENG"' in jql and "duedate < startOfDay()" in jql and "statusCategory != Done" in jql
+
+
+def test_user_lookup_dates_and_create_assignee_are_what_jira_returns():
+    j, http, _ = make()
+    connect(j)
+    http.on("GET", "/rest/api/3/user/search", R(200, [
+        {"accountId": "acc-1", "displayName": "Tester", "active": True, "accountType": "atlassian"}]))
+    http.on("GET", "/rest/api/3/user/assignable/search", R(200, [{"accountId": "acc-1", "displayName": "Tester"}]))
+    (u,) = j.lookup_user("tenant-a", "tester@example.test", "ENG")
+    assert u["account_id"] == "acc-1" and u["assignable_in_project"] is True
+    assert u["email_visible"] is False and u["email_exact_match"] is False    # hidden e-mail is never assumed
+    _meta(http)
+    assert j.date_fields("tenant-a", "ENG", "10001") == {"due": True, "start_field": None, "start_name": None}
+    http.routes[("GET", "/issue/createmeta/ENG/issuetypes/10001")] = [R(200, {"fields": [
+        {"fieldId": "summary", "name": "Summary", "required": True},
+        {"fieldId": "assignee", "name": "Assignee"}, {"fieldId": "customfield_10015", "name": "Start date"}]})]
+    assert j.date_fields("tenant-a", "ENG", "10001")["start_field"] == "customfield_10015"   # discovered, not assumed
+    with pytest.raises(jo.JiraError, match="not an assignable user"):
+        j.preview_create("tenant-a", "admin-1", "ENG", "10001", "T", extra={"assignee": {"accountId": "acc-x"}})
+    p = j.preview_create("tenant-a", "admin-1", "ENG", "10001", "T", extra={"assignee": {"accountId": "acc-1"}})
+    assert p["fields"]["Assignee"] == "Tester (Jira account acc-1)"

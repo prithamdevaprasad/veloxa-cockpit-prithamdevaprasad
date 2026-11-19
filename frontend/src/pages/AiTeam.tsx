@@ -10,7 +10,8 @@ import { useApi } from "../api/useApi";
 import { AgentAvatar } from "../ui/art";
 import { Guidance } from "../ui/kit";
 import { Button, Drawer, ErrorState, Loading, PageHead, Section, Segmented } from "../ui";
-import { Conversation, HistoryView } from "./Agents";
+import { get } from "../api/client";
+import { Conversation, HistoryView, type TestProposal } from "./Agents";
 import { Profile } from "./People";
 
 export const DISCLOSURE = "This is an AI assistant grounded in approved company records. It is not the actual employee.";
@@ -53,8 +54,13 @@ export function useTeam() {
   return { people, byId, loading, error, reload: () => { reloadP(); reloadR(); } };
 }
 
+interface TestAgent { agent_id: string; name: string; note: string | null; proposal: TestProposal | null }
+
 export function AiTeamPage() {
   const team = useTeam();
+  const [tests] = useApi((s) => get<{ agents: TestAgent[] }>("/v1/agents/test-fixtures", s), []);
+  const testAgents = tests.state === "ready" ? tests.data.agents : [];
+  const [testRun, setTestRun] = useState<TestAgent | null>(null);
   const [dept, setDept] = useState<string>("all");
   const [profile, setProfile] = useState<Person | null>(null);
   const [interview, setInterview] = useState<Person | null>(null);
@@ -110,6 +116,25 @@ export function AiTeamPage() {
             </Section>);
         })}
       </>}
+      {testAgents.length > 0 && (
+        <Section title="Test agents" aria-label="Test agents" subtitle="Temporary, test-only. Not part of the 14 AI
+          assistants; they represent no employee and can be removed at any time.">
+          <div className="person-grid">{testAgents.map((t) => (
+            <article key={t.agent_id} className="team-card test-agent" aria-label={t.name}>
+              <div className="row" style={{ flexWrap: "nowrap", gap: 12 }}>
+                <AgentAvatar id={t.agent_id} size={42} />
+                <div style={{ minWidth: 0 }}><strong>{t.name}</strong> <span className="pill">Test only</span>
+                  <div className="small muted">{t.note ?? "Test-only agent."}</div></div>
+              </div>
+              <div className="row" style={{ gap: 8, marginTop: 8 }}>
+                <Button variant="primary" onClick={() => setTestRun(t)}>Start test</Button>
+              </div>
+            </article>))}</div>
+        </Section>)}
+      {testRun && <InterviewDrawer person={{ agent_id: testRun.agent_id, name: testRun.name, title: "Test-only agent",
+                                             department: "not part of the 14" } as unknown as Person}
+                                   agent={{ agent_id: testRun.agent_id, activation: "synthetic_test" } as AgentSummary}
+                                   proposal={testRun.proposal ?? undefined} test onClose={() => setTestRun(null)} />}
       {profile && <Profile p={profile} onClose={() => setProfile(null)}
                            onInterview={canInterview(team.byId.get(profile.agent_id))
                              ? () => { setProfile(null); setInterview(profile); } : undefined} />}
@@ -120,7 +145,8 @@ export function AiTeamPage() {
 }
 
 /** An interview with ONE person's AI assistant; its history and sessions stay with that agent only. */
-export function InterviewDrawer({ person, agent, onClose }: { person: Person; agent?: AgentSummary; onClose: () => void }) {
+export function InterviewDrawer({ person, agent, onClose, proposal, test }: { person: Person; agent?: AgentSummary;
+  onClose: () => void; proposal?: TestProposal; test?: boolean }) {
   const [session, setSession] = useState<AgentSession | null>(null);
   const [resume, setResume] = useState<SessionDetail | null>(null);
   const [tab, setTab] = useState<"interview" | "history">("interview");
@@ -133,7 +159,8 @@ export function InterviewDrawer({ person, agent, onClose }: { person: Person; ag
   // One click opens the interview: the session starts as soon as the modal mounts (no second button).
   const ok = canInterview(agent);
   useEffect(() => { if (ok && !session) void start(); }, [person.agent_id, ok]); // eslint-disable-line react-hooks/exhaustive-deps
-  const opening = `Hello, I'm ${person.name ? `${person.name}'s` : "this team member's"} AI assistant`
+  const opening = test ? "This is a test-only agent. It represents no employee. Ask it to create a task and it"
+    + " prepares one for you to check, preview and confirm." : `Hello, I'm ${person.name ? `${person.name}'s` : "this team member's"} AI assistant`
     + `${person.title ? `, ${person.title}` : ""}${person.department ? ` in ${person.department}` : ""}. I answer from `
     + "approved company records only. Ask me about my role, my work, or what the records do and don't show.";
   return (
@@ -155,7 +182,7 @@ export function InterviewDrawer({ person, agent, onClose }: { person: Person; ag
           : !canInterview(agent) ? <p className="callout small">Interviews with this AI assistant are not available
               to you.</p>
           : session ? <Conversation key={session.session_id} session={session} history={resume}
-                                    opening={resume ? undefined : opening}
+                                    opening={resume ? undefined : opening} proposal={proposal}
                                     onClosed={() => { setSession(null); setResume(null); void start(); }} />
           : error ? <><ErrorState error={error} /><Button onClick={start}>Try again</Button></>
           : <Loading lines={3} />}

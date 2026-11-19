@@ -98,12 +98,15 @@ def test_verified_email_links_only_an_exact_unique_match(setup, proj, app_conn, 
     with tenant_tx(app_conn, tenant):
         value = {n: app_conn.execute("SELECT source_value FROM judgement.source_identity WHERE identity_id = %s",
                                      (i,)).fetchone()["source_value"] for n, i in acct.items()}
-    people = {"E1": {"entity_id": one, "full_name": "A", "title": "t", "department": "d", "work_email": "a@example.test"},
-              "E2": {"entity_id": two, "full_name": "B", "title": "t", "department": "d", "work_email": "dup@example.test"},
-              "E3": {"entity_id": three, "full_name": "C", "title": "t", "department": "d", "work_email": "dup@example.test"}}
+    row = lambda ent, name, mail: {"entity_id": ent, "full_name": name, "title": "t", "department": "d",  # noqa: E731
+                                   "work_email": mail}
+    people = {"E1": row(one, "A", "a@example.test"), "E2": row(two, "B", "dup@example.test"),
+              "E3": row(three, "C", "dup@example.test")}
     monkeypatch.setattr(jira_identity, "_people", lambda conn, t, k: people)
-    users = [{"account_id": value["ok"], "email": "A@example.test"}, {"account_id": value["dup"], "email": "dup@example.test"},
-             {"account_id": value["none"], "email": "nobody@example.test"}, {"account_id": value["noemail"], "email": None},
+    users = [{"account_id": value["ok"], "email": "A@example.test"},
+             {"account_id": value["dup"], "email": "dup@example.test"},
+             {"account_id": value["none"], "email": "nobody@example.test"},
+             {"account_id": value["noemail"], "email": None},
              {"account_id": "not-an-assignee", "email": "a@example.test"}]
     out = jira_identity.verify_with_jira(app_conn, tenant, "person:ADMIN", users, 1)
     assert (out["matched"], out["ambiguous"], out["no_hr_match"], out["not_assignees"]) == (1, 1, 1, 1)

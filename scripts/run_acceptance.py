@@ -468,10 +468,16 @@ def cases(s: Suite, admin: str, db: str, data: Path, built: dict) -> None:  # no
                     and any(n["recipient"] == "queue:engineering" for f in fl["findings"] for n in f["notified"]),
                     {"created": len(first["created"]), "again": len(second["created"])}))
     fid = fl["findings"][0]["finding_id"] if fl.get("findings") else "none"
-    ackr = client.post(f"/v1/findings/{fid}/events", json={"state": "acknowledged", "note": "seen"}, headers=H)
-    after = {f["finding_id"]: f["state"] for f in client.get("/v1/findings", headers=H).json()["findings"]}
-    s.case("F2", "workflow", "The CEO acknowledges a finding", "Recorded as an append-only event; state acknowledged",
-           lambda: (ackr.status_code == 200 and after.get(fid) == "acknowledged", after.get(fid)))
+    nid = next((n["notification_id"] for f in fl.get("findings", []) if f["finding_id"] == fid
+                for n in f["notified"]), "00000000-0000-0000-0000-000000000000")
+    ackr = client.post(f"/v1/notifications/{nid}/ack", headers=H)
+    after_f = {f["finding_id"]: f for f in client.get("/v1/findings", headers=H).json()["findings"]}
+    acked = [a for n in after_f.get(fid, {}).get("notified", []) if n["notification_id"] == nid
+             for a in n["acknowledged"]]
+    s.case("F2", "workflow", "The CEO acknowledges a notification",
+           "Recorded per notification with actor and time; the finding itself stays open (seeing is not resolving)",
+           lambda: (ackr.status_code == 200 and len(acked) == 1 and after_f.get(fid, {}).get("state") == "notified",
+                    (ackr.status_code, len(acked), after_f.get(fid, {}).get("state"))))
 
     # ---- Point-in-time answers (5)
     k17, k18, k19 = (ask("What is our headcount?", d)["read_basis"]["batch_seq"]

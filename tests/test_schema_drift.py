@@ -72,7 +72,7 @@ def test_the_catalogue_check_names_what_is_missing(old_data, db):
 
     with connect(old_data.dsn("app")) as conn:
         missing = schema.missing(conn)
-        assert [m["feature"] for m in missing] == ["company_intelligence"]
+        assert [m["feature"] for m in missing] == ["company_intelligence", "finding_workflow"]
         assert missing[0]["migration"] == "0021_company_intelligence"
         assert "runtime.agent_person" in missing[0]["relations"]
         with pytest.raises(schema.SchemaOutOfDate):
