@@ -129,7 +129,6 @@ export function OverviewPage({ go }: { go: (r: string) => void }) {
       </div>
 
       <div className="dash-row dash-mid">
-        <PeopleCard go={go} />
         <SourcesCard sources={sources} loading={srcs.state === "loading"} go={go} />
       </div>
 
@@ -164,30 +163,6 @@ function HiringHealth({ sources, loading }: { sources: ChartSource[]; loading: b
               <li key={p.x} className="row" style={{ justifyContent: "space-between" }}><span>{p.x}</span>
                 <span className="num">{p.value}</span></li>))}</ul>
             {s.state === "ready" && s.data && <p className="chart-foot">{cap(s.data.basis)}.</p>}
-          </>}
-    </Section>
-  );
-}
-
-function PeopleCard({ go }: { go: (r: string) => void }) {
-  const [ppl] = useApi((s) => product.people(s), []);
-  const [tab, setTab] = useState<"all" | "notice">("all");
-  const list = ppl.state === "ready" ? ppl.data.people : [];
-  const notice = list.filter((p) => /notice/i.test(p.status ?? ""));
-  const shown = (tab === "all" ? list : notice).slice(0, 8);
-  return (
-    <Section title="People" aria-label="People overview" subtitle="The people the agents represent, from the HR record."
-             actions={<button className="link small" onClick={() => go("agents")}>View all</button>}>
-      {ppl.state === "loading" ? <Loading lines={4} /> : list.length === 0
-        ? <Guidance title="No people mapped yet">Agents are mapped to people only after an owner-approved decision.</Guidance>
-        : <>
-            <Tabs label="People" value={tab} onChange={setTab} tabs={[{ value: "all", label: "People", count: list.length },
-              { value: "notice", label: "Notice period", count: notice.length }]} />
-            {shown.length === 0 ? <p className="small muted">Nobody is in a notice period in the HR record.</p>
-              : <ul className="plain people-list">{shown.map((p) => (
-                  <li key={p.agent_id}><Avatar name={p.name ?? p.agent_id} size={38} />
-                    <span style={{ minWidth: 0 }}><span className="n">{p.name}</span>
-                      <span className="s" style={{ display: "block" }}>{p.title}, {p.department}</span></span></li>))}</ul>}
           </>}
     </Section>
   );

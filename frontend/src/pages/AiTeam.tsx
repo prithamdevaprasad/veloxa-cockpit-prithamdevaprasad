@@ -171,7 +171,7 @@ export function MeetYourAiTeam({ go }: { go: (r: string) => void }) {
   const group = team.people.filter((p) => p.department === dept);
   return (
     <Section title="Meet your AI team" aria-label="Meet your AI team"
-             subtitle="AI representations of your people, grounded in company records."
+             subtitle="Non-human assistants grounded in employee records. They are not the employees and act for no one."
              actions={<button className="link small" onClick={() => go("agents")}>See everyone</button>}>
       {team.loading ? <Loading lines={2} /> : team.people.length === 0
         ? <p className="small muted">No AI representations yet: each needs an owner-approved HR mapping.</p>

@@ -435,3 +435,14 @@ test("sign-in errors are explained", async ({ page }) => {
   await page.reload();
   await expect(page.getByRole("alert")).toContainText("Single sign-on isn't configured");
 });
+
+test("People is the HR directory; AI representations are a separate, disclosed section", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/people");
+  await expect(page.getByRole("heading", { name: "People", exact: true })).toBeVisible();
+  await expect(page.getByText(/people in the HR export/)).toBeVisible();
+  await expect(page.getByText(/AI representations are separate/)).toBeVisible();
+  await page.goto("/#/overview");
+  await expect(page.getByRole("region", { name: "People overview" })).toHaveCount(0);     // no second roster
+  await expect(page.getByRole("region", { name: "Meet your AI team" })).toContainText("not the employees");
+});

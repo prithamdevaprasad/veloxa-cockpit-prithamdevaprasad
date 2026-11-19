@@ -82,6 +82,34 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
             return {"ranking_mode": "weighted", "policy": policy.as_json(), "read_basis": basis_json(basis),
                     **out, "hidden_for_access": hidden, "engine": governance.ENGINE_VERSION}
 
+    @app.get("/v1/directory")
+    def directory(as_known_at: str | None = None, authorization: str | None = Header(default=None)):
+        """The real HR directory: every person in the HR export at the basis, work facts only (name, title,
+        department, recorded status, join date, manager), each row only if the reader may read its record. Whether
+        an AI representation exists is shown, but the person and the AI representation are never the same thing."""
+        from .agents import people
+
+        with connect(state["dsn"]) as conn:
+            p, basis, _ = ctx(conn, authorization, as_known_at)
+            if basis is None:
+                return p
+            if not basis.batch_seq:
+                return {"read_basis": basis_json(basis), "people": [], "count": 0}
+            with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
+                staff = [dict(r) for r in people._people_at(conn, p.tenant_id, basis.batch_seq)]
+                mapped = {r["person_record"] for r in conn.execute(
+                    "SELECT person_record FROM runtime.agent_person").fetchall()} if schema.available(
+                    conn, "company_intelligence") else set()
+            ok = readable(conn, p, basis, [s["source_record_id"] for s in staff])
+            names = {s["emp_id"]: s["full_name"] for s in staff}
+            rows = [{"name": s["full_name"], "title": s["title"], "department": s["department"],
+                     "status": s["status"], "join_date": str(s["join_date"]) if s.get("join_date") else None,
+                     "manager": names.get(s.get("manager_emp_id")), "record": s["source_record_id"],
+                     "has_ai_representation": s["source_record_id"] in mapped}
+                    for s in staff if s["source_record_id"] in ok]
+            return {"read_basis": basis_json(basis), "people": rows, "count": len(rows),
+                    "withheld": len(staff) - len(rows)}
+
     @app.get("/v1/people")
     def people_list(as_known_at: str | None = None, authorization: str | None = Header(default=None)):
         """The 14 agent people as profiles (grounded work facts, persona assumptions labelled, unknowns)."""

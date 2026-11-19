@@ -3,6 +3,7 @@ import { ApiError, setToken } from "./api/client";
 import { product } from "./api/product";
 import type { Me } from "./api/product-types";
 import { AdminPage } from "./pages/Admin";
+import { DirectoryPage } from "./pages/Directory";
 import { AiTeamPage } from "./pages/AiTeam";
 import { ConflictsPage } from "./pages/Conflicts";
 import { DepartmentsPage } from "./pages/Departments";
@@ -23,7 +24,8 @@ const GROUPS = [
   { id: "home", label: "Home", icon: "overview", pages: [["overview", "Overview"], ["worry", "What to worry about"],
                                                          ["timeline", "Timeline"]] },
   { id: "ask", label: "Ask Veloxa", icon: "ask", pages: [["ask", "Ask Veloxa"]] },
-  { id: "people", label: "People", icon: "agents", pages: [["agents", "AI team"], ["departments", "Departments"]] },
+  { id: "people", label: "People", icon: "agents", pages: [["people", "Directory"], ["departments", "Departments"]] },
+  { id: "aiteam", label: "AI team", icon: "ask", pages: [["agents", "AI representations"]] },
   { id: "intel", label: "Intelligence", icon: "intelligence", pages: [["intelligence", "Intelligence"],
                                                                       ["evidence", "Evidence & Data"],
                                                                       ["whatif", "What-if Analysis"]] },
@@ -124,6 +126,7 @@ function Shell() {
           {route === "conflicts" && <ConflictsPage />}
           {route === "worry" && <WorryPage />}
           {route === "agents" && <AiTeamPage />}
+          {route === "people" && <DirectoryPage />}
           {route === "departments" && <DepartmentsPage go={go} />}
           {route === "evidence" && <EvidenceDataPage />}
           {route === "intelligence" && <IntelligencePage />}
