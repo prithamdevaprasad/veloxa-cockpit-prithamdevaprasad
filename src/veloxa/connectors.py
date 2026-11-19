@@ -218,7 +218,7 @@ def to_jsonl(records: list[dict]) -> bytes:
 
 def submit(conn, store, tenant_id, name: str, records: list[dict], *, actor: str, department_id: str,
            source_type: str, mode: str, scope: dict, cursor_before: str | None, cursor_after: str | None,
-           key: str = "key", version: str = "updated", title: str | None = None) -> dict:
+           key: str = "key", version: str = "updated", title: str | None = None, identity_fn=None) -> dict:
     """The ONE path from any connector into evidence: drop versions already submitted (idempotency), submit the rest
     to the data room as a pending submission (same review, admission and projection as a manual upload), and record
     the run with its scope and cursors."""
@@ -233,11 +233,36 @@ def submit(conn, store, tenant_id, name: str, records: list[dict], *, actor: str
         for r in rows:
             seen |= r["scope"].get("submitted_versions", {})
     new = [r for r in records if seen.get(str(r[key])) != str(r.get(version))]
+    from . import identity
+
+    fn = identity_fn or {"gmail": identity.from_gmail, "github": identity.from_github,
+                         "jira": identity.from_jira}.get(name)
+    objs, cls, dup = [], [], 0
+    with tenant_tx(conn, tenant_id, actor):
+        fn = fn if identity.available(conn) else None
+    if fn:                                  # the one cross-route registry: same item via another route is not new
+        with tenant_tx(conn, tenant_id, actor):
+            keep = []
+            for r in new:
+                o = fn(r)
+                c = identity.classify(conn, tenant_id, o)
+                if c[0] == "duplicate":
+                    dup += 1
+                    continue
+                keep.append(r)
+                objs.append(o)
+                cls.append(c)
+        new = keep
     sid = None
     if new:
         sid = intake.upload(conn, store, tenant_id, actor, department_id, source_type,
                             title or f"{name} sync {cursor_after or ''}".strip(),
-                            [intake.Upload(f"{name}_sync.jsonl", to_jsonl(new))])
+                            [intake.Upload(f"{name}_sync.jsonl", to_jsonl(new))], route=None)
+    if objs:
+        with tenant_tx(conn, tenant_id, actor):
+            reg = identity.register(conn, tenant_id, actor, objs, sid, cls)
+        scope = {**scope, "identity": {c: sum(1 for x in reg if x["classification"] == c)
+                                       for c in {x["classification"] for x in reg}} | {"duplicate": dup}}
     scope = {**scope, "submitted_versions": {str(r[key]): str(r.get(version)) for r in new},
              "submission_id": str(sid) if sid else None}
     with tenant_tx(conn, tenant_id, actor):
@@ -247,7 +272,7 @@ def submit(conn, store, tenant_id, name: str, records: list[dict], *, actor: str
                      (tenant_id, name, mode, json.dumps(scope), cursor_before, cursor_after, len(records), len(new),
                       len(new) if sid else 0))
     return {"status": "ok", "fetched": len(records), "changed": len(new), "submission_id": sid,
-            "cursor": cursor_after}
+            "cursor": cursor_after, "identity": scope.get("identity")}
 
 
 def record_failure(conn, tenant_id, name: str, *, actor: str, mode: str, scope: dict, cursor_before, error: str):

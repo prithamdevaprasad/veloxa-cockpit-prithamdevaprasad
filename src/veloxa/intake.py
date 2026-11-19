@@ -87,7 +87,8 @@ def authorise_source_type(conn, tenant_id, actor: str, *, source_type: str, titl
 
 
 def upload(conn, store: ObjectStore, tenant_id: uuid.UUID, actor: str, department_id: str, source_type: str,
-           title: str, files: list[Upload], data_period: str | None = None) -> uuid.UUID:
+           title: str, files: list[Upload], data_period: str | None = None, route: str | None = "upload"
+           ) -> uuid.UUID:
     """Store the originals (write-once) and record the submission. C06 limits and type checks run BEFORE storing;
     the database then checks the contributor relation and the approved source type."""
     lim = isolation.limits()
@@ -113,6 +114,11 @@ def upload(conn, store: ObjectStore, tenant_id: uuid.UUID, actor: str, departmen
         with tenant_tx(conn, tenant_id, actor):
             conn.execute("SELECT intake.submit(%s, %s, %s, %s, %s, %s::jsonb)",
                          (sid, department_id, source_type, title, data_period, json.dumps(meta)))
+            from . import identity
+
+            if route and identity.available(conn):  # connector carriers register ITEMS instead (connectors.submit)
+                identity.register(conn, tenant_id, actor, [identity.from_upload(f.file_name, f.data, m["sha256"], route)
+                                                           for f, m in zip(files, meta, strict=True)], sid)
             audit.append(conn, tenant_id, "intake.uploaded", {"submission": str(sid), "files": len(meta),
                                                               "department": department_id,
                                                               "source_type": source_type, "by": actor})

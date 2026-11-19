@@ -24,6 +24,11 @@ FEATURES: dict[str, tuple[str, str, tuple[str, ...]]] = {
         "notification acknowledgements, investigations and follow-up actions",
         ("runtime.notification_ack", "runtime.follow_up_event"),
     ),
+    "source_identity": (
+        "0025_source_object_registry",
+        "cross-route duplicate detection for uploads and connectors",
+        ("runtime.source_object",),
+    ),
 }
 
 _CHECK = (
