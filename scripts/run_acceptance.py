@@ -22,7 +22,7 @@ import sys
 import tempfile
 import time
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -236,6 +236,78 @@ def cases(s: Suite, admin: str, db: str, data: Path, built: dict) -> None:  # no
                     and built["profile_k3_eng04"]["title"] == "Site Reliability Engineer"
                     and e4_now.get("title") == "Senior Site Reliability Engineer",
                     [built["profile_k3_eng04"]["title"], e4_now.get("title")]), knowledge_date="Day 3 vs current")
+
+    # ---- Question routing (19 Nov 2026): business intents answered by the subsystem that owns them
+    q_unr = ask("Which issues cannot currently be ranked?")
+    s.case("Q1", "routing", "Which issues cannot currently be ranked?",
+           "Answered from the worry model's unrankable list, each item with its reason and records; not a text search",
+           lambda: (q_unr["status"] == "qualified" and q_unr["claims"] and all("not ranked" in c["text"]
+                    for c in q_unr["claims"]) and "unrankable" in q_unr["interpretation"],
+                    [c["text"][:60] for c in q_unr["claims"]]), refusal="unranked is not low priority")
+    q_this = ask("Why is this ranked as a concern?")
+    s.case("Q2", "routing", "Why is this ranked as a concern? (no concern selected)",
+           "A short clarification listing the concerns; no unrelated record is cited",
+           lambda: (q_this["status"] == "abstained" and not q_this["evidence"]
+                    and q_this["answer"].startswith("Which concern do you mean") and q_this["follow_ups"],
+                    q_this["follow_ups"]), refusal="clarification, not a guess")
+    q_hob = ask("What are the personal hobbies of the employee?")
+    s.case("Q3", "routing", "What are the personal hobbies of the employee?",
+           "No verified company record; persona details are never presented as facts; nothing is cited",
+           lambda: (q_hob["status"] == "abstained" and not q_hob["evidence"]
+                    and q_hob["answer"].startswith("I couldn't find a verified company record"), q_hob["answer"][:80]),
+           refusal="no verified record")
+    q_delay = ask("Why was the Orion 2 release delayed?")
+    s.case("Q4", "routing", "Why was the release delayed?",
+           "The recorded schedule change first, cited; what the records do not establish is stated; no probability",
+           lambda: (q_delay["status"] == "qualified"
+                    and q_delay["claims"][0]["text"].startswith("Recorded schedule change")
+                    and any("multifactorial" in u for u in q_delay["unknowns"])
+                    and "%" not in q_delay["answer"], [c["text"][:70] for c in q_delay["claims"]]))
+    q_board = ask("What changed in the latest board update?")
+    s.case("Q5", "routing", "What changed in the latest board update?",
+           "Reported figures compared period by period (previous -> latest), as reported, with both documents cited",
+           lambda: (q_board["status"] == "qualified" and any("\u2192" in c["text"] and len(c["evidence"]) == 2
+                                                               for c in q_board["claims"]),
+                    [c["text"] for c in q_board["claims"]]), citations=["documents"])
+    q_miss = ask("What information is missing?")
+    s.case("Q6", "routing", "What information is missing?",
+           "The measures the worry model could not obtain and why items are unrankable, each citing its records",
+           lambda: (q_miss["status"] == "qualified" and q_miss["claims"]
+                    and all(c["evidence"] for c in q_miss["claims"]), len(q_miss["claims"])))
+    q_noise = ask("Why do the purple elephants sing?")
+    s.case("Q7", "routing", "An unsupported question whose words barely match any record",
+           "An honest 'no verified record' answer; no passage that matches a single word is cited",
+           lambda: (q_noise["status"] == "abstained" and not q_noise["evidence"]
+                    and q_noise["answer"] == "I couldn't find a verified company record for that information.",
+                    q_noise["answer"]), refusal="relevance threshold")
+    q_pay = ask("What is Someone Notinhr's salary?")
+    s.case("Q8", "routing", "Salary of a person who is not in the HR export",
+           "Refused by POL-PAY-01 in plain words; no payroll figure, no documents",
+           lambda: (q_pay["status"] == "refused" and q_pay["refusal"]["policy"] == "POL-PAY-01"
+                    and not q_pay["evidence"]
+                    and q_pay["answer"].startswith("I can't provide individual salary information"), q_pay["answer"]),
+           refusal="POL-PAY-01")
+    from veloxa import tools as _tools
+    from veloxa.temporal import Mode as _Mode
+    from veloxa.temporal import resolve_basis as _rb
+
+    regc2 = client.get("/v1/knowledge/conflicts", headers=H).json()["conflicts"]
+    xc2 = client.get(f"/v1/knowledge/conflicts/{regc2[0]['conflict_id']}/explain", headers=H).json()["explanation"] \
+        if regc2 else {"sections": []}
+    texts = [i["text"] for x in xc2["sections"] for i in x["items"]]
+    s.case("Q9", "routing", "Conflict values are shown as readable text",
+           "Each competing value has a display text; no raw dictionary or object appears in the explanation",
+           lambda: (bool(regc2) and all(c.get("display") for c in regc2[0]["claims"])
+                    and not any("{" in t or "object Object" in t for t in texts), texts[:3]))
+    with connect(_dsn(admin, db, "app")) as c:
+        from veloxa import ledger as _ledger
+
+        b = _rb(tid, _ledger.sealed_releases(c, tid), _Mode.CURRENT, None, "Asia/Kolkata", datetime.now(UTC))
+        tr = _tools.conflicts(c, b, _tools.Principal("person:x", "executive", None))
+    s.case("Q10", "routing", "Does the conflicts tool report what the registry holds?",
+           "Recorded disagreements with their state and records; no claim that none exist",
+           lambda: (tr.status == "ok" and tr.facts and not any("no owner-reviewed" in g for g in tr.gaps),
+                    [f.display[:80] for f in tr.facts]))
 
     # ---- Agent self-profile (owner decision 2, 19 Nov 2026): all 14 answer role and manager from their HR record
     import uuid as _uuid
@@ -499,13 +571,18 @@ def cases(s: Suite, admin: str, db: str, data: Path, built: dict) -> None:  # no
     sc = sections(xc) if regc else {}
     s.case("X3", "explanation", "Explain a disagreement between sources",
            "Every competing value is kept, each with its record; uncertainty stated; confidence conflicting",
-           lambda: (bool(regc) and all(str(cl["object"]) in sc.get("recorded", "") for cl in regc[0]["claims"])
+           lambda: (bool(regc) and all(cl["display"] in sc.get("recorded", "") for cl in regc[0]["claims"])
+                    and "{" not in sc.get("recorded", "")                       # readable values, never a dict
                     and sc.get("unknown") and xc["confidence"] == "conflicting", xc["headline"]),
            confidence="conflicting")
     xa = client.post(f"/v1/answers/{arr['audit_id']}/explain", headers=H).json()["explanation"]
     s.case("X4", "explanation", "Explain the conflicting ARR answer",
-           "The explanation keeps the disagreement as not established and gives no single figure",
-           lambda: ("disagree" in sections(xa).get("unknown", "").lower() and xa["status"] == "explained"
+           "The answer shows the disagreement once (its own section) and the explanation keeps every reported "
+           "figure without choosing one",
+           lambda: (arr["status"] == "conflict" and len(arr["disagreements"]) >= 1 and xa["status"] == "explained"
+                    and all(c["text"].split(":")[-1].strip().split(" ")[0] in sections(xa).get("recorded", "")
+                            for c in arr["claims"])
+                    and "disagree" not in sections(xa).get("unknown", "").lower()          # not repeated
                     and xa["wording"]["mode"] == "facts_only", list(sections(xa))),
            confidence="conflicting", refusal="disagreement not resolved by wording")
     del knowledge

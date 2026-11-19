@@ -338,6 +338,32 @@ def build_batch(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int) -> int:
     return n
 
 
+def _day(text) -> str | None:
+    from datetime import date as _date
+
+    try:
+        d = _date.fromisoformat(str(text)[:10])
+    except (TypeError, ValueError):
+        return None
+    return f"{d.day} {d.strftime('%B %Y')}"
+
+
+def display_value(obj) -> str:
+    """Human-readable text for a claim's structured value (reported figure, spoken figure, plain value)."""
+    if not isinstance(obj, dict):
+        return "" if obj is None else str(obj)
+    if obj.get("value_text"):
+        bits = [b for b in (obj.get("period"), f"issued {_day(obj['issued_on'])}" if _day(obj.get("issued_on"))
+                            else None) if b]
+        return f"{obj['value_text']}" + (f" ({'; '.join(bits)})" if bits else "") + ", as reported"
+    if obj.get("span") or obj.get("number"):
+        said = obj.get("span") or obj.get("number")
+        return f"\u201c{said}\u201d, as spoken" + (" (approximate)" if obj.get("hedged") else "") + \
+            (f" ({obj['period']})" if obj.get("period") else "") + "; not a recorded figure"
+    shown = {k: v for k, v in obj.items() if v not in (None, "", [], {}) and k not in ("unit",)}
+    return "; ".join(f"{k.replace('_', ' ')}: {v}" for k, v in shown.items()) or "no value recorded"
+
+
 def conflicts_at(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int) -> list[dict]:
     """Registry entries visible at K, each with its claims and its latest human decision (if any)."""
     rows = conn.execute(
@@ -349,7 +375,8 @@ def conflicts_at(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int) -> list
                           " ORDER BY claim_id", (tenant_id, r["claim_ids"])).fetchall()
         dec = conn.execute("SELECT * FROM knowledge.conflict_decision WHERE tenant_id = %s AND conflict_id = %s"
                            " ORDER BY at DESC LIMIT 1", (tenant_id, r["conflict_id"])).fetchone()
-        out.append({**dict(r), "claims": [dict(c) for c in cl], "decision": dict(dec) if dec else None})
+        out.append({**dict(r), "claims": [dict(c) | {"display": display_value(c["object"])} for c in cl],
+                    "decision": dict(dec) if dec else None})
     return out
 
 

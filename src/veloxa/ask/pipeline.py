@@ -118,6 +118,12 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
     # and are used only to recognise that a question targets an individual.
     people = _people(conn, current)          # names AND employee IDs: either one identifies an individual
     refusal = policy.prescreen(question, [p["full_name"] for p in people] + [p["emp_id"] for p in people])
+    from . import routes
+
+    if refusal is None and routes.pays_an_individual(question):      # named or not in the HR export
+        reading = "I read this as a request for one person's pay (POL-PAY-01: individual compensation)."
+        return _record(conn, tenant_id, principal, now, current, base,
+                       _refused(policy.POLICIES["POL-PAY-01"], current, reading))
     if refusal:
         reading = f"I read this as a request covered by {refusal.policy.policy_id} ({refusal.policy.title})."
         return _record(conn, tenant_id, principal, now, current, base, _refused(refusal.policy, current, reading))
@@ -148,6 +154,11 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
     except ValueError as e:      # e.g. VALID_AT over sources that record no valid time: unanswerable, not an error
         return _record(conn, tenant_id, principal, now, basis, base, _abstained(
             basis, f"I read this as a question at {basis.banner()}.", [str(e)]))
+    routed = routes.Router(conn, tenant_id, tz, principal, basis, _basis_json(basis), SOURCE_CLASS).route(
+        spec.remainder or question)
+    if routed is not None:
+        base["diagnostics"] = {"stage": "routed", "route": routed["interpretation"][:80]}
+        return _record(conn, tenant_id, principal, now, basis, base, routed)
     the_plan = planner.plan(spec.remainder, people, now.year, tz)
     interpretation = the_plan.interpretation + (f" Time: {spec.phrase!r} -> {basis.banner()}." if spec.phrase
                                                 else f" Time: {basis.banner()}.")
@@ -189,6 +200,19 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
         "access_mode": principal.access.mode if principal.access is not None else "tenant_wide",
     }
 
+    searched = [st for st in the_plan.steps if st.tool == "text_search"]
+    if (searched and len(searched) == len(the_plan.steps)) or fallback:
+        terms = {t.strip().lower() for st in searched for t in st.args.get("query", "").split(" OR ")} | (
+            {t.lower() for t in fallback.split(" OR ")} if fallback else set())
+        need = 2 if len(terms) >= 2 else 1
+        for r in results:
+            if r.tool == "text_search" and r.evidence:
+                keep = [e for e in r.evidence
+                        if len({m.lower() for m in re.findall(r"\u27e6([^\u27e7]+)\u27e7", e.excerpt)}) >= need]
+                r.evidence = keep
+                if not keep:
+                    r.status, r.gaps = "no_data", ["no admitted passage matches enough of the question to answer it"]
+        base["diagnostics"]["relevance_threshold"] = f">= {need} distinct query terms per passage"
     withheld = [r for r in results if r.status == "withheld"]
     if withheld and len(withheld) == len(results):
         return _record(conn, tenant_id, principal, now, basis, base,
@@ -340,7 +364,7 @@ _FORECAST = _Forecast()
 
 def _abstained(basis: ReadBasis, interpretation: str, unknowns: list[str]) -> dict:
     out = _empty(basis, "abstained", "D", interpretation)
-    out["answer"] = "I don't know: no usable evidence answers this at this knowledge point."
+    out["answer"] = "I couldn't find a verified company record for that information."
     out["grade"]["reasons"] = ["no claim survived verification"]
     out["unknowns"] = list(dict.fromkeys(unknowns))
     return out
@@ -354,7 +378,7 @@ def _record(conn: psycopg.Connection, tenant_id: uuid.UUID, principal: tools.Pri
     from . import confidence
 
     result = confidence.assess(dict(result))                      # deterministic, never a model
-    result["follow_ups"] = confidence.follow_ups(result)
+    result["follow_ups"] = result.get("follow_ups") or confidence.follow_ups(result)   # routes may set their own
     from .. import schema
 
     specialists_ok = schema.available(conn, "company_intelligence")   # optional enrichment; never fails the answer

@@ -311,11 +311,29 @@ def timeline(conn: psycopg.Connection, basis: ReadBasis, principal: Principal, s
 
 
 def conflicts(conn: psycopg.Connection, basis: ReadBasis, principal: Principal, **_) -> ToolResult:
-    """Owner-reviewed conflict records (§7.6). None have been authored yet; the tool says so instead of
-    inventing or auto-detecting a source-truth conclusion."""
-    return ToolResult("conflicts", "no_data",
-                      gaps=["no owner-reviewed conflict records exist yet (conclusions are the owner's, in "
-                            "TRANSCRIPT_NOTES.md)"])
+    """The Conflict Registry at the basis (migration 0021): each recorded disagreement with its competing values and
+    whether a reviewed decision is recorded. No value is chosen here. The owner's conclusions about transcript
+    contradictions are published in TRANSCRIPT_NOTES.md (documentation, not records in the knowledge projection)."""
+    from . import knowledge, schema
+
+    note = ("the owner's conclusions about transcript contradictions are published in TRANSCRIPT_NOTES.md; they are "
+            "documentation, not records in the knowledge projection")
+    if not basis.batch_seq or not schema.available(conn, "company_intelligence"):
+        return ToolResult("conflicts", "no_data", gaps=["the Conflict Registry is not available", note])
+    with tenant_tx(conn, basis.tenant_id, batch_seq=basis.batch_seq):
+        found = knowledge.conflicts_at(conn, basis.tenant_id, basis.batch_seq)
+    facts = []
+    for i, c in enumerate(found, 1):
+        values = "; ".join(cl["display"] for cl in c["claims"])
+        state = ("a reviewed decision is recorded" if c.get("decision") else
+                 "resolved by precedence rule " + str(c["rule"]) if c["resolution"] == "rule" else
+                 "needs review: no decision is recorded")
+        facts.append(Fact(f"conflict:{i}", f"Recorded disagreement about {c['subject'].replace('metric:', '')}: "
+                          f"{values} ({state})", None, None, "record", [cl["record_id"] for cl in c["claims"]]))
+    if not facts:
+        return ToolResult("conflicts", "no_data", gaps=["no disagreement is recorded at this knowledge point", note])
+    return ToolResult("conflicts", "ok", facts, _evidence(conn, basis, sorted({i for f in facts for i in f.inputs})),
+                      gaps=[note])
 
 
 TOOLS = {

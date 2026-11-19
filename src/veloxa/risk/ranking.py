@@ -108,8 +108,8 @@ def eligibility(policy: dict, item: Item, s: dict) -> list[str]:
     g = policy["gate_thresholds"]
     why = []
     if s["measured_weight"] + 1e-9 < g["eligibility_min_measured_weight"]:
-        why.append(f"only {s['measured_weight']:.0%} of the weight is measured or not applicable "
-                   f"(the gate is {g['eligibility_min_measured_weight']:.0%})")
+        why.append(f"too little of its exposure can be measured from the records ({s['measured_weight']:.0%} "
+                   f"measured; at least {g['eligibility_min_measured_weight']:.0%} is needed to rank it)")
     if g.get("require_verified_evidence") and not item.verified:
         why.append("its evidence did not pass verification")
     if len(item.evidence) < g.get("min_evidence_records", 1):

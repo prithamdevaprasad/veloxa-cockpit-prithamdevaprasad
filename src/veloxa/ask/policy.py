@@ -30,8 +30,7 @@ class Refusal:
 POLICIES = {
     p.policy_id: p for p in (
         Policy("POL-PAY-01", "Individual compensation",
-               "Individual pay is protected. Pay values are released only as audited aggregates, and the disclosure "
-               "auditor that clears them is not available yet.",
+               "I can't provide individual salary information because payroll records are restricted.",
                "Ask about ledger spend excluding payroll lines, or headcount by department."),
         Policy("POL-PEOPLE-01", "Ranking or predicting individuals",
                "Veloxa does not rank or predict individuals' attrition, performance or sentiment.",

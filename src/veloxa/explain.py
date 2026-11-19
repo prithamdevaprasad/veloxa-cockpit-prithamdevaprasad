@@ -164,8 +164,10 @@ def worry(item: dict, *, ranked: bool, total_ranked: int = 0) -> dict:
 # ---------------------------------------------------------------- conflicts
 def conflict(c: dict) -> dict:
     claims = c["claims"]
-    recorded = [_item("", f"{_source(cl)} records {c['predicate'].replace('_', ' ')} for {c['subject']} as "
-                      f"{cl['object']}" + (f" (as of {str(cl['valid_at'])[:10]})" if cl.get("valid_at") else ""),
+    from .knowledge import display_value
+
+    what = _subject(c)
+    recorded = [_item("", f"{_source(cl)}: {what} {cl.get('display') or display_value(cl.get('object'))}",
                       [cl["record_id"]]) for cl in claims]
     calc = []
     if c["resolution"] == "rule" and c.get("preferred_claim_id"):
@@ -181,7 +183,7 @@ def conflict(c: dict) -> dict:
         calc.append(_item("", f"A reviewer ({d.get('reviewer')}) recorded a decision: "
                           + (f"prefer {_source(chosen)}" if chosen else "left unresolved")
                           + f". {d.get('rationale', '')}", [chosen["record_id"]] if chosen else []))
-    headline = f"The sources disagree about {c['predicate'].replace('_', ' ')} for {c['subject']}."
+    headline = f"The sources disagree about {what}. Each figure is shown separately; none is chosen."
     return _explanation("conflict", headline, [
         _section("recorded", "What each source says", "recorded", recorded),
         _section("resolution", "How Veloxa treats the disagreement", "calculated", calc),
@@ -189,10 +191,21 @@ def conflict(c: dict) -> dict:
     ], confidence="conflicting")
 
 
+def _subject(c: dict) -> str:
+    subj = str(c.get("subject", ""))
+    if subj.startswith("metric:"):
+        return {"arr": "ARR (annual recurring revenue)"}.get(subj.split(":", 1)[1], subj.split(":", 1)[1].upper())
+    return f"{c.get('predicate', '').replace('_', ' ')} for {subj}".strip()
+
+
+_SOURCES = {"documents": "A board update", "meeting_summaries": "A call transcript", "email": "An e-mail",
+            "keka_hrms": "The HR export", "zoho_books": "The general ledger", "jira": "The Jira export"}
+
+
 def _source(cl: dict) -> str:
     rid = cl.get("record_id", "")
-    system = rid.split(":", 1)[0].replace("_", " ") if ":" in rid else "a record"
-    return f"the {system} source"
+    system = rid.split(":", 1)[0] if ":" in rid else ""
+    return _SOURCES.get(system, f"The {system.replace('_', ' ')} source" if system else "A record")
 
 
 # ---------------------------------------------------------------- answers (including abstentions and refusals)
@@ -212,8 +225,6 @@ def answer(a: dict) -> dict:
         target = calc if "derived" in kinds else recorded
         target.append(_item("", c["text"].replace("⟦", "").replace("⟧", ""),
                             [e for e in c.get("evidence", []) if e not in facts]))
-    for d in a.get("disagreements", []):
-        unknown.append(_item("", f"Sources disagree about {d.get('subject', 'this')}; both values are shown above"))
     for u in a.get("unknowns", []):
         unknown.append(_item("", _cap(_plain_unknown(u))))
     caveats = [_item("", _cap(q)) for q in a.get("qualifiers", []) if not q.lower().startswith(META)]
@@ -221,6 +232,8 @@ def answer(a: dict) -> dict:
         headline = "Veloxa cannot answer this from the admitted records."
         if not unknown:
             unknown.append(_item("", "No admitted record answers this question"))
+    elif (a.get("diagnostics") or {}).get("stage") == "routed" and a.get("answer"):
+        headline = a["answer"]
     else:
         headline = (a.get("interpretation") or "").replace("I read this as: ", "You asked about ").split(" Time:")[0]
         headline = headline.rstrip(".") + "."

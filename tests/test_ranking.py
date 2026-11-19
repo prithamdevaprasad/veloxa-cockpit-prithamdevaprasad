@@ -63,7 +63,8 @@ def test_eligibility_gate_keeps_weakly_measured_items_visible_but_unranked():
     out = r.rank([item("strong", c1=m(2.0)), item("weak", c1=MISSING, c2=MISSING, c3=MISSING)], POLICY)
     assert [x["item_id"] for x in out["ranked"]] == ["strong"]
     [u] = out["unrankable"]
-    assert u["item_id"] == "weak" and "weight is measured" in u["reasons"][0]
+    assert u["item_id"] == "weak" and "too little of its exposure can be measured" in u["reasons"][0]
+    assert "% measured; at least" in u["reasons"][0] and "is needed to rank it" in u["reasons"][0]
 
 
 def test_unsupported_or_unverified_findings_are_never_ranked():
