@@ -37,3 +37,21 @@ def test_personal_sources_aggregate_only_by_non_identifying_columns():
     allow = api_insights.PERSONAL_COUNT_COLUMNS["hiring_tracker"]
     assert allow == {"Status", "Team"}
     assert not allow & {"Hiring Manager", "Notes", "In pipeline", "Req ID"}
+
+
+def test_owner_reported_conversation_fixes():
+    from veloxa import assistant, jira_chat
+    from veloxa.agents import conversation
+    from veloxa.ask import routes
+
+    assert jira_chat._due('Create a Jira task in ENG for "X" due 30 November 2026') == "2026-11-30"
+    assert jira_chat._due("create a task in ENG for X by 2026-12-01") == "2026-12-01"
+    assert jira_chat._due("create a task in ENG for X") is None                       # never invented
+    assert routes.ISSUE_KEY.findall("What is the status of ENG-12?") == ["ENG-12"]
+    assert routes.COMMITMENTS.search("Which commitments are unresolved?")
+    assert scenario_engine.parse("move atlas by 3 weeks", ["Atlas GA"]) == [{"subject": "Atlas GA", "shift_days": 21}]
+    assert scenario_engine.parse("move atlas by 3 weeks", ["Atlas GA", "Atlas Mobile"]) == []   # ambiguous: no guess
+    assert conversation.intent("What are the current issues in your area? Summarize the evidence.") == "updates"
+    for yes in ("yes, create it", "Confirm", "go ahead", "yes please"):
+        assert assistant.CONFIRM.match(yes)
+    assert not assistant.CONFIRM.match("yes, but what is the ARR?")

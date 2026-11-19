@@ -63,6 +63,9 @@ COMMITMENTS = re.compile(r"\b(unresolved|open|outstanding|pending|missed|late|ov
                          r"without (a )?(new )?date)\b|\bwhich commitments\b", re.I)
 TOPIC_ABOUT = re.compile(r"\b(what (do|does) (the )?records? (say|show)|what do we know|tell me|summari[sz]e)\b.{0,10}"
                          r"\babout\s+(?P<topic>[A-Za-z0-9][\w .-]{1,40}?)\s*(,|\band what\b|\?|$)", re.I)
+ISSUE_KEY = re.compile(r"\b([A-Z][A-Z0-9]{1,9}-\d{1,6})\b")
+JIRA_ABOUT = re.compile(r"\b(jira|tickets?|issues?)\b.{0,30}\b(say|says|about|mention\w*|on)\s+(the\s+)?"
+                        r"(?P<topic>[A-Za-z0-9][\w .-]{2,60}?)\s*\??$", re.I)
 STOP = {"risk", "risks", "concern", "concerns", "worry", "exposure", "what", "our", "the", "is", "are", "about",
         "with", "this", "that", "current", "currently", "biggest", "main", "any", "there"}
 
@@ -180,6 +183,10 @@ class Router:
 
         if continuity.asks(q):                      # before DELAY: "what does the resignation do to the release?"
             out = continuity.answer(self, q)
+            if out is not None:
+                return out
+        if ISSUE_KEY.search(q) or JIRA_ABOUT.search(q):
+            out = self.issues(q)
             if out is not None:
                 return out
         if COMMITMENTS.search(q):
@@ -308,6 +315,42 @@ class Router:
         return _result(self.basis_json, "qualified", f"I read this as: what the board updates say about {topic}.",
                        " ".join(c["text"] for c in claims), claims, [recs[i] for c in claims for i in c["evidence"]],
                        ["Board updates are reported statements, not independently verified."])
+
+    def issues(self, q):
+        """Named issues ("status of VIT-2") or issues about a topic, from the issue claims (exports and Jira sync)."""
+        from .continuity import _claims
+
+        k = self.basis.batch_seq
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id, k):
+            issues = _claims(self.conn, self.tenant_id, k, "issue")
+        keys = {m.upper() for m in ISSUE_KEY.findall(q)}
+        if keys:
+            hits = {s: d for s, d in issues.items() if s.split(":", 1)[1] in keys}
+        else:
+            m = JIRA_ABOUT.search(q)
+            words = [w for w in re.findall(r"[a-z0-9]+", m.group("topic").lower()) if len(w) > 2 and w not in STOP]
+            hits = {s: d for s, d in issues.items()
+                    if len([w for w in words if w in str(d.get("summary", "")).lower()]) >= min(2, len(words))}
+        if not hits:
+            return None
+        recs = self.records({r for d in hits.values() for r in d["_records"]})
+        claims = []
+        for s, d in sorted(hits.items())[:8]:
+            bits = [f"{s.split(':', 1)[1]}: {d.get('summary') or 'no summary recorded'}",
+                    f"status {d.get('status_at_export') or 'not recorded'}"]
+            if d.get("assignee_name") or d.get("assignee_source_id"):
+                bits.append(f"assignee {d.get('assignee_name') or d.get('assignee_source_id')}")
+            bits.append(f"due {_human(d['due_date'])}" if d.get("due_date") else "no due date recorded")
+            c = self.claim("; ".join(bits) + ".", sorted(d["_records"]), recs)
+            if c:
+                claims.append(c)
+        if not claims:
+            return None
+        return _result(self.basis_json, "answered", "I read this as: what the tracker records say about these "
+                       "issues.", " ".join(c["text"] for c in claims), claims,
+                       [recs[i] for c in claims for i in c["evidence"]],
+                       ["Tracker records are as of their last sync or export; later changes in Jira are not shown "
+                        "until the next sync is reviewed and admitted."])
 
     def commitments(self, q):
         """Recorded commitments and what is unresolved about each (moved without a new date, no date, one source)."""

@@ -253,11 +253,36 @@ def main() -> int:
     if args.admit or args.review:
         admit(admin, args.db, args.review)
     if args.serve:
+        import threading
+        import time
+
         import uvicorn
 
+        from veloxa import intake
         from veloxa.api import PRIVILEGED_ENV, create_app
+        from veloxa.db import connect
+        from veloxa.storage import LocalContentStore
 
         app_dsn = _dsn(admin, args.db, "app")
+        ingest_dsn, projection_dsn = _dsn(admin, args.db, "ingest"), _dsn(admin, args.db, "projection")
+        # Data-room originals: write-once files outside the repository (VELOXA_ORIGINALS_DIR, else a temp folder).
+        import tempfile
+
+        originals = Path(os.environ.get("VELOXA_ORIGINALS_DIR")
+                         or Path(tempfile.gettempdir()) / "veloxa-company-originals")
+        os.environ["VELOXA_ORIGINALS_DIR"] = str(originals)
+        store = LocalContentStore(originals)
+
+        def worker():                    # the data-room worker: validates uploads, admits AUTHORISED submissions
+            while True:
+                try:
+                    with connect(ingest_dsn) as i, connect(projection_dsn) as p:
+                        intake.work_once(i, p, store)
+                except Exception:  # noqa: BLE001, S110 - lab worker: keep polling
+                    pass
+                time.sleep(3)
+
+        threading.Thread(target=worker, daemon=True).start()
         for k in PRIVILEGED_ENV + ("VELOXA_TEST_ADMIN_DSN",):
             os.environ.pop(k, None)
         os.environ.update({"VELOXA_DEV_AUTH": "1", "VELOXA_DEV_TOKEN": LAB_TOKEN,
@@ -266,7 +291,8 @@ def main() -> int:
         from veloxa import telemetry as _telemetry
 
         _telemetry.configure_logging()        # unhandled errors are logged with their request ID and traceback
-        uvicorn.run(create_app(dsn=app_dsn), host="127.0.0.1", port=args.port, log_level="warning")
+        uvicorn.run(create_app(dsn=app_dsn, store_factory=lambda: store), host="127.0.0.1", port=args.port,
+                    log_level="warning")
     return 0
 
 

@@ -169,6 +169,50 @@ def register(app, *, state, principal_of, now_fn, jira_factory=None) -> None:
         return run(authorization, lambda j, t, pr: (j.disconnect(t), {"connected": False})[1], "jira.disconnected", {},
                    ("admin",))
 
+    def _scheduled_sync():
+        """Optional pull schedule for the tenant VELOXA_JIRA_SYNC_TENANT (slug):
+        VELOXA_JIRA_SYNC="PROJ[,PROJ]:department:source_type", every
+        VELOXA_JIRA_SYNC_EVERY_MIN minutes (default 15), as VELOXA_JIRA_SYNC_ACTOR (a workspace administrator).
+        Each run submits only changed issues to the data room (pending review); nothing is admitted here."""
+        import os as _os
+        import threading
+        import time as _time
+
+        spec, actor = _os.environ.get("VELOXA_JIRA_SYNC"), _os.environ.get("VELOXA_JIRA_SYNC_ACTOR")
+        if not spec or not actor or spec.count(":") != 2:
+            return
+        projects, dept, stype = spec.split(":")
+        every = max(5, int(_os.environ.get("VELOXA_JIRA_SYNC_EVERY_MIN", "15"))) * 60
+
+        def loop():
+            from . import connectors
+
+            while True:
+                _time.sleep(every)
+                try:
+                    j = jira()
+                    if j is None:
+                        continue
+                    with connect(state["dsn"]) as conn:
+                        tid = conn.execute("SELECT tenant_id FROM directory.tenant WHERE slug = %s",
+                                           (_os.environ.get("VELOXA_JIRA_SYNC_TENANT", ""),)).fetchone()
+                    if tid is None or not j.status(str(tid["tenant_id"])).get("connected"):
+                        continue
+                    tid = tid["tenant_id"]
+                    con = connectors.oauth_connector(j, str(tid), projects.split(","))
+                    with connect(state["dsn"]) as conn:
+                        out = connectors.sync(conn, state["store"](), tid, con, actor=actor,
+                                              department_id=dept, source_type=stype)
+                        record(conn, tid, actor, "jira.sync", {"projects": projects.split(","), "scheduled": True,
+                                                                **{k: (str(v) if k == "submission_id" and v else v)
+                                                                   for k, v in out.items() if k != "error"}})
+                except Exception:  # noqa: BLE001, S110 - a failed run is retried at the next interval
+                    pass
+
+        threading.Thread(target=loop, daemon=True, name="jira-sync").start()
+
+    _scheduled_sync()
+
     @app.post("/v1/integrations/jira/sync")
     def sync(body: SyncIn, authorization: str | None = Header(default=None)):
         """Import Jira issues into the GOVERNED data room over the OAuth connection: changed issues (by key and
@@ -223,8 +267,8 @@ def register(app, *, state, principal_of, now_fn, jira_factory=None) -> None:
                                                                          "outcome": type(e).__name__})
                 return JSONResponse(status_code=409, content={"error": "not_submitted", "detail": str(e)[:300]})
             record(conn, p.tenant_id, p.principal_id, "jira.sync", {"projects": body.projects, **{
-                k: (str(v) if k == "submission_id" else v) for k, v in out.items() if k != "error"}})
-            return {k: (str(v) if k == "submission_id" else v) for k, v in out.items()}
+                k: (str(v) if k == "submission_id" and v else v) for k, v in out.items() if k != "error"}})
+            return {k: (str(v) if k == "submission_id" and v else v) for k, v in out.items()}
 
     @app.get("/v1/integrations/jira/migration-preview")
     def migration_preview(authorization: str | None = Header(default=None)):

@@ -120,7 +120,22 @@ class JiraConnector:
     def _shape(self, issue: dict) -> dict:
         f = issue.get("fields", {})
         kept = {k: f.get(k) for k in self.config.fields if k in f}          # allowlist only; nothing interpreted
-        return {"key": issue["key"], "id": issue.get("id"), "updated": f.get("updated"), "fields": kept}
+        rec = {"key": issue["key"], "id": issue.get("id"), "updated": f.get("updated"), "fields": kept}
+        if self.config.base_url == "oauth":                 # flat, readable columns (searchable; mapped to claims)
+            from .jira_oauth import _plain
+
+            name = lambda x: (x or {}).get("displayName") or (x or {}).get("name") if isinstance(x, dict) else x  # noqa: E731
+            comments = (f.get("comment") or {}).get("comments", []) if isinstance(f.get("comment"), dict) else []
+            rec.update({
+                "Key": issue["key"], "Summary": f.get("summary"), "Status": name(f.get("status")),
+                "Assignee": name(f.get("assignee")), "Due date": f.get("duedate"),
+                "Issue type": name(f.get("issuetype")),
+                "Project": issue["key"].split("-")[0], "Created": f.get("created"), "Updated": f.get("updated"),
+                "Fix Version": ", ".join(v.get("name", "") for v in f.get("fixVersions") or []) or None,
+                "Comments": " | ".join(_plain(c.get("body")) for c in comments)[:4000] or None,
+                "Links": ", ".join(((ln.get("outwardIssue") or ln.get("inwardIssue") or {}).get("key") or "")
+                                   for ln in f.get("issuelinks") or []) or None})
+        return rec
 
     def fetch(self, cursor: str | None) -> tuple[list[dict], str | None]:
         out, token, newest = [], None, cursor
@@ -216,7 +231,7 @@ def sync(conn, store, tenant_id, connector: JiraConnector, *, actor: str, depart
         with tenant_tx(conn, tenant_id, actor):
             rows = conn.execute("SELECT scope FROM runtime.connector_run WHERE tenant_id = %s AND connector = %s"
                                 " AND status = 'ok'", (tenant_id, connector.name)).fetchall()
-        for r in rows:
+        for r in rows if mode != "initial" else []:      # "initial" = a deliberate full refresh (new versions)
             seen |= r["scope"].get("submitted_versions", {})
         new = changed(records, seen)
         sid = None

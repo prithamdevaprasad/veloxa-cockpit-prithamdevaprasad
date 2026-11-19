@@ -53,6 +53,21 @@ def _summary(q: str) -> str:
     return (text[:1].upper() + text[1:])[:255]
 
 
+_MONTHS = {m: i for i, m in enumerate(("january", "february", "march", "april", "may", "june", "july", "august",
+                                       "september", "october", "november", "december"), start=1)}
+
+
+def _due(q: str) -> str | None:
+    """A due date stated in the request ("due 30 November 2026", "by 2026-12-01"), as YYYY-MM-DD; else None."""
+    m = re.search(r"\b(?:due|by|deadline)\s+(?:on\s+)?(\d{4}-\d{2}-\d{2})\b", q, re.I)
+    if m:
+        return m.group(1)
+    m = re.search(r"\b(?:due|by|deadline)\s+(?:on\s+)?(\d{1,2})\s+([a-z]+)\s+(\d{4})\b", q, re.I)
+    if m and m.group(2).lower() in _MONTHS:
+        return f"{int(m.group(3)):04d}-{_MONTHS[m.group(2).lower()]:02d}-{int(m.group(1)):02d}"
+    return None
+
+
 def handle(j: jira_oauth.Jira | None, tenant: str, principal: str, q: str) -> dict:
     if j is None:
         return _result("abstained", "Jira isn't configured on this server, so I can't act in Jira. An administrator "
@@ -131,7 +146,11 @@ def _create(j, tenant, principal, q):
         res["awaiting"] = {"field": "summary", "project": proj["key"], "type": match[0]["name"]}
         return res
     description = f"Requested in Veloxa: “{q.strip()}”"
-    p = j.preview_create(tenant, principal, proj["key"], match[0]["id"], summary, description)
+    due = _due(q)
+    if due:                                   # only when the request states a date; never invented
+        summary = re.sub(r"\s*,?\s*(due|by|deadline)\s+.*$", "", summary, flags=re.I).strip() or summary
+    p = j.preview_create(tenant, principal, proj["key"], match[0]["id"], summary, description,
+                         {"duedate": due} if due else None)
     return _result("action_preview", f"Here is the issue I would create in {proj['key']}. Check it, then confirm to "
                    "write it to Jira. Nothing has been created yet.", "I read this as: create a Jira issue (preview "
                    "only until you confirm).", action=p)
