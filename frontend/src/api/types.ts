@@ -48,7 +48,7 @@ export interface Refusal {
 export type AnswerStatus = "answered" | "qualified" | "conflict" | "abstained" | "refused" | "action_preview" | "clarify";
 /** A Jira write preview from Ask: shown for explicit confirmation; nothing is written before that. */
 export interface JiraPreview {
-  preview_id: string; operation: "create" | "update"; project?: string; issue_type?: string; key?: string;
+  preview_id: string; operation: "create" | "update" | "internal_request" | "scenario"; project?: string; issue_type?: string; key?: string;
   url?: string; fields: Record<string, unknown>; description?: string | null; comment?: string | null;
 }
 

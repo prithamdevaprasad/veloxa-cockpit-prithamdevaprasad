@@ -72,6 +72,15 @@ def register(app, *, state, principal_of, now_fn, jira_factory=None) -> None:
         return p
 
     USE = ("admin", "company_reader")
+
+    def permission_for(conn, p) -> bool:
+        """The same organisation-level rule for a principal already resolved (Ask threads)."""
+        with tenant_tx(conn, p.tenant_id, p.principal_id):
+            return any(conn.execute("SELECT policy.holds(%s, %s, 'tenant', %s, %s) AS ok",
+                                    (p.tenant_id, p.principal_id, str(p.tenant_id), rel)).fetchone()["ok"]
+                       for rel in USE)
+
+    state["jira_permission_for"] = permission_for
     state["jira_permission"] = lambda conn, authorization: admin(conn, authorization, USE)
 
     def record(conn, tenant_id, principal_id, kind, detail):

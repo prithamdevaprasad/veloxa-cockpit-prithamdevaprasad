@@ -91,7 +91,7 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
                 return p
             try:
                 return product.ask_in_thread(conn, p.tenant_id, p, tz_of(conn, p.tenant_id), thread_id,
-                                             body.question, now_fn(), as_known_at=body.as_known_at)
+                                             body.question, now_fn(), state=state, as_known_at=body.as_known_at)
             except product.ProductError as e:
                 return _err(e)
             except ValueError as e:

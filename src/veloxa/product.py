@@ -20,7 +20,6 @@ from datetime import datetime
 import psycopg
 
 from . import audit, tools
-from .ask import pipeline
 from .db import tenant_tx
 
 PRONOUN = re.compile(r"\b(it|this|that|they|them|its|their|these|those)\b", re.I)
@@ -79,12 +78,19 @@ def contextual_question(question: str, context: dict) -> str:
 
 
 def ask_in_thread(conn, tenant_id, principal: tools.Principal, tz: str, thread_id: str, question: str,
-                  now: datetime, **time_kw) -> dict:
+                  now: datetime, state: dict | None = None, **time_kw) -> dict:
     t = get_thread(conn, tenant_id, principal.principal_id, thread_id)
     if t is None:
         raise ProductError("not_found", "no such thread")
     asked = contextual_question(question, t["context"])
-    answer = pipeline.answer(conn, tenant_id, tz, principal, asked, now, **time_kw)
+    with tenant_tx(conn, tenant_id, principal.principal_id):
+        last = conn.execute("SELECT a.question FROM runtime.thread_answer t JOIN runtime.answer a ON a.tenant_id ="
+                            " t.tenant_id AND a.answer_id = t.answer_id WHERE t.tenant_id = %s AND t.thread_id = %s"
+                            " ORDER BY t.seq DESC LIMIT 1", (tenant_id, thread_id)).fetchone()
+    from . import assistant
+
+    answer = assistant.respond(conn, tenant_id, principal, tz, asked, now, state=state or {},
+                               thread_last=last["question"] if last else None, **time_kw)
     with tenant_tx(conn, tenant_id, principal.principal_id):
         seq = conn.execute("SELECT coalesce(max(seq), 0) + 1 AS s FROM runtime.thread_answer WHERE tenant_id = %s"
                            " AND thread_id = %s", (tenant_id, thread_id)).fetchone()["s"]

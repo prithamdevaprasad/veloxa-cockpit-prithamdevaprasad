@@ -52,6 +52,13 @@ def assert_unprivileged(env: Mapping[str, str] | None = None) -> None:
         )
 
 
+class RequestCommit(BaseModel):
+    """Confirm a previewed internal review request."""
+    model_config = ConfigDict(extra="forbid")
+    preview_id: str = Field(min_length=10, max_length=100)
+    confirm: bool
+
+
 class ScenarioRun(BaseModel):
     """One or more what-if changes, structured or as free text (read-only; nothing is saved)."""
     model_config = ConfigDict(extra="forbid")
@@ -346,25 +353,19 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
                 return _403("the development principal is not an active member of the workspace")
         return _with_access(conn, principal, tid)
 
-    def _jira_chat(conn, principal, authorization, question: str):
-        """A Jira request from Ask: the integration's own permission (administration or the company-reader grant),
-        then a read, a clarifying question or a PREVIEW. Audited (structure only); the write needs confirmation."""
-        import uuid as _uuid
+    @app.post("/v1/requests/commit")
+    def request_commit(body: RequestCommit, authorization: str | None = Header(default=None)):
+        """Submit a previewed internal review request (recorded and pending; Veloxa contacts no one)."""
+        from . import assistant, product
 
-        from . import audit, jira_chat
-        from .db import tenant_tx as _ttx
-
-        allowed = state["jira_permission"](conn, authorization)
-        if isinstance(allowed, JSONResponse):
-            out = jira_chat._result("refused", "Jira actions need workspace administration or the company-reader "
-                                    "grant. Ask an administrator for access.", "I read this as a Jira request.")
-        else:
-            out = jira_chat.handle(state["jira_get"](), str(principal.tenant_id), principal.principal_id, question)
-        with _ttx(conn, principal.tenant_id, principal.principal_id):
-            audit.append(conn, principal.tenant_id, "jira.chat",
-                         {"status": out["status"], "operation": (out.get("action") or {}).get("operation"),
-                          "key": (out.get("action") or {}).get("key")})
-        return out | {"answer_id": str(_uuid.uuid4()), "question": question, "pipeline_version": "jira-chat-1"}
+        with connect(state["dsn"]) as conn:
+            principal = _principal(conn, authorization, now_fn())
+            if isinstance(principal, JSONResponse):
+                return principal
+            try:
+                return assistant.commit_request(conn, principal.tenant_id, principal, body.preview_id, body.confirm)
+            except (ValueError, product.ProductError) as e:
+                return JSONResponse(status_code=409, content={"error": "not_submitted", "detail": str(e)})
 
     @app.post("/v1/ask")
     def ask(body: AskRequest, authorization: str | None = Header(default=None)):
@@ -374,13 +375,11 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             if isinstance(principal, JSONResponse):
                 return principal
             tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
-            from . import jira_chat
+            from . import assistant
 
-            if jira_chat.asks(body.question) and "jira_permission" in state:     # Jira actions: preview, never write
-                return _jira_chat(conn, principal, authorization, body.question)
-            try:
-                return pipeline.answer(conn, tenant_id, tz, principal, body.question, now,
-                                       mode=body.mode, as_of=body.as_of, as_known_at=body.as_known_at)
+            try:              # one governed conversational entry point (also used by saved threads)
+                return assistant.respond(conn, tenant_id, principal, tz, body.question, now, state=state,
+                                         mode=body.mode, as_of=body.as_of, as_known_at=body.as_known_at)
             except pipeline.InvalidTime as e:
                 return JSONResponse(status_code=422, content={"error": "invalid_time", "detail": str(e)})
 

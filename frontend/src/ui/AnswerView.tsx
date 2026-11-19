@@ -120,8 +120,9 @@ export function AnswerView({ answer }: { answer: Answer }) {
     lead = cap(answer.answer.replace(/^I don't know:\s*/i, "")) || "There isn't enough evidence to answer this.";
     leadTone = "muted";
   } else if (answer.status === "conflict") { lead = "The sources disagree. Veloxa shows each value and chooses none."; leadTone = "warn"; }
-  else if ((answer as { diagnostics?: { stage?: string } }).diagnostics?.stage === "routed" && answer.answer)
-    lead = answer.answer;                                     // routed: the subsystem's own plain answer
+  else if (["routed", "assistant"].includes((answer as { diagnostics?: { stage?: string } }).diagnostics?.stage ?? "")
+           && answer.answer)
+    lead = answer.answer;                                     // routed / conversation: the plain answer itself
   else if (answer.claims.length === 1 && text.length === 1) lead = clean(answer.claims[0].text);
   else {
     const search = subject && /^a text search for (.*)$/i.exec(subject);
@@ -141,7 +142,7 @@ export function AnswerView({ answer }: { answer: Answer }) {
                title={`${answer.grade.label}: ${answer.grade.reasons.join("; ")}`} />
       </div>
 
-      <p className={`brief-lead ${leadTone}`}>{lead}</p>
+      <div className={`brief-lead ${leadTone}`}><RichText text={lead} /></div>
       {explainable && <ExplanationView ex={ex} compact />}
 
       {answer.refusal && (
@@ -252,7 +253,8 @@ export function AnswerView({ answer }: { answer: Answer }) {
             .join(", ")}. Why: {answer.specialists![0].reason}.
         </p>
       )}
-      {answer.action && answer.status === "action_preview" && <JiraConfirm p={answer.action} />}
+      {answer.action && answer.status === "action_preview" && (answer.action.operation === "internal_request"
+        ? <RequestConfirm p={answer.action as unknown as InternalRequest} /> : <JiraConfirm p={answer.action} />)}
       {(answer.follow_ups?.length ?? 0) > 0 && <FollowUps items={answer.follow_ups!} />}
 
       <footer className="brief-foot">
@@ -290,6 +292,50 @@ export function Highlighted({ text }: { text: string }) {
   const parts = text.split(/(⟦[^⟧]*⟧)/g);
   return <>{parts.map((p, i) => p.startsWith("⟦")
     ? <mark key={i} className="hl">{p.slice(1, -1)}</mark> : <span key={i}>{p}</span>)}</>;
+}
+
+/** Paragraphs, "- " bullets and **bold** from a plain answer (no HTML is interpreted). */
+function RichText({ text }: { text: string }) {
+  const inline = (t: string) => t.split(/(\*\*[^*]+\*\*)/g).map((x, i) =>
+    x.startsWith("**") && x.endsWith("**") ? <strong key={i}>{x.slice(2, -2)}</strong> : <Fragment key={i}>{x}</Fragment>);
+  const blocks = text.split(/\n\s*\n/);
+  if (blocks.length === 1 && !text.includes("\n- ")) return <>{inline(text)}</>;
+  return <>{blocks.map((b, i) => {
+    const lines = b.split("\n").filter((l) => l.trim());
+    const bullets = lines.filter((l) => l.trim().startsWith("- "));
+    return bullets.length && bullets.length === lines.length - (lines[0].trim().startsWith("- ") ? 0 : 1)
+      ? <div key={i}>{!lines[0].trim().startsWith("- ") && <p style={{ margin: "6px 0 2px" }}>{inline(lines[0])}</p>}
+          <ul className="bullets small" style={{ margin: 0 }}>{bullets.map((l) => <li key={l}>{inline(l.trim().slice(2))}</li>)}</ul></div>
+      : <p key={i} style={{ margin: "6px 0" }}>{inline(lines.join(" "))}</p>;
+  })}</>;
+}
+
+interface InternalRequest { preview_id: string; operation: "internal_request"; department: string; request: string;
+  status_after_confirmation: string; notes: string[] }
+
+/** An internal review request: recorded and pending after confirmation; Veloxa contacts no one. */
+function RequestConfirm({ p }: { p: InternalRequest }) {
+  const [ok, setOk] = useState(false);
+  const [done, setDone] = useState<{ request_id: string; state: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  async function submit() {
+    setError(null);
+    try { setDone(await request("POST", "/v1/requests/commit", { preview_id: p.preview_id, confirm: true })); }
+    catch (e) { setError(e instanceof ApiError ? e.message : String(e)); }
+  }
+  if (done) return <p className="callout ok small" role="status">Request recorded for {p.department} ({done.state}).
+    Veloxa has not contacted anyone; share it with the reviewer.</p>;
+  return (
+    <div className="callout warn stack small" aria-label="Request to confirm">
+      <strong>Review request for {p.department}</strong>
+      <p style={{ margin: 0 }}>{p.request}</p>
+      <p className="muted" style={{ margin: 0 }}>After confirmation: {p.status_after_confirmation}.</p>
+      <ul className="bullets" style={{ margin: 0 }}>{p.notes.map((n) => <li key={n}>{n}</li>)}</ul>
+      <label><input type="checkbox" checked={ok} onChange={(e) => setOk(e.target.checked)} /> Record this request.</label>
+      {error && <p className="callout bad">{error}</p>}
+      <div><Button variant="primary" disabled={!ok} onClick={submit}>Submit request</Button></div>
+    </div>
+  );
 }
 
 /** A Jira write preview: every proposed value is shown; the write needs an explicit tick and a click. */
