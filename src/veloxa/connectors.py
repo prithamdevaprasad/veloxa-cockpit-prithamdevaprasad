@@ -120,7 +120,7 @@ class JiraConnector:
     def _shape(self, issue: dict) -> dict:
         f = issue.get("fields", {})
         kept = {k: f.get(k) for k in self.config.fields if k in f}          # allowlist only; nothing interpreted
-        return {"key": issue["key"], "updated": f.get("updated"), "fields": kept}
+        return {"key": issue["key"], "id": issue.get("id"), "updated": f.get("updated"), "fields": kept}
 
     def fetch(self, cursor: str | None) -> tuple[list[dict], str | None]:
         out, token, newest = [], None, cursor
@@ -154,6 +154,41 @@ class JiraConnector:
         return hmac.compare_digest(want, signature)
 
 
+DEFAULT_SYNC_FIELDS = ("summary", "status", "assignee", "reporter", "issuetype", "priority", "created", "updated",
+                       "duedate", "resolutiondate", "labels", "parent", "fixVersions", "comment", "issuelinks")
+
+
+class _Resp:
+    def __init__(self, status: int, body):
+        self.status_code, self._body, self.headers = status, body, {}
+
+    def json(self):
+        return self._body
+
+
+class OAuthTransport:
+    """The JiraConnector's transport over the Atlassian OAuth connection (cloud ID, bearer token and refresh handled
+    by `jira_oauth.Jira`). There is no second credential system: no API token is used or stored."""
+
+    def __init__(self, jira, tenant: str):
+        self.jira, self.tenant = jira, tenant
+
+    def request(self, method: str, url: str, **kw):
+        from . import jira_oauth
+
+        try:
+            return _Resp(200, self.jira.call(self.tenant, method, url, **kw))
+        except jira_oauth.JiraError as e:
+            return _Resp(e.status if e.status >= 400 else 502, {})
+
+
+def oauth_connector(jira, tenant: str, projects: list[str], fields: list[str] | None = None) -> JiraConnector:
+    """A read-only connector for the given project keys over the OAuth connection (fields default to the work fields:
+    keys, status, assignee, timestamps, comments, links)."""
+    cfg = JiraConfig("oauth", "oauth", "", tuple(projects), tuple(fields or DEFAULT_SYNC_FIELDS))
+    return JiraConnector(cfg, http=OAuthTransport(jira, tenant))
+
+
 def changed(records: list[dict], seen: dict[str, str]) -> list[dict]:
     """Idempotency: only records whose (key, updated) differs from what was already submitted."""
     return [r for r in records if seen.get(r["key"]) != r["updated"]]
@@ -167,16 +202,21 @@ def sync(conn, store, tenant_id, connector: JiraConnector, *, actor: str, depart
          mode: str = "incremental") -> dict:
     """One run: fetch since the last cursor, submit changed records to the data room (pending review), record it."""
     from . import intake
+    from .db import tenant_tx
 
-    last = conn.execute("SELECT cursor_after FROM runtime.connector_run WHERE tenant_id = %s AND connector = %s"
-                        " AND status = 'ok' ORDER BY started_at DESC LIMIT 1", (tenant_id, connector.name)).fetchone()
+    with tenant_tx(conn, tenant_id, actor):                      # FORCE RLS: every read and write is tenant-scoped
+        last = conn.execute("SELECT cursor_after FROM runtime.connector_run WHERE tenant_id = %s AND connector = %s"
+                            " AND status = 'ok' ORDER BY started_at DESC LIMIT 1",
+                            (tenant_id, connector.name)).fetchone()
     cursor = None if mode == "initial" or not last else last["cursor_after"]
     scope = {"projects": list(connector.config.projects), "fields": list(connector.config.fields)}
     try:
         records, newest = connector.fetch(cursor)
         seen = {}
-        for r in conn.execute("SELECT scope FROM runtime.connector_run WHERE tenant_id = %s AND connector = %s"
-                              " AND status = 'ok'", (tenant_id, connector.name)).fetchall():
+        with tenant_tx(conn, tenant_id, actor):
+            rows = conn.execute("SELECT scope FROM runtime.connector_run WHERE tenant_id = %s AND connector = %s"
+                                " AND status = 'ok'", (tenant_id, connector.name)).fetchall()
+        for r in rows:
             seen |= r["scope"].get("submitted_versions", {})
         new = changed(records, seen)
         sid = None
@@ -186,14 +226,16 @@ def sync(conn, store, tenant_id, connector: JiraConnector, *, actor: str, depart
                                 [intake.Upload("jira_sync.jsonl", to_jsonl(new))])
         scope["submitted_versions"] = {r["key"]: r["updated"] for r in new}
         scope["submission_id"] = str(sid) if sid else None
-        conn.execute("INSERT INTO runtime.connector_run (tenant_id, connector, mode, scope, cursor_before,"
-                     " cursor_after, fetched, changed, submitted, status, finished_at)"
-                     " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'ok',now())",
-                     (tenant_id, connector.name, mode, json.dumps(scope), cursor, newest, len(records), len(new),
-                      len(new) if sid else 0))
+        with tenant_tx(conn, tenant_id, actor):
+            conn.execute("INSERT INTO runtime.connector_run (tenant_id, connector, mode, scope, cursor_before,"
+                         " cursor_after, fetched, changed, submitted, status, finished_at)"
+                         " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'ok',now())",
+                         (tenant_id, connector.name, mode, json.dumps(scope), cursor, newest, len(records), len(new),
+                          len(new) if sid else 0))
         return {"status": "ok", "fetched": len(records), "changed": len(new), "submission_id": sid, "cursor": newest}
     except ConnectorFailed as e:
-        conn.execute("INSERT INTO runtime.connector_run (tenant_id, connector, mode, scope, cursor_before, status,"
-                     " error, finished_at) VALUES (%s,%s,%s,%s,%s,'failed',%s,now())",
-                     (tenant_id, connector.name, mode, json.dumps(scope), cursor, str(e)))
+        with tenant_tx(conn, tenant_id, actor):
+            conn.execute("INSERT INTO runtime.connector_run (tenant_id, connector, mode, scope, cursor_before,"
+                         " status, error, finished_at) VALUES (%s,%s,%s,%s,%s,'failed',%s,now())",
+                         (tenant_id, connector.name, mode, json.dumps(scope), cursor, str(e)))
         return {"status": "failed", "error": str(e)}

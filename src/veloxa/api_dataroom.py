@@ -112,6 +112,8 @@ def register(app, *, state, principal_of, now_fn, store_factory=LocalContentStor
             raise StoreError("no original store is configured (VELOXA_ORIGINALS_DIR)")
         return s
 
+    state["store"] = _store                       # the Jira sync submits through the same data room
+
     @app.get("/v1/source-types")
     def source_types(authorization: str | None = Header(default=None)):
         with connect(state["dsn"]) as conn:

@@ -38,6 +38,15 @@ class UpdateIn(BaseModel):
     comment: str = Field(default="", max_length=20000)
 
 
+class SyncIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    projects: list[str] = Field(min_length=1, max_length=10)
+    department_id: str | None = Field(default=None, max_length=64)
+    source_type: str | None = Field(default=None, max_length=64)
+    mode: str = Field(default="incremental", pattern="^(incremental|initial)$")
+    dry_run: bool = True
+
+
 class CommitIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     preview_id: str = Field(min_length=10, max_length=100)
@@ -159,6 +168,63 @@ def register(app, *, state, principal_of, now_fn, jira_factory=None) -> None:
     def disconnect(authorization: str | None = Header(default=None)):
         return run(authorization, lambda j, t, pr: (j.disconnect(t), {"connected": False})[1], "jira.disconnected", {},
                    ("admin",))
+
+    @app.post("/v1/integrations/jira/sync")
+    def sync(body: SyncIn, authorization: str | None = Header(default=None)):
+        """Import Jira issues into the GOVERNED data room over the OAuth connection: changed issues (by key and
+        update time) become one submission pending review; nothing is admitted here. dry_run (the default) fetches
+        and reports what would be submitted without submitting. Administration only."""
+        import re as _re
+
+        from . import connectors
+
+        if any(not _re.fullmatch(r"[A-Z][A-Z0-9_]{1,19}", k) for k in body.projects):
+            return JSONResponse(status_code=422, content={"error": "invalid_request", "detail": "project keys only"})
+        with connect(state["dsn"]) as conn:
+            p = admin(conn, authorization, ("admin",))
+            if isinstance(p, JSONResponse):
+                return p
+            j = jira()
+            if j is None:
+                return JSONResponse(status_code=409, content={"error": "not_configured",
+                                                              "detail": "Jira OAuth is not configured on the server."})
+            con = connectors.oauth_connector(j, str(p.tenant_id), body.projects)
+            with tenant_tx(conn, p.tenant_id, p.principal_id):
+                prior = conn.execute("SELECT scope FROM runtime.connector_run WHERE connector = 'jira'"
+                                     " AND status = 'ok'").fetchall()
+                last = conn.execute("SELECT cursor_after FROM runtime.connector_run WHERE connector = 'jira' AND"
+                                    " status = 'ok' ORDER BY started_at DESC LIMIT 1").fetchone()
+            if body.dry_run:
+                try:
+                    cursor = None if body.mode == "initial" or not last else last["cursor_after"]
+                    records, newest = con.fetch(cursor)
+                except connectors.ConnectorFailed as e:
+                    return JSONResponse(status_code=502, content={"error": "jira_failed", "detail": str(e)})
+                seen = {}
+                for r in prior:
+                    seen |= (r["scope"] or {}).get("submitted_versions", {})
+                new = connectors.changed(records, seen)
+                record(conn, p.tenant_id, p.principal_id, "jira.sync_previewed",
+                       {"projects": body.projects, "fetched": len(records), "would_submit": len(new)})
+                return {"dry_run": True, "projects": body.projects, "fetched": len(records), "would_submit": len(new),
+                        "already_submitted_unchanged": len(records) - len(new), "cursor": newest,
+                        "sample": [{"key": r["key"], "updated": r["updated"],
+                                    "fields": sorted(r["fields"])} for r in new[:10]],
+                        "next": "Run again with dry_run=false, a department and an approved source type to submit "
+                                "these issues for review (nothing is admitted until reviewed and authorised)."}
+            if not body.department_id or not body.source_type:
+                return JSONResponse(status_code=422, content={"error": "invalid_request", "detail":
+                                    "a department and an approved data-room source type are required to submit"})
+            try:
+                out = connectors.sync(conn, state["store"](), p.tenant_id, con, actor=p.principal_id,
+                                      department_id=body.department_id, source_type=body.source_type, mode=body.mode)
+            except Exception as e:  # noqa: BLE001 - intake refusals (no contributor relation, unapproved type)
+                record(conn, p.tenant_id, p.principal_id, "jira.sync", {"projects": body.projects,
+                                                                         "outcome": type(e).__name__})
+                return JSONResponse(status_code=409, content={"error": "not_submitted", "detail": str(e)[:300]})
+            record(conn, p.tenant_id, p.principal_id, "jira.sync", {"projects": body.projects, **{
+                k: (str(v) if k == "submission_id" else v) for k, v in out.items() if k != "error"}})
+            return {k: (str(v) if k == "submission_id" else v) for k, v in out.items()}
 
     @app.get("/v1/integrations/jira/overdue")
     def overdue(project: str | None = None, authorization: str | None = Header(default=None)):
