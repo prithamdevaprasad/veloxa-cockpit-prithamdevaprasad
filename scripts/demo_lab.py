@@ -86,16 +86,20 @@ def create_database(admin: str, name: str) -> None:
     migrate(_dsn(admin, name), _dsn(admin, name, "migrator"), name)
 
 
-def populate(dsns: dict, store, files_dir: Path, slug: str = "demo") -> dict:
-    """Build the demo workspace inside an already-migrated database (also used by the benchmark tests)."""
-    from synthetic_company import generate as gen
+def populate(dsns: dict, store, files_dir: Path, slug: str = "demo", gen=None, company: str = "Lumora Systems (DEMO)",
+             domain: str = "lumora.example", agents: list | None = None) -> dict:
+    """Build a synthetic workspace inside an already-migrated database (also used by the benchmark tests).
+    `gen` is the generator module (default: Lumora); Orbitra passes its own (scripts/synthetic_lab.py)."""
+    if gen is None:
+        from synthetic_company import generate as gen
+    agents = AGENTS if agents is None else agents
 
     from veloxa import intake, product, tenancy
     from veloxa.db import connect
 
     manifest = gen.generate(files_dir)
     with connect(dsns["admin"]) as a, connect(dsns["app"]) as app:
-        tid = tenancy.create_tenant(a, slug, "Asia/Kolkata", "Lumora Systems (DEMO)", synthetic=True)
+        tid = tenancy.create_tenant(a, slug, "Asia/Kolkata", company, synthetic=True)
         tenancy.bootstrap_synthetic_admin(a, tid, ADMIN, "Demo Workspace Admin")
         people = {CEO: "Demo CEO", ANALYST: "Demo Analyst", AUTHORISER: "Demo Data Owner",
                   "person:demo-outsider": "Demo Outsider (no roles)"}
@@ -104,7 +108,7 @@ def populate(dsns: dict, store, files_dir: Path, slug: str = "demo") -> dict:
             people[f"person:demo-{d}-contrib"] = f"Demo {gen.DEPARTMENTS[d]} Contributor"
             people[f"person:demo-{d}-reviewer"] = f"Demo {gen.DEPARTMENTS[d]} Reviewer"
         for pid, name in people.items():
-            tenancy.add_synthetic_member(a, tid, pid, name, f"{pid.split(':')[1]}@lumora.example")
+            tenancy.add_synthetic_member(a, tid, pid, name, f"{pid.split(':')[1]}@{domain}")
         g = lambda *x: tenancy.grant(app, tid, ADMIN, *x)  # noqa: E731
         for d, name in gen.DEPARTMENTS.items():
             tenancy.create_department(app, tid, ADMIN, d, name, "demo setup")
@@ -146,7 +150,7 @@ def populate(dsns: dict, store, files_dir: Path, slug: str = "demo") -> dict:
     from veloxa.tools import Principal
 
     with connect(dsns["projection"]) as prj:
-        for aid, cat, _p, _q, _proj in AGENTS:
+        for aid, cat, _p, _q, _proj in agents:
             caps, tools_ = registry.category_default(cat)
             registry.publish(prj, tid, registry.AgentConfig(aid, cat, caps, tools_, activation="synthetic_test"))
     updates = 0
@@ -154,8 +158,8 @@ def populate(dsns: dict, store, files_dir: Path, slug: str = "demo") -> dict:
         rt = AgentRuntime(app, "Asia/Kolkata", kb=SyntheticTestKnowledgeBoundary())
         basis = resolve_basis(tid, ledger.sealed_releases(app, tid), Mode.CURRENT, None, "Asia/Kolkata",
                               current_time())
-        who = Principal(ANALYST, "authenticated", "demo-analyst" + "@" + "lumora.example")  # synthetic
-        for i, (aid, _cat, _purpose, question, project) in enumerate(AGENTS):
+        who = Principal(ANALYST, "authenticated", "demo-analyst" + "@" + domain)  # synthetic
+        for i, (aid, _cat, _purpose, question, project) in enumerate(agents):
             sid = rt.open_session(tid, who, aid, basis)["session_id"]
             rt.execute(AgentRequest(tid, who, sid, question, f"demo-lab-{i:03d}-q1"))
             try:
@@ -164,7 +168,7 @@ def populate(dsns: dict, store, files_dir: Path, slug: str = "demo") -> dict:
             except product.ProductError:
                 pass                                             # an unanswered session publishes nothing
     return {"tenant_id": str(tid), "slug": slug, "files": sum(1 for _ in files_dir.rglob("*.*")),
-            "agents": len(AGENTS), "updates": updates, "facts": manifest["facts"], "manifest": manifest}
+            "agents": len(agents), "updates": updates, "facts": manifest["facts"], "manifest": manifest}
 
 
 def main() -> int:

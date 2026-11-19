@@ -256,12 +256,15 @@ def _answer_one(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, princip
         terms = {t.strip().lower() for st in searched for t in st.args.get("query", "").split(" OR ")} | (
             {t.lower() for t in fallback.split(" OR ")} if fallback else set())
         specific = {t for t in terms if t and t not in _GENERIC} or terms
-        need = max(2 if len(specific) >= 2 else 1, -(-len(specific) * 3 // 5))     # >= 60% of the specific terms
+        need = max(2 if len(specific) >= 2 else 1, -(-len(specific) // 2))     # >= half of the specific terms
         for r in results:
             if r.tool == "text_search" and r.evidence:
+                def hits(e):                       # highlighted words are stemmed forms: count them, not exact terms
+                    found = {m.lower() for m in re.findall(r"\u27e6([^\u27e7]+)\u27e7", e.excerpt)} - _GENERIC
+                    return found, any(re.fullmatch(r"[a-z]+-[a-z]?\d+", w) for w in found)   # e.g. NIM-E1, D-07
+
                 keep = [e for e in r.evidence if e.system != "challenge_brief"      # the brief is not company evidence
-                        and len({m.lower() for m in re.findall(r"\u27e6([^\u27e7]+)\u27e7", e.excerpt)}
-                                & specific) >= need]
+                        and (hits(e)[1] or len(hits(e)[0]) >= need)]
                 r.evidence = keep
                 if not keep:
                     r.status, r.gaps = "no_data", ["no admitted passage matches enough of the question to answer it"]

@@ -109,6 +109,15 @@ ROW_SPECS: dict[str, tuple[str, str, str | None, dict[str, str]]] = {
                                                   "Resolved": "resolved"}),
     "zoho_books": ("voucher", "Voucher", "Txn Date", {"Vendor / Payee": "payee", "Cost Centre": "cost_centre",
                                                       "Amount (Rs.)": "amount_inr", "Txn Date": "transaction_date"}),
+    # Generic tracker / release-calendar / recruiting exports (e.g. the synthetic companies' source types)
+    "issue_tracker": ("issue", "Issue Key", None, {
+        "Summary": "summary", "Epic Key": "epic", "Project": "project", "Status": "status_at_export",
+        "Points": "story_points", "Blocked by": "blocked_by", "Fix Version": "fix_version"}),
+    "release_calendar": ("version", "Version", None, {
+        "Project": "project", "Target date": "release_date", "Original date": "original_release_date",
+        "Status": "release_status"}),
+    "recruiting": ("requisition", "Requisition", None, {
+        "Role": "role", "Department": "team", "Opened": "opened", "Status": "status", "Note": "note"}),
 }
 DATE_PREDICATES = {"join_date", "exit_date", "opened", "created", "resolved", "release_date", "original_release_date",
                    "last_changed", "transaction_date"}

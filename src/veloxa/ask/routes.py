@@ -38,14 +38,24 @@ WORRY_LIST = re.compile(r"\b(what should i worry about|what (are|is) (the |our )
 TOPIC_RISK = re.compile(r"\b(risk|concern|worry|exposure)\b", re.I)
 DELAY = re.compile(r"\b(why|what caused|reason)\b.{0,60}\b(ga|launch|release|go-?live|delivery|ship\w*|"
                    r"(?:product|atlas)\b).{0,40}\b(delay\w*|slip\w*|moved?|late|postponed)\b|"
-                   r"\b(delay\w*|slip\w*|moved?|postponed)\b.{0,40}\b(ga|launch|release)\b", re.I)
+                   r"\b(delay\w*|slip\w*|moved?|postponed)\b.{0,40}\b(ga|launch|release)\b|"
+                   r"\bwhy (was|did|is|has)\b.{0,60}\b(delay\w*|slip\w*|moved?|late|postponed)\b", re.I)
 BOARD_CHANGE = re.compile(r"\b(what )?(changed|change[sd]?|compare[sd]?|difference)\b.{0,40}\bboard\b|"
                           r"\bboard\b.{0,40}\b(changed|change[sd]?|compared?)\b|\blatest board update\b", re.I)
 MISSING = re.compile(r"\bwhat (information|data|records?|evidence) (is|are) missing\b|\bmissing (information|data|"
                      r"records|evidence)\b|\bwhat (don't|do not) we know\b|\bknowledge gaps?\b", re.I)
 STATUS = re.compile(r"\b(status|progress|on track|how (is )?.{0,30} (is |are )?(going|doing|tracking)|"
                     r"where (are|is) we|update on|"
-                    r"latest on|state of)\b", re.I)
+                    r"latest on|state of|when (is|was|will|did) .{0,40}\b(due|ship\w*|released?|launch\w*)|"
+                    r"original (date|deadline)|"
+                    r"still due|committed date|delivered on|on time|"
+                    r"date (has )?(moved|changed|slipped)|date move)\b", re.I)
+ROLE_HOLDER = re.compile(r"\bwho (is|are|'s) (the |our )?(?P<role>ceo|chief executive( officer)?|cfo|chief financial "
+                         r"officer|cto|chief technology officer|head of [a-z &]+?|vp [a-z &]+?)\s*\??$", re.I)
+BLOCKED = re.compile(r"\b(which|what|how many|list)\b.{0,30}\b(issues?|tasks?|tickets?|work|items?)\b.{0,20}"
+                     r"\b(blocked|blocking|stuck)\b|\bblocked (issues?|tasks?|work)\b", re.I)
+BOARD_ABOUT = re.compile(r"\bboard\b.{0,40}\b(say|said|says|report\w*|mention\w*|state\w*)\b.{0,12}\babout\s+"
+                         r"(?P<topic>[A-Za-z0-9][\w .-]{1,40}?)(\s+in\s+(?P<when>\w+))?\s*\??$", re.I)
 STOP = {"risk", "risks", "concern", "concerns", "worry", "exposure", "what", "our", "the", "is", "are", "about",
         "with", "this", "that", "current", "currently", "biggest", "main", "any", "there"}
 
@@ -76,6 +86,28 @@ def _quote(excerpt: str) -> str:
     if text and text[-1] not in ".!?":
         text = (text.rsplit(" ", 1)[0] + " …") if " " in text else text
     return text
+
+
+def _sentence(excerpt: str, terms: list[str]) -> str | None:
+    """The one sentence of a search excerpt that contains every term (so a quote never borrows a neighbouring
+    sentence about something else); None for spreadsheet-row text, which is not a statement."""
+    text = excerpt.replace("\u27e6", "").replace("\u27e7", "")
+    for sent in re.split(r"(?<=[.!?])\s+|\n+", text):
+        low = sent.lower()
+        if all(t in low for t in terms) and sent.count("; ") < 2 and "synthetic;" not in low and len(sent) > 20:
+            return _quote(sent)
+    return None
+
+
+def _human(day) -> str:
+    """'2027-04-15' -> '15 April 2027' (anything else unchanged)."""
+    from datetime import date as _date
+
+    try:
+        d = _date.fromisoformat(str(day)[:10])
+        return f"{d.day} {d.strftime('%B %Y')}"
+    except (TypeError, ValueError):
+        return str(day)
 
 
 class Router:
@@ -145,7 +177,9 @@ class Router:
                 return out
         for test, fn in ((PERSONAL, self.personal), (THIS_CONCERN, self.this_concern), (UNRANKABLE, self.unrankable),
                          (MISSING, self.missing), (DELAY, self.delay), (BOARD_CHANGE, self.board_change),
-                         (WORRY_LIST, self.worry_list), (STATUS, self.status)):
+                         (WORRY_LIST, self.worry_list), (ROLE_HOLDER, self.role_holder), (BLOCKED, self.blocked),
+                         (BOARD_ABOUT, self.board_about),
+                         (STATUS, self.status)):
             if test.search(q):
                 out = fn(q)
                 if out is not None:
@@ -174,12 +208,18 @@ class Router:
         for s, d in named:
             name = s.split(":", 1)[1]
             moved = d.get("original_release_date") and d.get("release_date") != d.get("original_release_date")
-            c = self.claim(f"{name} is due {d.get('release_date')}" + (
-                f"; it was originally due {d.get('original_release_date')} and the date was changed on "
-                f"{d.get('last_changed')}" if moved else "") + ".", sorted(d["_records"]), recs)
+            rel_status = str(d.get("release_status") or "")
+            verb = "was due" if "released" in rel_status.lower() else "is due"
+            c = self.claim(f"{name} {verb} {_human(d.get('release_date'))}" + (
+                f"; it was originally due {_human(d.get('original_release_date'))}" if moved else "")
+                + (f" (the date was changed on {_human(d.get('last_changed'))})" if moved and d.get("last_changed")
+                   else "")
+                + (f". Release status: {rel_status}" if rel_status else "") + ".", sorted(d["_records"]), recs)
             if c:
                 claims.append(c)
-            mine = {i: x for i, x in issues.items() if x.get("fix_version") == name}
+            proj = d.get("project")
+            mine = {i: x for i, x in issues.items() if x.get("fix_version") == name
+                    or (proj and not x.get("fix_version") and x.get("project") == proj)}
             if mine:
                 st = Counter(str(x.get("status_at_export")) for x in mine.values())
                 pts = lambda xs: sum(float(x.get("story_points") or 0) for x in xs)  # noqa: E731
@@ -198,6 +238,114 @@ class Router:
                        "tracker records.", " ".join(c["text"] for c in claims), claims,
                        [recs[i] for c in claims for i in c["evidence"]], unknowns,
                        ["Why did the release date move?", "What does the reported resignation mean for the release?"])
+
+    def _body(self, record_id: str) -> str:
+        """The full admitted text of a document record (for whole-sentence quotes)."""
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id, self.basis.batch_seq):
+            r = self.conn.execute("SELECT body FROM projection.document_text WHERE source_record_id = %s"
+                                  " AND batch_seq <= %s ORDER BY batch_seq DESC LIMIT 1",
+                                  (record_id, self.basis.batch_seq)).fetchone()
+        return (r or {}).get("body") or ""
+
+    def _whole(self, record_id: str, excerpt: str, terms: list[str]) -> str | None:
+        """A whole sentence containing the terms: from the excerpt, or from the full text when the excerpt clips it."""
+        s = _sentence(excerpt, terms)
+        if s is None or s.endswith("\u2026"):
+            full = _sentence(self._body(record_id), terms)
+            s = full or s
+        return s
+
+    def board_about(self, q):
+        """What the board updates say about a topic: whole sentences, each citing its update (as reported)."""
+        m = BOARD_ABOUT.search(q)
+        topic, when = m.group("topic").strip().rstrip("?. "), (m.group("when") or "").lower()
+        quarter = re.search(r"\bq([1-4])\b", q, re.I)
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id, self.basis.batch_seq):
+            docs = self.conn.execute(
+                "SELECT DISTINCT ON (source_record_id) source_record_id, title, body FROM projection.document_text"
+                " WHERE batch_seq <= %s AND system IN ('board_reporting', 'documents') AND body ILIKE %s"
+                " AND body ILIKE '%%board%%' ORDER BY source_record_id, batch_seq DESC",
+                (self.basis.batch_seq, f"%{topic.split()[0]}%")).fetchall()
+        months = {"q1": ("jan", "apr"), "q2": ("apr to jun", "jul"), "q3": ("jul to sep", "oct"),
+                  "q4": ("oct to dec", "jan")}
+        if quarter:
+            key = months[f"q{quarter.group(1)}"][0]
+            docs = [d for d in docs if key in d["body"].lower()] or docs
+        elif when:
+            docs = [d for d in docs if re.search(rf"\bsent \d+ {when[:3]}", d["body"].lower())] or docs
+        recs = self.records([d["source_record_id"] for d in docs])
+        claims = []
+        for d in docs:
+            if d["source_record_id"] not in recs:
+                continue
+            sents = [x for x in re.split(r"(?<=[.!?])\s+|\n+", d["body"]) if topic.split()[0].lower() in x.lower()
+                     and x.count("; ") < 2 and len(x) > 15]
+            sent = re.search(r"\bSent ([^.]+)\.", d["body"])
+            for x in sents[:2]:
+                c = self.claim(f"Board update{f' sent {sent.group(1)}' if sent else ''} (as reported): "
+                               f"\u201c{x.strip()}\u201d", [d["source_record_id"]], recs, "document")
+                if c:
+                    claims.append(c)
+        if not claims:
+            return None
+        return _result(self.basis_json, "qualified", f"I read this as: what the board updates say about {topic}.",
+                       " ".join(c["text"] for c in claims), claims, [recs[i] for c in claims for i in c["evidence"]],
+                       ["Board updates are reported statements, not independently verified."])
+
+    def role_holder(self, q):
+        """Who holds a named role, from the HR export's titles (work facts only; nothing about the person)."""
+        from .continuity import _claims
+
+        role = ROLE_HOLDER.search(q).group("role").lower()
+        want = {"ceo": "chief executive officer", "chief executive": "chief executive officer",
+                "cfo": "chief financial officer", "cto": "chief technology officer"}.get(role, role)
+        k = self.basis.batch_seq
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id, k):
+            people = _claims(self.conn, self.tenant_id, k, "person")
+        hits = [d for d in people.values() if str(d.get("title", "")).lower() == want
+                or (want == "chief executive officer" and str(d.get("title", "")).lower() == "ceo")]
+        recs = self.records({r for d in hits for r in d["_records"]})
+        claims = [c for d in hits if (c := self.claim(
+            f"{d.get('name')} holds the title {d.get('title')} in the HR export"
+            + (f" ({d.get('department')})" if d.get("department") else "")
+            + (f"; recorded status: {d.get('employment_status')}" if d.get("employment_status") not in (None, "Active")
+               else "") + ".", sorted(d["_records"]), recs))]
+        if not claims:
+            return None
+        return _result(self.basis_json, "answered", "I read this as: who holds a role, from the HR export.",
+                       " ".join(c["text"] for c in claims), claims, [recs[i] for c in claims for i in c["evidence"]],
+                       ["Titles are as at the HR export date; later changes are not recorded."])
+
+    def blocked(self, q):
+        """Issues the tracker marks as blocked, with what the record says blocks them (no judgement)."""
+        from collections import Counter
+
+        from .continuity import _claims
+
+        k = self.basis.batch_seq
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id, k):
+            issues = _claims(self.conn, self.tenant_id, k, "issue")
+        low = q.lower()
+        blocked = {s: d for s, d in issues.items() if str(d.get("status_at_export", "")).lower() == "blocked"}
+        named = {s: d for s, d in blocked.items() if d.get("project") and str(d["project"]).lower() in low}
+        blocked = named or blocked
+        if not blocked:
+            return None
+        recs = self.records({r for d in blocked.values() for r in d["_records"]})
+        why = Counter(str(d.get("blocked_by") or "not stated") for d in blocked.values())
+        by_proj = Counter(str(d.get("project") or "unassigned") for d in blocked.values())
+        ids = sorted({r for d in blocked.values() for r in d["_records"]})
+        c1 = self.claim(f"The tracker export marks {len(blocked)} issue{'s' if len(blocked) != 1 else ''} as blocked ("
+                        + ", ".join(f"{n} in {p}" for p, n in by_proj.most_common()) + ").", ids, recs)
+        c2 = self.claim("What the records say blocks them: " + "; ".join(f"{w} ({n})" for w, n in why.most_common(4))
+                        + ".", ids, recs)
+        claims = [c for c in (c1, c2) if c]
+        if not claims:
+            return None
+        return _result(self.basis_json, "answered", "I read this as: which tracker issues are blocked, and by what.",
+                       " ".join(c["text"] for c in claims), claims, [recs[i] for c in claims for i in c["evidence"]],
+                       ["The export is a snapshot; work unblocked since then is not recorded."],
+                       ["What does this mean for the release date?"])
 
     def personal(self, q):
         return _result(self.basis_json, "abstained", "I read this as a question about an employee's personal life.",
@@ -313,7 +461,9 @@ class Router:
         slips = [x for x in w.get("ranked", []) + w.get("unrankable", []) if str(x["item_id"]).startswith("slip:")]
         if not slips:
             return None
-        x = slips[0]
+        low = q.lower()          # the release the question names, else the first recorded move
+        x = next((s for s in slips if str(s.get("project") or s["title"].removeprefix("Release ").split(" moved")[0])
+                  .lower() in low), slips[0])
         claims = []
         reason = (x.get("severity") or {}).get("criteria", {}).get("C1", {}).get("reason")
         c = self.claim(f"Recorded schedule change: {x['title']}" + (f" ({reason})" if reason else "") + ".",
@@ -331,10 +481,28 @@ class Router:
             for e in self._search(query, must):
                 if (label, e.record_id) in used:
                     continue
+                quote = _sentence(e.excerpt, must or [])
+                if quote is None:                                  # a table row or a neighbouring sentence: skip
+                    continue
                 used.add((label, e.record_id))
                 recs.update(self.records([e.record_id]))
-                quote = _quote(e.excerpt)
                 cl = self.claim(f"{label}: \u201c{quote}\u201d", [e.record_id], recs, "document")
+                if cl:
+                    claims.append(cl)
+                break
+        project = str(x.get("project") or x["title"].split(" moved")[0].removeprefix("Release ")).strip()
+        for word in ("because", "depend", "slipp", "paus"):              # statements about THIS release, any company
+            if any(lab == f"Recorded reason ({word})" for lab, _ in used) or len(claims) > 6:
+                continue
+            for e in self._search(f"{project} {word}", [project.split()[0].lower(), word]):
+                if any(rid == e.record_id for _, rid in used):
+                    continue
+                quote = self._whole(e.record_id, e.excerpt, [project.split()[0].lower(), word])
+                if quote is None:
+                    continue
+                used.add((f"Recorded reason ({word})", e.record_id))
+                recs.update(self.records([e.record_id]))
+                cl = self.claim(f"Stated in the records: “{quote}”", [e.record_id], recs, "document")
                 if cl:
                     claims.append(cl)
                 break

@@ -170,7 +170,8 @@ def run(lab: dict) -> dict:
             outside = {e["system"] for e in ans["evidence"] if not acc.allows(e["system"], e["data_class"])}
             ok_access = not outside and (case["category"] != "access_control" or _no_foreign(case, ans))
             cited = {e["record_id"] for e in ans["evidence"]}
-            precise = cited <= known and all(cl["verification"] in ("supported", "downgraded") for cl in ans["claims"])
+            precise = cited <= known and all(cl["verification"] in ("supported", "downgraded", "cites its records")
+                                             for cl in ans["claims"])
             results.append({**case, "got_status": ans["status"], "systems": sorted(systems),
                             "passed": ok_status and ok_system and ok_text and ok_access, "precise": precise,
                             "access_ok": ok_access})

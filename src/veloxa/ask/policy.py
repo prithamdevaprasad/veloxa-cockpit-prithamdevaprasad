@@ -116,10 +116,11 @@ def prescreen(question: str, people: list[str]) -> Refusal | None:
     if (_has(_ATTRITION, q) and _has(_PREDICT, q)) or (_has(_JUDGEMENT, q) and (names or _has(_WHO, q)
                                                                                   or _has(_PREDICT, q))):
         return Refusal(POLICIES["POL-PEOPLE-01"], "individual attrition, performance or sentiment")
-    if _has(_COMMS, q) and (_has(_MONITOR, q) or (_has(_READ, q) and (names or _has(r"'s\b|\b(his|her|their)\b",
-                                                                                     q)))):
+    if _has(_COMMS, q) and (_has(_MONITOR, q) or (_has(_READ, q) and (names or _has(
+            r"'s\b|\w+s'(\s|$)|\b(his|her|their|the (team|staff|employees|engineers|people)'?s?)\b", q)))):
         return Refusal(POLICIES["POL-COMMS-01"], "reading someone's communications")
-    if _has(_WHY, q) and _has(_SENSITIVE, q) and (names or _has(r"\b(he|she|they|his|her|their|someone|employee)\b",
-                                                                 q)):
+    if _has(_WHY, q) and _has(_SENSITIVE, q) and (names or _has(
+            r"\b(he|she|they|his|her|their|someone|anyone|employees?|people|staff|engineers?|colleagues?|"
+            r"team members?)\b", q)):
         return Refusal(POLICIES["POL-SENS-01"], "reason for a personal record")
     return None
