@@ -118,6 +118,8 @@ export function AnswerView({ answer }: { answer: Answer }) {
     lead = cap(answer.answer.replace(/^I don't know:\s*/i, "")) || "There isn't enough evidence to answer this.";
     leadTone = "muted";
   } else if (answer.status === "conflict") { lead = "The sources disagree. Veloxa shows each value and chooses none."; leadTone = "warn"; }
+  else if ((answer as { diagnostics?: { stage?: string } }).diagnostics?.stage === "routed" && answer.answer)
+    lead = answer.answer;                                     // routed: the subsystem's own plain answer
   else if (answer.claims.length === 1 && text.length === 1) lead = clean(answer.claims[0].text);
   else {
     const search = subject && /^a text search for (.*)$/i.exec(subject);
@@ -209,9 +211,10 @@ export function AnswerView({ answer }: { answer: Answer }) {
 
       {answer.disagreements.length > 0 && (
         <section className="stack">
-          {answer.disagreements.map((d, i) => (
+          {mergeDisagreements(answer.disagreements).map((d, i) => (
             <div key={i}>
-              <h4>{cap(d.subject)}{d.period ? `, ${d.period}` : ""}</h4>
+              <h4>{cap(d.subject)}{d.period && d.period !== "period_unconfirmed" ? `, ${d.period}`
+                : d.period ? ": reporting periods are not confirmed" : ""}</h4>
               <div className="conflict-grid">
                 {d.claims.map((c) => (
                   <div key={c.record_id} className="conflict-side">
@@ -222,8 +225,10 @@ export function AnswerView({ answer }: { answer: Answer }) {
                       aria-label={`Show source ${index.get(c.record_id)}`}>{index.get(c.record_id)}</button>}
                   </div>))}
               </div>
-              <p className="small muted" style={{ marginTop: 6 }}>Metric match: {d.metric_match.replace(/_/g, " ")}.
-                Definition: {d.definition}.</p>
+              <p className="small muted" style={{ marginTop: 6 }}>{d.metric_match === "same_metric"
+                ? "These figures measure the same thing." : "These figures may not measure the same thing"}
+                {d.definition === "unconfirmed" ? ", and no source defines it, so Veloxa doesn't pick one."
+                  : `; definition: ${d.definition}.`}</p>
             </div>))}
         </section>
       )}
@@ -292,3 +297,14 @@ function FollowUps({ items }: { items: string[] }) {
   );
 }
 
+
+/** One block per subject: pairwise disagreements about the same figure are merged, each distinct value shown once. */
+function mergeDisagreements<T extends { subject: string; claims: { record_id: string }[] }>(ds: T[]): T[] {
+  const by = new Map<string, T>();
+  for (const d of ds) {
+    const prev = by.get(d.subject);
+    if (!prev) { by.set(d.subject, { ...d, claims: [...d.claims] }); continue; }
+    for (const c of d.claims) if (!prev.claims.some((x) => x.record_id === c.record_id)) prev.claims.push(c);
+  }
+  return [...by.values()];
+}

@@ -83,7 +83,9 @@ function Registry() {
         ? <EmptyState title="No recorded disagreements">No two admitted sources disagree about the same figure at this
             knowledge point{reg.data.hidden_for_access ? `; ${reg.data.hidden_for_access} you may not read are hidden` : ""}.</EmptyState>
         : <ul className="plain stack">{reg.data.conflicts.map((c) => <RegistryItem key={c.conflict_id} id={c.conflict_id}
-            title={`${c.predicate.replace(/_/g, " ")} for ${c.subject}`} values={c.claims.map((x) => x.object)} />)}</ul>)}
+            title={c.subject.startsWith("metric:") ? `${c.subject.slice(7).toUpperCase()} reported by different sources`
+              : `${c.predicate.replace(/_/g, " ")} for ${c.subject}`}
+            values={c.claims.map((x) => x.display ?? (typeof x.object === "string" ? x.object : "value not shown"))} />)}</ul>)}
     </Section>
   );
 }
@@ -93,7 +95,7 @@ function RegistryItem({ id, title, values }: { id: string; title: string; values
   return (
     <li className="worry-item">
       <div className="row" style={{ justifyContent: "space-between" }}>
-        <strong>{title}</strong><span className="small muted num">{values.join(" vs ")}</span></div>
+        <strong>{title}</strong><span className="small muted">{values.length} differing values</span></div>
       <ExplanationView ex={ex} />
     </li>
   );

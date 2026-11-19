@@ -3,8 +3,7 @@ import { api, ApiError, newIdempotencyKey } from "../api/client";
 import { useApi } from "../api/useApi";
 import type { AgentSession, AgentSummary, AgentTurn, SessionDetail } from "../api/types";
 import { AgentAvatar } from "../ui/art";
-import { PeopleSection } from "./People";
-import { Badge, Button, EmptyState, ErrorState, EvidenceList, Loading, PageHead, Section, Segmented } from "../ui";
+import { Badge, Button, EmptyState, ErrorState, EvidenceList, Loading, Section, Segmented } from "../ui";
 
 type Cat = "all" | AgentSummary["category"];
 const CATS: { value: Cat; label: string }[] = [
@@ -19,7 +18,8 @@ function describe(a: AgentSummary): string {
   return "Mapped to an employee by an owner decision.";
 }
 
-export function AgentsPage() {
+/** Admin > Agent administration: runtime IDs, activation, tools and configuration versions (operational view). */
+export function AgentAdministration() {
   const [cat, setCat] = useState<Cat>("all");
   const [reg, reload] = useApi((s) => api.agents(s), []);
   const [selected, setSelected] = useState<AgentSummary | null>(null);
@@ -27,10 +27,9 @@ export function AgentsPage() {
 
   return (
     <>
-      <PageHead title="Agents" intro="One shared runtime. Each agent answers only from evidence that is in its
-        knowledge boundary, that you are authorised to see, and that interview policy allows. Agents take no action." />
-      <PeopleSection />
-      <h2 style={{ margin: "8px 0 10px" }}>Agent configuration and interviews</h2>
+      <h2 style={{ margin: "8px 0 10px" }}>Agent administration</h2>
+      <p className="small muted" style={{ marginBottom: 8 }}>Runtime configuration of every agent (operational checks).
+        To interview someone, use People &gt; AI team.</p>
       <div className="row" style={{ marginBottom: 12 }}>
         <Segmented label="Category" value={cat} options={CATS} onChange={(c) => { setCat(c); setDirPage(0); }} />
       </div>
@@ -127,7 +126,7 @@ function AgentDetail({ agent }: { agent: AgentSummary }) {
 
 type Entry = { q: string; key: string; turn?: AgentTurn; error?: ApiError; cancelled?: boolean };
 
-function Conversation({ session, history, onClosed }: { session: AgentSession; history: SessionDetail | null;
+export function Conversation({ session, history, onClosed }: { session: AgentSession; history: SessionDetail | null;
                                                           onClosed: () => void }) {
   const [msg, setMsg] = useState("");
   const [log, setLog] = useState<Entry[]>(() => (history?.turns ?? []).map((t) => ({
@@ -265,7 +264,7 @@ function MemoryView({ agentId }: { agentId: string }) {
   );
 }
 
-function HistoryView({ agentId, onOpen }: { agentId: string; onOpen: (d: SessionDetail) => void }) {
+export function HistoryView({ agentId, onOpen }: { agentId: string; onOpen: (d: SessionDetail) => void }) {
   const [offset, setOffset] = useState(0);
   const [list, reload] = useApi((s) => api.sessions(agentId, offset, 10, s), [agentId, offset]);
   const [error, setError] = useState<ApiError | null>(null);

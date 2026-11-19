@@ -1,7 +1,7 @@
 // "What should I worry about?": the D-15 v1 weighted severity ranking (recorded decision content only), every
 // criterion's measure, weight and contribution inspectable; items that cannot be ranked listed with the reason;
 // findings with who was notified and their lifecycle. Severity is an ordinal interval, never a probability.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { product } from "../api/product";
 import type { Finding, WorryItem } from "../api/product-types";
 import { useApi } from "../api/useApi";
@@ -19,7 +19,7 @@ function Item({ x }: { x: WorryItem }) {
   const ex = useExplanation(async () => (await product.explainWorry(x.item_id)).explanation, [x.item_id]);
   const s = x.severity;
   return (
-    <li className="worry-item">
+    <li className="worry-item" id={`worry-${x.item_id}`}>
       <div className="worry-head">
         <div className="rank-n" aria-label={`Rank ${x.rank}${x.tied ? ", tied" : ""}`}>{x.rank}
           {x.tied && <small>tied</small>}</div>
@@ -94,8 +94,17 @@ function Findings() {
   );
 }
 
+function useScrollToItem(ready: boolean) {
+  useEffect(() => {
+    if (!ready) return;
+    const id = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("item");
+    if (id) document.getElementById(`worry-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [ready]);
+}
+
 export function WorryPage() {
   const [w, reload] = useApi((s) => product.worry(undefined, s), []);
+  useScrollToItem(w.state === "ready");
   return (
     <>
       <PageHead title="What should I worry about?" intro="Ranked by evidence-backed severity under the completed D-15
@@ -117,9 +126,7 @@ export function WorryPage() {
                  subtitle="Visible, with the reason, so nothing is hidden by the ranking.">
           {w.state === "ready" && ((w.data.unrankable ?? w.data.unranked ?? []).length === 0
             ? <p className="small muted">None.</p>
-            : <ul className="plain">{(w.data.unrankable ?? []).map((u) => (
-                <li key={u.item_id} className="worry-item"><strong>{u.title}</strong>
-                  <span className="small muted">{u.reasons.join("; ")}</span></li>))}
+            : <ul className="plain">{(w.data.unrankable ?? []).map((u) => <Unranked key={u.item_id} u={u} />)}
                 {(w.data.unranked ?? []).map((u) => <li key={u.item_id} className="worry-item">{u.title}</li>)}</ul>)}
         </Section>
         <Section title="Findings and notifications" className="span-12" aria-label="Findings">
@@ -127,5 +134,15 @@ export function WorryPage() {
         </Section>
       </div>
     </>
+  );
+}
+
+function Unranked({ u }: { u: { item_id: string; title: string; reasons: string[] } }) {
+  const ex = useExplanation(async () => (await product.explainWorry(u.item_id)).explanation, [u.item_id]);
+  return (
+    <li className="worry-item" id={`worry-${u.item_id}`}>
+      <span className="status-tag">Unranked: information missing</span> <strong>{u.title}</strong>
+      <ExplanationView ex={ex} />
+    </li>
   );
 }

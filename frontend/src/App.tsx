@@ -3,7 +3,7 @@ import { ApiError, setToken } from "./api/client";
 import { product } from "./api/product";
 import type { Me } from "./api/product-types";
 import { AdminPage } from "./pages/Admin";
-import { AgentsPage } from "./pages/Agents";
+import { AiTeamPage } from "./pages/AiTeam";
 import { ConflictsPage } from "./pages/Conflicts";
 import { DepartmentsPage } from "./pages/Departments";
 import { EvidenceDataPage } from "./pages/EvidenceData";
@@ -23,7 +23,7 @@ const GROUPS = [
   { id: "home", label: "Home", icon: "overview", pages: [["overview", "Overview"], ["worry", "What to worry about"],
                                                          ["timeline", "Timeline"]] },
   { id: "ask", label: "Ask Veloxa", icon: "ask", pages: [["ask", "Ask Veloxa"]] },
-  { id: "people", label: "People", icon: "agents", pages: [["agents", "Agents"], ["departments", "Departments"]] },
+  { id: "people", label: "People", icon: "agents", pages: [["agents", "AI team"], ["departments", "Departments"]] },
   { id: "intel", label: "Intelligence", icon: "intelligence", pages: [["intelligence", "Intelligence"],
                                                                       ["evidence", "Evidence & Data"],
                                                                       ["whatif", "What-if Analysis"]] },
@@ -37,7 +37,7 @@ const groupOf = (route: string) => [...GROUPS, ADMIN].find((g) => g.pages.some((
   ?? GROUPS[0];
 
 function current(): string {
-  const r = window.location.hash.replace(/^#\/?/, "");
+  const r = window.location.hash.replace(/^#\/?/, "").split("?")[0];
   return KNOWN.has(r) ? r : "overview";
 }
 
@@ -123,7 +123,7 @@ function Shell() {
           {route === "today" && <TodayPage onAsk={(q) => ask.ask(q)} />}
           {route === "conflicts" && <ConflictsPage />}
           {route === "worry" && <WorryPage />}
-          {route === "agents" && <AgentsPage />}
+          {route === "agents" && <AiTeamPage />}
           {route === "departments" && <DepartmentsPage go={go} />}
           {route === "evidence" && <EvidenceDataPage />}
           {route === "intelligence" && <IntelligencePage />}

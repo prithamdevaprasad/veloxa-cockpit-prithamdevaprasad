@@ -7,7 +7,7 @@ import { useApi } from "../api/useApi";
 import { AgentAvatar } from "../ui/art";
 import { useEvidence } from "../ui/EvidenceDrawer";
 import { Guidance, Tabs } from "../ui/kit";
-import { Drawer, ErrorState, Loading, Section } from "../ui";
+import { Button, Drawer, ErrorState, Loading, Section } from "../ui";
 
 function workloadLine(p: Person): string {
   const w = p.workload;
@@ -18,7 +18,7 @@ function workloadLine(p: Person): string {
   return parts.join(", ");
 }
 
-function Profile({ p, onClose }: { p: Person; onClose: () => void }) {
+export function Profile({ p, onClose, onInterview }: { p: Person; onClose: () => void; onInterview?: () => void }) {
   const [tab, setTab] = useState<"overview" | "workload" | "personal" | "unknowns">("overview");
   const evidence = useEvidence();
   return (
@@ -26,9 +26,12 @@ function Profile({ p, onClose }: { p: Person; onClose: () => void }) {
       <div className="stack">
         <div className="row" style={{ flexWrap: "nowrap", gap: 12 }}>
           <AgentAvatar id={p.agent_id.startsWith("syn-") ? p.agent_id : (p.name ?? p.agent_id)} size={48} />
-          <div><strong>{p.title}</strong><div className="small muted">{p.department}. AI representation of this
-            person, grounded in company records; not the employee.</div></div>
+          <div><strong>{p.title}</strong><div className="small muted">{p.department}</div></div>
         </div>
+        {onInterview && <div className="stack" style={{ gap: 6 }}>
+          <Button variant="primary" onClick={onInterview}>Interview AI representation</Button>
+          <p className="small muted">This is an AI representation grounded in approved company records. It is not the
+            actual employee.</p></div>}
         <Tabs label="Profile" value={tab} onChange={setTab} tabs={[{ value: "overview", label: "Overview" },
           { value: "workload", label: "Workload" }, { value: "personal", label: "Personal" },
           { value: "unknowns", label: "Not yet known" }]} />

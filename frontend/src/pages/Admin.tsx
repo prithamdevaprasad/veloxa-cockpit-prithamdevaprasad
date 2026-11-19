@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ApiError, getToken } from "../api/client";
 import { product } from "../api/product";
+import { AgentAdministration } from "./Agents";
 import { useApi } from "../api/useApi";
 import { Guidance } from "../ui/kit";
 import { Badge, Button, ErrorState, Loading, PageHead, Section } from "../ui";
@@ -15,6 +16,7 @@ export function AdminPage({ onSignOut }: { onSignOut: () => void }) {
       <WhoAmI />
       <Workspace />
       <Connectors />
+      <AgentAdministration />
     </>
   );
 }

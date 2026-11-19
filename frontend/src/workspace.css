@@ -471,3 +471,16 @@ mark.hl { background: #fdeccb; color: var(--text); padding: 0 2px; border-radius
 .agent-reply { margin: 0; line-height: 1.55; max-width: 72ch; white-space: pre-wrap; overflow-wrap: anywhere; }
 .turn-details summary { cursor: pointer; color: var(--accent); }
 .turn-details[open] summary { margin-bottom: 6px; }
+
+/* AI team */
+.team-card { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: var(--surface);
+  display: flex; flex-direction: column; min-width: 0; }
+.team-list { display: grid; gap: 8px; margin-top: 10px; }
+.team-list li { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dash-attn { display: grid; gap: 16px; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); margin-bottom: 16px; }
+@media (max-width: 900px) { .dash-attn { grid-template-columns: minmax(0, 1fr); } }
+.status-tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-2, #5b5873); background: var(--surface-2, #f6f5fb); white-space: nowrap; }
+.status-tag.ranked { border-color: var(--accent); color: var(--accent); }
+.attention-list li { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.attention-list li .what { flex: 1; min-width: 200px; }

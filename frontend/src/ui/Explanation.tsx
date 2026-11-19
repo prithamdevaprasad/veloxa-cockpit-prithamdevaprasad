@@ -61,7 +61,9 @@ export function ExplanationView({ ex, compact = false }: { ex: ReturnType<typeof
                 evidence.open(it.evidence[0], it.text)}>Source</button>}</li>))}</ul>
         </section>
       ))}
-      {w.notice && <p className="small muted" role="note">{w.notice}</p>}
+      {w.notice && <p className="small muted" role="note" title={w.notice}>
+        {ai ? w.notice : w.notice.startsWith("AI-assisted wording isn't enabled") ? "Written from verified records."
+          : "Written from verified records (AI-assisted wording wasn't used here)."}</p>}
       {(sources.length > 0 || ai) && (
         <details className="explain-details">
           <summary>Evidence and verified details</summary>

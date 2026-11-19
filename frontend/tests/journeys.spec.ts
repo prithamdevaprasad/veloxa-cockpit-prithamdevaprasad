@@ -62,7 +62,7 @@ test("Journey D: the conflict register states its basis and never picks a side",
 
 test("Journey C: a synthetic agent interview, memory and close; slots stay closed", async ({ page }) => {
   await signIn(page);
-  await page.goto("/#/agents");
+  await page.goto("/#/admin");
   await expect(page.getByRole("cell", { name: "agent-eng-01" })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Directory pages" })).toContainText("Page 1 of 2");
   await page.getByRole("cell", { name: "agent-eng-01" }).click();
@@ -107,7 +107,7 @@ test("the layout has no horizontal page scroll", async ({ page }) => {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow, r).toBeLessThanOrEqual(1);
   }
-  await page.goto("/#/agents");                                  // also with an agent's detail open
+  await page.goto("/#/admin");                                  // also with an agent's detail open
   await page.getByRole("cell", { name: "agent-eng-01" }).click();
   await expect(page.getByText("Interviews are closed")).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -140,7 +140,7 @@ test("Timeline shows record events with their sources", async ({ page }) => {
 
 test("Agent session history survives a page reload", async ({ page }) => {
   await signIn(page);
-  await page.goto("/#/agents");
+  await page.goto("/#/admin");
   await page.getByRole("button", { name: "People Ops" }).click();               // 15 agents: page through by category
   await page.getByRole("cell", { name: "syn-demo-ppl" }).click();
   await page.getByRole("button", { name: "Start interview" }).click();
@@ -311,10 +311,37 @@ test("the worry view states it is unranked while D-15 is not recorded, and lists
   await expect(page.locator("body")).not.toContainText("probability of");             // severity is never a probability
 });
 
-test("Agents shows the people section honestly when no owner-approved mapping exists", async ({ page }) => {
+test("AI team: no HR mapping here, so only labelled synthetic agents appear, with the disclosure", async ({ page }) => {
   await signIn(page);
   await page.goto("/#/agents");
-  await expect(page.getByRole("region", { name: "People" })).toContainText("No people mapped yet");
+  await expect(page.getByRole("heading", { name: "AI team" })).toBeVisible();
+  await expect(page.getByText("It is not the actual employee.").first()).toBeVisible();
+  await expect(page.getByText("agent-eng-01")).toHaveCount(0);                     // no runtime IDs for the CEO
+  const card = page.getByRole("article").filter({ hasText: "Synthetic test agent" }).first();
+  await expect(card).toBeVisible();
+  await card.getByRole("button", { name: "Start interview" }).click();
+  const drawer = page.getByRole("dialog");
+  await expect(drawer.getByRole("note")).toContainText("It is not the actual employee.");
+  await drawer.getByRole("button", { name: "Start interview" }).click();
+  await drawer.getByLabel("Message to the agent").fill("What do you not know?");
+  await drawer.getByRole("button", { name: "Send" }).click();
+  await expect(drawer.getByText(/My records cover/).first()).toBeVisible();
+});
+
+test("Overview: what needs attention and the AI team come right after the business figures", async ({ page }) => {
+  await signIn(page);
+  await page.goto("/#/overview");
+  const attn = page.getByRole("region", { name: "What needs attention" });
+  await expect(attn).toBeVisible();
+  await expect(page.getByRole("region", { name: "Meet your AI team" })).toBeVisible();
+  const figures = await page.getByRole("region", { name: "Key figures" }).boundingBox();
+  const box = await attn.boundingBox();
+  const brief = await page.getByRole("region", { name: "Executive brief" }).boundingBox();
+  expect(box!.y).toBeGreaterThan(figures!.y);
+  expect(box!.y).toBeLessThan(brief!.y);                                         // above the lower dashboard rows
+  await expect(attn).not.toContainText("[object Object]");
+  await attn.getByRole("button", { name: "View all concerns" }).click();
+  await expect(page.getByRole("heading", { name: "What should I worry about?" })).toBeVisible();
 });
 
 test("every answer is explained automatically; abstentions say why; refusals are never dressed up", async ({ page }) => {
@@ -328,8 +355,7 @@ test("every answer is explained automatically; abstentions say why; refusals are
   await expect(ex).toBeVisible();                                                   // no click needed
   await expect(ex).toContainText("People in the HR export: 2");
   await expect(answer.getByRole("button", { name: /Explain/ })).toHaveCount(0);     // one experience, no buttons
-  await expect(ex.getByRole("note")).toHaveText(
-    "AI-assisted wording isn't enabled for this workspace. Showing the verified explanation instead.");
+  await expect(ex.getByRole("note")).toHaveText("Written from verified records.");   // short, never implies a model
   await expect(page.locator("body")).not.toContainText("DENY_ALL");
   await ex.getByText("Evidence and verified details").click();
   await expect(ex.getByRole("button", { name: /View source/ }).first()).toBeVisible();

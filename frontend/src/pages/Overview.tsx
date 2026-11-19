@@ -10,6 +10,7 @@ import { DeptArt } from "../ui/art";
 import { useAsk } from "../ui/Ask";
 import { useEvidence } from "../ui/EvidenceDrawer";
 import { ExplanationView } from "../ui/Explanation";
+import { MeetYourAiTeam } from "./AiTeam";
 import { Avatar, BarChart, DemoBadge, Donut, Guidance, Icon, KpiCard, LineChart, Tabs } from "../ui/kit";
 import { Badge, Button, Drawer, ErrorState, Loading, Section } from "../ui";
 
@@ -110,16 +111,20 @@ export function OverviewPage({ go }: { go: (r: string) => void }) {
         <HiringHealth sources={sources} loading={srcs.state === "loading"} />
       </div>
 
-      <div className="dash-row dash-mid">
-        <PeopleCard go={go} />
-        <SourcesCard sources={sources} loading={srcs.state === "loading"} go={go} />
+      <div className="dash-row dash-attn">
         <WorrySummary go={go} />
+        <MeetYourAiTeam go={go} />
       </div>
 
       <div className="dash-row dash-low">
         <WorkforceCard />
         <Performance charts={charts} loading={srcs.state === "loading"} go={go} />
         <BriefCard />
+      </div>
+
+      <div className="dash-row dash-mid">
+        <PeopleCard go={go} />
+        <SourcesCard sources={sources} loading={srcs.state === "loading"} go={go} />
       </div>
 
       <div className="ov-grid">
@@ -199,21 +204,46 @@ function SourcesCard({ sources, loading, go }: { sources: ChartSource[]; loading
   );
 }
 
+/** What needs attention: ranked concerns and unranked ones, each with a text status, the reason it matters and
+ * a way to open its explanation. No colour carries meaning on its own; unranked is never shown as ranked. */
 function WorrySummary({ go }: { go: (r: string) => void }) {
   const [w] = useApi((s) => product.worry(undefined, s), []);
+  const open = (id: string) => { window.location.hash = `/worry?item=${encodeURIComponent(id)}`; };
   return (
-    <Section title="What to worry about" aria-label="Worry summary"
-             actions={<button className="link small" onClick={() => go("worry")}>Open</button>}>
+    <Section title="What needs attention" aria-label="What needs attention"
+             subtitle="Concerns backed by company records. Ranked ones use the approved method; unranked ones lack the
+               measurements needed to rank them."
+             actions={<button className="link small" onClick={() => go("worry")}>View all concerns</button>}>
       {w.state === "loading" ? <Loading lines={3} /> : w.state === "error" ? <ErrorState error={w.error} />
-        : w.data.ranking_mode === "pending"
-          ? <Guidance title="Not ranked yet">{w.data.note ?? "The ranking method is not recorded for this company."}</Guidance>
-          : w.data.ranked.length === 0 ? <Guidance title="Nothing ranked">No item meets the evidence gate.</Guidance>
-            : <ul className="plain attention-list">{w.data.ranked.slice(0, 4).map((x) => (
-                <li key={x.item_id}><span className="rank-n" style={{ fontSize: 16 }}>{x.rank}</span>
-                  <span className="what">{x.title}<span className="small muted" style={{ display: "block" }}>
-                    Exposure {x.severity.low.toFixed(2)}–{x.severity.high.toFixed(2)} (not a probability)
-                    {x.tied ? "; tied with others at this rank" : ""}</span></span>
-                </li>))}</ul>}
+        : (() => {
+            const ranked = w.data.ranking_mode === "pending" ? [] : w.data.ranked;
+            const unranked = [...(w.data.unrankable ?? []).map((u) => ({ id: u.item_id, title: u.title,
+                                status: "Unranked: information missing", why: u.reasons[0] ?? "" })),
+                              ...(w.data.unranked ?? []).map((u) => ({ id: u.item_id, title: u.title,
+                                status: "Unranked: needs review", why: w.data.note ?? "" }))];
+            if (!ranked.length && !unranked.length) {
+              return <Guidance title="Nothing needs attention">No concern is supported by the records you may read.</Guidance>;
+            }
+            return (
+              <ul className="plain attention-list">
+                {ranked.slice(0, 4).map((x) => (
+                  <li key={x.item_id}>
+                    <span className="status-tag ranked">Ranked #{x.rank}{x.tied ? " (tied)" : ""}</span>
+                    <span className="what">{x.title}<span className="small muted" style={{ display: "block" }}>
+                      {(x.severity.criteria.C1?.status === "measured" ? x.severity.criteria.C1.reason
+                        : Object.values(x.severity.criteria).find((c) => c.status === "measured")?.reason) ?? ""}
+                      {" "}Exposure {x.severity.low.toFixed(2)}–{x.severity.high.toFixed(2)}, an ordering, not a probability.
+                      {x.evidence.length ? ` ${x.evidence.length} supporting record${x.evidence.length === 1 ? "" : "s"}.` : ""}</span></span>
+                    <button className="link small" onClick={() => open(x.item_id)}>Explain</button>
+                  </li>))}
+                {unranked.slice(0, 3).map((u) => (
+                  <li key={u.id}>
+                    <span className="status-tag">{u.status}</span>
+                    <span className="what">{u.title}<span className="small muted" style={{ display: "block" }}>{u.why}</span></span>
+                    <button className="link small" onClick={() => open(u.id)}>Explain</button>
+                  </li>))}
+              </ul>);
+          })()}
     </Section>
   );
 }
@@ -274,8 +304,8 @@ function Attention() {
   const warnings = deps.state === "ready" ? deps.data.warnings : [];
   const items = today.state === "ready" ? today.data.today.items : [];
   return (
-    <Section title="Needs attention" aria-label="Needs attention"
-             subtitle="Evidence-backed signals, not ranked: ranking waits for the owner's D-15 values.">
+    <Section title="Early warnings" aria-label="Early warnings"
+             subtitle="Evidence-backed signals from the records. These are not ranked risks.">
       {(deps.state === "loading" || today.state === "loading") && <Loading lines={4} />}
       {deps.state === "error" && <ErrorState error={deps.error} />}
       {deps.state === "ready" && today.state !== "loading" && (warnings.length === 0 && items.length === 0

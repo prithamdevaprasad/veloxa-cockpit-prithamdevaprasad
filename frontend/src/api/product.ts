@@ -61,7 +61,7 @@ export const product = {
   explainWorry: (itemId: string, model = false) => get<{ item_id: string; explanation: P.Explanation }>(
     `/v1/worry/${enc(itemId)}/explain` + qs({ model: model ? "true" : undefined })),
   registry: (s?: AbortSignal) => get<{ conflicts: { conflict_id: string; subject: string; predicate: string;
-    resolution: string; claims: { claim_id: string; object: string; record_id: string }[] }[];
+    resolution: string; claims: { claim_id: string; object: unknown; display?: string; record_id: string }[] }[];
     hidden_for_access: number }>("/v1/knowledge/conflicts", s),
   explainConflict: (id: string, model = false) => get<{ conflict_id: string; explanation: P.Explanation }>(
     `/v1/knowledge/conflicts/${enc(id)}/explain` + qs({ model: model ? "true" : undefined })),
