@@ -22,6 +22,17 @@ const ERRORS: Record<string, string> = {
 const errorText = (code: string) => ERRORS[code]
   ?? (code.startsWith("rejected_") ? "The e-mail or password is not correct, or this account has no access."
     : "Sign-in failed. Try again.");
+/** The invitation code from the link, kept for this tab so it survives the password-reset round trip. */
+const INVITE_KEY = "veloxa.invite";
+function rememberedInvite(): string | undefined {
+  const fromUrl = /[?&]invite=([^&]+)/.exec(window.location.hash)?.[1];
+  try {
+    if (fromUrl) sessionStorage.setItem(INVITE_KEY, fromUrl);
+    return fromUrl ?? sessionStorage.getItem(INVITE_KEY) ?? undefined;
+  } catch { return fromUrl; }
+}
+function forgetInvite() { try { sessionStorage.removeItem(INVITE_KEY); } catch { /* */ } }
+
 /** The developer token is shown only in builds that opt in (local development) AND when the server offers it. */
 const DEV_UI = import.meta.env.VITE_DEV_TOKEN_UI === "1";
 
@@ -40,7 +51,7 @@ export function SignInPage({ onSignedIn, reason }: { onSignedIn: () => void; rea
   useEffect(() => {
     get<Options>("/v1/auth/options").then(setOpts, (e) => setOptsErr(e instanceof ApiError ? e : null));
   }, []);
-  const invite = /[?&]invite=([^&]+)/.exec(window.location.hash)?.[1];
+  const invite = rememberedInvite();
   const nothing = opts && opts.providers.length === 0 && !opts.demo && !(opts.developer_token && DEV_UI)
     && !sb.supabaseConfigured();
   return (
@@ -107,7 +118,20 @@ function PasswordForm({ invite, onSignedIn, onForgot }: { invite?: string; onSig
       setPassword("");
       if (invite) {
         try { await request("POST", "/v1/invitations/accept", { invitation_token: decodeURIComponent(invite) }); }
-        catch { await sb.signOut(); throw new Error(errorText("invalid_invitation")); }
+        catch (x) {
+          if (!(x instanceof ApiError && /already bound/.test(x.message))) {
+            await sb.signOut(); throw new Error(errorText("invalid_invitation"));
+          }
+        }
+        forgetInvite();
+      }
+      try { await get("/v1/me"); }
+      catch (x) {
+        if (x instanceof ApiError && x.status === 401) {
+          await sb.signOut();
+          throw new Error("Your password was accepted, but this account isn't linked to a Veloxa workspace yet. "
+            + "Open the invitation link your administrator gave you, then sign in again.");
+        }
       }
       onSignedIn();
     } catch (e) { setErr(e instanceof Error ? e.message : "Sign-in failed. Try again."); }
