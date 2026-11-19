@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, get, request, setToken } from "../api/client";
 import { BrandMark } from "../ui/kit";
+import * as sb from "../api/supabase";
 import { Button } from "../ui";
 
 interface Options { providers: { id: string; label: string }[]; demo: boolean; developer_token: boolean;
@@ -37,7 +38,8 @@ export function SignInPage({ onSignedIn, reason }: { onSignedIn: () => void; rea
     get<Options>("/v1/auth/options").then(setOpts, (e) => setOptsErr(e instanceof ApiError ? e : null));
   }, []);
   const invite = /[?&]invite=([^&]+)/.exec(window.location.hash)?.[1];
-  const nothing = opts && opts.providers.length === 0 && !opts.demo && !opts.developer_token;
+  const nothing = opts && opts.providers.length === 0 && !opts.demo && !opts.developer_token
+    && !sb.supabaseConfigured();
   return (
     <div className="signin">
       <div className="signin-card" role="main" aria-labelledby="signin-title">
@@ -49,6 +51,7 @@ export function SignInPage({ onSignedIn, reason }: { onSignedIn: () => void; rea
           Check your connection and try again.</div>}
         {invite && <p className="small">You're accepting an invitation. Sign in with the account your administrator
           invited.</p>}
+        {sb.supabaseConfigured() && <EmailCode invite={invite} onSignedIn={onSignedIn} />}
         <div className="signin-actions">
           {opts?.providers.map((p) => (
             <a key={p.id} className="btn primary signin-sso" href={`/v1/auth/login/${p.id}${invite ? `?invite=${invite}` : ""}`}>
@@ -75,6 +78,58 @@ export function SignInPage({ onSignedIn, reason }: { onSignedIn: () => void; rea
             </form>
           </details>)}
       </div>
+    </div>
+  );
+}
+
+/** Supabase e-mail one-time code. Invite-only: a code is sent only to an address that already has an account, and
+ * Veloxa admits only a verified identity bound to an invitation (first sign-in) or to an existing member. */
+function EmailCode({ invite, onSignedIn }: { invite?: string; onSignedIn: () => void }) {
+  const [email, setEmail] = useState("");
+  const [code, setCode] = useState("");
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function run(fn: () => Promise<void>) {
+    setBusy(true); setErr(null);
+    try { await fn(); } catch (e) { setErr(e instanceof Error ? e.message : "Sign-in failed. Try again."); }
+    finally { setBusy(false); }
+  }
+  const verify = () => run(async () => {
+    await sb.verifyCode(email.trim(), code.trim());
+    if (invite) {
+      try { await request("POST", "/v1/invitations/accept", { invitation_token: decodeURIComponent(invite) }); }
+      catch (e) {
+        await sb.signOut(null); setToken(null);
+        throw new Error(e instanceof ApiError ? errorText("invalid_invitation") : "The invitation couldn't be accepted.");
+      }
+    }
+    onSignedIn();
+  });
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      {err && <div className="callout bad small" role="alert">{err}</div>}
+      {!sent ? (
+        <form className="stack" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); void run(async () => {
+          await sb.sendCode(email.trim()); setSent(true); }); }}>
+          <label className="small">Work e-mail
+            <input className="input" type="email" autoComplete="email" required value={email}
+                   onChange={(e) => setEmail(e.target.value)} /></label>
+          <Button type="submit" variant="primary" disabled={busy || !email.includes("@")}>
+            {busy ? "Sending…" : "Email me a sign-in code"}</Button>
+        </form>
+      ) : (
+        <form className="stack" style={{ gap: 8 }} onSubmit={(e) => { e.preventDefault(); void verify(); }}>
+          <p className="small">We sent a code to <strong>{email}</strong>. It expires shortly.</p>
+          <label className="small">Sign-in code
+            <input className="input" inputMode="numeric" autoComplete="one-time-code" required value={code}
+                   onChange={(e) => setCode(e.target.value.replace(/\s/g, ""))} /></label>
+          <div className="row" style={{ gap: 8 }}>
+            <Button type="submit" variant="primary" disabled={busy || code.length < 6}>{busy ? "Checking…" : "Sign in"}</Button>
+            <Button type="button" disabled={busy} onClick={() => { setSent(false); setCode(""); }}>Use another e-mail</Button>
+          </div>
+        </form>)}
+      {sb.googleEnabled() && <a className="btn signin-sso" href={sb.googleUrl()}>Continue with Google</a>}
     </div>
   );
 }

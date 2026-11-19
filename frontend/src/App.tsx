@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, setToken } from "./api/client";
+import { ApiError, getToken, setToken } from "./api/client";
+import * as sb from "./api/supabase";
 import { product } from "./api/product";
 import type { Me } from "./api/product-types";
 import { AdminPage } from "./pages/Admin";
@@ -80,7 +81,8 @@ function Shell() {
   const [auth, setAuth] = useState<"checking" | "in" | "out">("checking");
   const [reason, setReason] = useState<string | undefined>();
   useEffect(() => {
-    product.me().then((m) => { setMe(m); setAuth("in"); }, (e) => {
+    sb.takeRedirectSession();
+    void sb.restore().then(() => product.me()).then((m) => { setMe(m); setAuth("in"); }, (e) => {
       setMe(null);
       if (e instanceof ApiError && e.status === 401) {
         setReason(/expired/.test(e.message) ? "session_expired" : undefined);
@@ -90,6 +92,7 @@ function Shell() {
   }, [authTick]);
   const signOut = useCallback(async () => {
     try { await product.logout(); } catch { /* the session is cleared locally either way */ }
+    await sb.signOut(getToken());
     setToken(null); setReason(undefined); setAuthTick((t) => t + 1);
   }, []);
   const go = useCallback((r: string) => { window.location.hash = `/${r}`; }, []);
