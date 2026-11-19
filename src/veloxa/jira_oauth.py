@@ -127,8 +127,9 @@ def _iso(t: float | None) -> str | None:
 class Vault:
     """Per-tenant grants. Memory only, or AES-GCM encrypted files when a key and a directory are configured."""
 
-    def __init__(self, env: dict | None = None):
+    def __init__(self, env: dict | None = None, prefix: str = "jira", grant_type: type | None = None):
         env = os.environ if env is None else env
+        self._prefix, self._grant_type = prefix, grant_type or Grant
         self._lock = threading.Lock()
         self._mem: dict[str, Grant] = {}
         self._dir = Path(env["VELOXA_TOKEN_DIR"]) if env.get("VELOXA_TOKEN_DIR") else None
@@ -142,7 +143,7 @@ class Vault:
         return bool(self._dir and self._key)
 
     def _path(self, tenant: str) -> Path:
-        return self._dir / f"jira-{tenant}.bin"            # type: ignore[operator]
+        return self._dir / f"{self._prefix}-{tenant}.bin"            # type: ignore[operator]
 
     def get(self, tenant: str) -> Grant | None:
         with self._lock:
@@ -151,7 +152,7 @@ class Vault:
             from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
             raw = self._path(tenant).read_bytes()
-            g = Grant(**json.loads(AESGCM(self._key).decrypt(raw[:12], raw[12:], tenant.encode())))
+            g = self._grant_type(**json.loads(AESGCM(self._key).decrypt(raw[:12], raw[12:], tenant.encode())))
             self._mem[tenant] = g
             return g
 

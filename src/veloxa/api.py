@@ -944,6 +944,9 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
     from . import api_jira
 
     api_jira.register(app, state=state, principal_of=_principal, now_fn=now_fn)
+    from . import api_gmail
+
+    api_gmail.register(app, state=state)
     from . import api_dataroom
 
     api_dataroom.register(app, state=state, principal_of=_principal, now_fn=now_fn,

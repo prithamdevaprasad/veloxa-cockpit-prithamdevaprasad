@@ -80,6 +80,7 @@ def register(app, *, state, principal_of, now_fn, jira_factory=None) -> None:
             return JSONResponse(status_code=403, content={"error": "not_permitted", "detail": f"{need} is required"})
         return p
 
+    state["require_relation"] = admin
     USE = ("admin", "company_reader")
 
     def permission_for(conn, p) -> bool:

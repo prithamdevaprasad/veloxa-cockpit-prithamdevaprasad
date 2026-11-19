@@ -216,10 +216,53 @@ def to_jsonl(records: list[dict]) -> bytes:
     return "".join(json.dumps(r, sort_keys=True, default=str) + "\n" for r in records).encode("utf-8")
 
 
+def submit(conn, store, tenant_id, name: str, records: list[dict], *, actor: str, department_id: str,
+           source_type: str, mode: str, scope: dict, cursor_before: str | None, cursor_after: str | None,
+           key: str = "key", version: str = "updated", title: str | None = None) -> dict:
+    """The ONE path from any connector into evidence: drop versions already submitted (idempotency), submit the rest
+    to the data room as a pending submission (same review, admission and projection as a manual upload), and record
+    the run with its scope and cursors."""
+    from . import intake
+    from .db import tenant_tx
+
+    seen: dict = {}
+    if mode != "initial":                                # "initial" = a deliberate full refresh (new versions)
+        with tenant_tx(conn, tenant_id, actor):
+            rows = conn.execute("SELECT scope FROM runtime.connector_run WHERE tenant_id = %s AND connector = %s"
+                                " AND status = 'ok'", (tenant_id, name)).fetchall()
+        for r in rows:
+            seen |= r["scope"].get("submitted_versions", {})
+    new = [r for r in records if seen.get(str(r[key])) != str(r.get(version))]
+    sid = None
+    if new:
+        sid = intake.upload(conn, store, tenant_id, actor, department_id, source_type,
+                            title or f"{name} sync {cursor_after or ''}".strip(),
+                            [intake.Upload(f"{name}_sync.jsonl", to_jsonl(new))])
+    scope = {**scope, "submitted_versions": {str(r[key]): str(r.get(version)) for r in new},
+             "submission_id": str(sid) if sid else None}
+    with tenant_tx(conn, tenant_id, actor):
+        conn.execute("INSERT INTO runtime.connector_run (tenant_id, connector, mode, scope, cursor_before,"
+                     " cursor_after, fetched, changed, submitted, status, finished_at)"
+                     " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'ok',now())",
+                     (tenant_id, name, mode, json.dumps(scope), cursor_before, cursor_after, len(records), len(new),
+                      len(new) if sid else 0))
+    return {"status": "ok", "fetched": len(records), "changed": len(new), "submission_id": sid,
+            "cursor": cursor_after}
+
+
+def record_failure(conn, tenant_id, name: str, *, actor: str, mode: str, scope: dict, cursor_before, error: str):
+    from .db import tenant_tx
+
+    with tenant_tx(conn, tenant_id, actor):
+        conn.execute("INSERT INTO runtime.connector_run (tenant_id, connector, mode, scope, cursor_before,"
+                     " status, error, finished_at) VALUES (%s,%s,%s,%s,%s,'failed',%s,now())",
+                     (tenant_id, name, mode, json.dumps(scope), cursor_before, error))
+    return {"status": "failed", "error": error}
+
+
 def sync(conn, store, tenant_id, connector: JiraConnector, *, actor: str, department_id: str, source_type: str,
          mode: str = "incremental") -> dict:
-    """One run: fetch since the last cursor, submit changed records to the data room (pending review), record it."""
-    from . import intake
+    """One Jira run: fetch since the last cursor, then `submit`."""
     from .db import tenant_tx
 
     with tenant_tx(conn, tenant_id, actor):                      # FORCE RLS: every read and write is tenant-scoped
@@ -230,30 +273,9 @@ def sync(conn, store, tenant_id, connector: JiraConnector, *, actor: str, depart
     scope = {"projects": list(connector.config.projects), "fields": list(connector.config.fields)}
     try:
         records, newest = connector.fetch(cursor)
-        seen = {}
-        with tenant_tx(conn, tenant_id, actor):
-            rows = conn.execute("SELECT scope FROM runtime.connector_run WHERE tenant_id = %s AND connector = %s"
-                                " AND status = 'ok'", (tenant_id, connector.name)).fetchall()
-        for r in rows if mode != "initial" else []:      # "initial" = a deliberate full refresh (new versions)
-            seen |= r["scope"].get("submitted_versions", {})
-        new = changed(records, seen)
-        sid = None
-        if new:
-            sid = intake.upload(conn, store, tenant_id, actor, department_id, source_type,
-                                f"Jira sync {newest or ''}".strip(),
-                                [intake.Upload("jira_sync.jsonl", to_jsonl(new))])
-        scope["submitted_versions"] = {r["key"]: r["updated"] for r in new}
-        scope["submission_id"] = str(sid) if sid else None
-        with tenant_tx(conn, tenant_id, actor):
-            conn.execute("INSERT INTO runtime.connector_run (tenant_id, connector, mode, scope, cursor_before,"
-                         " cursor_after, fetched, changed, submitted, status, finished_at)"
-                         " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'ok',now())",
-                         (tenant_id, connector.name, mode, json.dumps(scope), cursor, newest, len(records), len(new),
-                          len(new) if sid else 0))
-        return {"status": "ok", "fetched": len(records), "changed": len(new), "submission_id": sid, "cursor": newest}
+        return submit(conn, store, tenant_id, connector.name, records, actor=actor, department_id=department_id,
+                      source_type=source_type, mode=mode, scope=scope, cursor_before=cursor, cursor_after=newest,
+                      title=f"Jira sync {newest or ''}".strip())
     except ConnectorFailed as e:
-        with tenant_tx(conn, tenant_id, actor):
-            conn.execute("INSERT INTO runtime.connector_run (tenant_id, connector, mode, scope, cursor_before,"
-                         " status, error, finished_at) VALUES (%s,%s,%s,%s,%s,'failed',%s,now())",
-                         (tenant_id, connector.name, mode, json.dumps(scope), cursor, str(e)))
-        return {"status": "failed", "error": str(e)}
+        return record_failure(conn, tenant_id, connector.name, actor=actor, mode=mode, scope=scope,
+                              cursor_before=cursor, error=str(e))
