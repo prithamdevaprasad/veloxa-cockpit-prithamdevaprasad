@@ -164,7 +164,8 @@ export function Conversation({ session, history, onClosed, opening }: { session:
 
   return (
     <div className="interview">
-      <p className="label-ai">{session.label} Session at K={session.batch_seq}, configuration v{session.config_version}.</p>
+      <p className="label-ai" title={`Knowledge point K=${session.batch_seq}; configuration v${session.config_version}`}>
+        {session.label} It uses company records up to release {session.batch_seq}.</p>
       <div className="chat" aria-live="polite">
         {opening && <div className="bubble agent">{opening}</div>}
         {log.map((l, i) => (
@@ -236,7 +237,7 @@ function TurnView({ turn }: { turn: AgentTurn }) {
           {sources > 0 && <EvidenceList items={turn.evidence} />}
           {turn.unknowns.length > 0 && <><strong>Gaps</strong>
             <ul className="bullets">{turn.unknowns.map((u, i) => <li key={i}>{u}</li>)}</ul></>}
-          {turn.refusal && <p className="muted">Policy {turn.refusal.policy}.</p>}
+          {turn.refusal && <p className="muted small">This follows company policy {turn.refusal.policy}.</p>}
           <p className="muted">Tools: {turn.tools.map((t) => `${t.tool} (${t.decision}${t.status ? `, ${t.status}`
             : ""})`).join("; ") || "none"}. Excluded evidence: policy {turn.excluded.policy ?? 0}, authorisation{" "}
             {turn.excluded.authorization ?? 0}, knowledge boundary {turn.excluded.knowledge ?? 0}.</p>
@@ -282,7 +283,7 @@ export function HistoryView({ agentId, onOpen }: { agentId: string; onOpen: (d: 
       <ul className="plain stack" aria-label="Your sessions">
         {list.data.sessions.map((s) => (
           <li key={s.session_id} className="row" style={{ justifyContent: "space-between" }}>
-            <span className="small">{new Date(s.opened_at).toLocaleString()} · {s.turns} turn(s) · K={s.batch_seq}</span>
+            <span className="small">{new Date(s.opened_at).toLocaleString()} · {s.turns} turn(s) · release {s.batch_seq}</span>
             <Button onClick={async () => {
               try { onOpen(await api.session(s.session_id)); }
               catch (e) { setError(e instanceof ApiError ? e : new ApiError(0, "unknown", String(e))); }

@@ -55,7 +55,7 @@ function EvidencePanel({ recordId, why, onClose }: { recordId: string; why?: str
             <dl className="meta">
               <dt>Source</dt><dd>{d.system.replace(/_/g, " ")}</dd>
               <dt>Location</dt><dd>{where(d.locator)}</dd>
-              <dt>Version</dt><dd>v{d.version} · batch K={d.batch_seq}{d.versions.length > 1 ? ` (${d.versions.length} versions)` : ""}</dd>
+              <dt>Version</dt><dd>v{d.version} · release {d.batch_seq}{d.versions.length > 1 ? ` (${d.versions.length} versions)` : ""}</dd>
               <dt>Extracted</dt><dd>{new Date(d.extracted_at).toLocaleString()}</dd>
               <dt>Classification</dt><dd><Badge value={d.data_class} /></dd>
               <dt>Admission</dt><dd>{d.admission_state}</dd>

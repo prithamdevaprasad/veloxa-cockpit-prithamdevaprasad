@@ -39,7 +39,7 @@ function Changes() {
           ? <Guidance title="No changes recorded">Changes appear when a later admitted batch alters an earlier signal.</Guidance>
           : <ul className="plain stack">{events.map((e, i) => (
               <li key={i} className="row-item"><Badge value="open" label={e.change} />
-                <span>{e.subject ?? e.risk_id}</span><span className="small muted">K={e.batch_seq}
+                <span>{e.subject ?? e.risk_id}</span><span className="small muted">release {e.batch_seq}
                   {e.fields?.length ? ` · ${e.fields.join(", ")}` : ""}</span></li>))}</ul>;
       })()}
     </Section>

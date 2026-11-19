@@ -89,7 +89,7 @@ export function TodayPage({ onAsk }: { onAsk: (q: string) => void }) {
               <tr key={it.item_id}><td>{it.title}<div className="small muted">{it.kind.replace("_", " ")}</div></td>
                 <td>{it.events.map((e, i) => (
                   <div key={i} className="small"><Badge value={e.event === "resolved" ? "answered" : e.event === "changed" ? "qualified" : "open"}
-                    label={e.event} /> at K={e.batch_seq}{e.fields ? ` (${e.fields.join(", ")})` : ""}</div>
+                    label={e.event} /> in release {e.batch_seq}{e.fields ? ` (${e.fields.join(", ")})` : ""}</div>
                 ))}</td></tr>
             ))}</tbody>
           </table></div>

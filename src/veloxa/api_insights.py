@@ -92,7 +92,7 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
                                      "evidence": [f["source_record_id"]]})
                 kpis.append({"key": "coverage", "label": "Evidence coverage",
                              "value": f"{cov['records']} records from {cov['sources']} sources", "unit": None,
-                             "basis": f"sealed knowledge point K={basis.batch_seq}", "evidence": []})
+                             "basis": f"admitted records up to release {basis.batch_seq}", "evidence": []})
             else:
                 notes.append("nothing has been admitted yet: upload and authorise data to populate the overview")
             synthetic = conn.execute("SELECT synthetic FROM directory.tenant WHERE tenant_id = %s",

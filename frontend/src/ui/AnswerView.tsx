@@ -144,7 +144,8 @@ export function AnswerView({ answer }: { answer: Answer }) {
 
       {answer.refusal && (
         <div className="callout bad" role="note">
-          <strong>{answer.refusal.policy}{answer.refusal.title ? `: ${answer.refusal.title}` : ""}</strong>
+          <strong>{answer.refusal.title || "A company privacy rule applies"}</strong>
+          <span className="small muted"> (policy {answer.refusal.policy})</span>
           <p style={{ marginTop: 4 }}>{answer.refusal.reason}</p>
           {answer.refusal.alternative && <p className="small" style={{ marginTop: 6 }}>Instead: {answer.refusal.alternative}</p>}
         </div>
@@ -254,7 +255,7 @@ export function AnswerView({ answer }: { answer: Answer }) {
       <footer className="brief-foot">
         {answer.evidence.length > 0 && (
           <button className="btn" onClick={() => setOpen(true)}>Evidence ({answer.evidence.length})</button>)}
-        <span>{answer.read_basis.banner ?? `Knowledge point K=${answer.read_basis.batch_seq}`}</span>
+        <span title={answer.read_basis.banner ?? undefined}>Records up to release {answer.read_basis.batch_seq}</span>
         <details className="small" style={{ flexBasis: "100%" }}>
           <summary>How Veloxa read the question</summary>
           <p style={{ marginTop: 4 }}>{answer.interpretation}</p>
@@ -269,7 +270,7 @@ export function AnswerView({ answer }: { answer: Answer }) {
                 <span className="source-n">{i + 1}</span>
                 <span style={{ minWidth: 0 }}>
                   <strong style={{ fontWeight: 500 }}>{(e.source_path ?? e.system).split("/").pop()}</strong>
-                  <div className="small muted">{e.system.replace(/_/g, " ")}, {where(e)}, batch K={e.batch_seq}, {e.data_class}</div>
+                  <div className="small muted">{e.system.replace(/_/g, " ")}, {where(e)}, release {e.batch_seq}</div>
                   <div className="mono small muted" style={{ overflowWrap: "anywhere" }}>{e.record_id}</div>
                 </span>
                 <button className="btn" onClick={() => evidence.open(e.record_id)}>View</button>

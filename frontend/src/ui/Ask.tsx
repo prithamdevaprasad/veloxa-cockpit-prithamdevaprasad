@@ -10,7 +10,7 @@ import { AnswerView } from "./AnswerView";
 import { Icon } from "./kit";
 import { Button, ErrorState, Loading } from "./index";
 
-type AskCtx = { openThread: (threadId: string) => void; ask: (question: string) => void; open: () => void;
+type AskCtx = { openThread: (threadId: string, draft?: string) => void; ask: (question: string) => void; open: () => void;
                 full: boolean };
 const Ctx = createContext<AskCtx>({ openThread: () => undefined, ask: () => undefined, open: () => undefined, full: false });
 export const useAsk = () => useContext(Ctx);
@@ -63,7 +63,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
   const close = useCallback(() => { setOpen(false); if (isAskRoute()) leaveFull(); }, [leaveFull]);
 
   const ctx = useMemo<AskCtx>(() => ({
-    openThread: (id) => { setThreadId(id); setOpen(true); setFocusTick((t) => t + 1); },
+    openThread: (id, q) => { setThreadId(id); if (q) setDraft(q); setOpen(true); setFocusTick((t) => t + 1); },
     ask: (q) => { if (q) { setDraft(q); setThreadId(null); } setOpen(true); setFocusTick((t) => t + 1); },
     open: () => { setOpen(true); setFocusTick((t) => t + 1); },
     full,

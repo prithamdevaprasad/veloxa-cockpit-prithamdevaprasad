@@ -142,7 +142,7 @@ export function EvidenceList({ items, focus }: { items: Evidence[]; focus?: stri
             <Badge value={e.kind} />
             <Badge value={e.data_class} />
             {e.knowledge_basis && <Badge value={e.knowledge_basis} title="knowledge basis (§14.2)" />}
-            <span className="small muted">batch K={e.batch_seq}</span>
+            <span className="small muted">release {e.batch_seq}</span>
           </div>
           <div className="mono small" style={{ marginTop: 6, wordBreak: "break-all" }}>{e.record_id}</div>
           {e.excerpt && <div className="excerpt small">{e.excerpt.replace(/[⟦⟧]/g, "")}</div>}

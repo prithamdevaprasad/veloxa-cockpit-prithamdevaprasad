@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { product } from "../api/product";
 import type { Finding, WorryItem } from "../api/product-types";
 import { useApi } from "../api/useApi";
+import { useAsk } from "../ui/Ask";
 import { useEvidence } from "../ui/EvidenceDrawer";
 import { ExplanationView, useExplanation } from "../ui/Explanation";
 import { Guidance } from "../ui/kit";
@@ -26,6 +27,7 @@ export const groupLabel = (rank: number) =>
 function Item({ x, groupSize }: { x: WorryItem; groupSize: number }) {
   const [explain, setExplain] = useState(false);
   const evidence = useEvidence();
+  const ask = useAsk();
   const ex = useExplanation(async () => (await product.explainWorry(x.item_id)).explanation, [x.item_id], explain);
   const s = x.severity;
   const crit = Object.entries(s.criteria);
@@ -46,6 +48,8 @@ function Item({ x, groupSize }: { x: WorryItem; groupSize: number }) {
         <Button onClick={() => setExplain(!explain)} aria-expanded={explain}>{explain ? "Hide explanation" : "Explain concern"}</Button>
         <Button variant="ghost" disabled={!x.evidence.length} onClick={() => evidence.open(x.evidence[0], x.title)}>
           View evidence ({x.evidence.length})</Button>
+        <Button variant="ghost" onClick={() => ask.ask(`What do the records show about "${x.title}", and what is still unknown?`)}>
+          Ask about this</Button>
       </div>
       {explain && <ExplanationView ex={ex} />}
       <details className="small assess">

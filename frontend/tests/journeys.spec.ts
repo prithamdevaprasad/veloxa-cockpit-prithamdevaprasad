@@ -170,6 +170,7 @@ test("Overview shows governed figures, recent agent updates from a real session,
   await page.getByRole("button", { name: "Ask about this" }).click();
   const ask = page.getByRole("dialog", { name: "Ask Veloxa" });
   await expect(ask).toContainText("About an agent update");
+  await expect(ask.getByLabel("Question")).toHaveValue(/What does ".+" mean for us/);  // prefilled, editable, unsent
   await ask.getByLabel("Question").fill("Why did it change?");
   await ask.getByRole("button", { name: "Send" }).click();
   await expect(ask.getByText(/regarding Synthetic org|Why did it change/).first()).toBeVisible();

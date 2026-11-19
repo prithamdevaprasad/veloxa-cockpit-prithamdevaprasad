@@ -52,7 +52,8 @@ function Updates({ dept }: { dept: string }) {
             <span className="small muted">{u.agent_id.replace(/^syn-/, "")}, {relTime(u.created_at)} <DemoBadge show={u.synthetic} /></span>
             <span style={{ display: "block" }}>{u.title}</span>
             <button className="link small" onClick={async () => {
-              const t = await product.updateThread(u.update_id); ask.openThread(t.thread_id); }}>Ask about this</button>
+              const t = await product.updateThread(u.update_id);
+              ask.openThread(t.thread_id, `What does "${u.title}" mean for us, and what is still unknown?`); }}>Ask about this</button>
           </span>
         </li>))}</ul>;
 }

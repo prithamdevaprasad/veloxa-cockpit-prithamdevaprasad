@@ -87,7 +87,7 @@ export function OverviewPage({ go }: { go: (r: string) => void }) {
           <div className="ov-meta">
             <span>{greeting()}. {me.state === "ready" ? `${me.data.tenant.display_name} at a glance.` : ""}</span>
             {ov.state === "ready" && <span className="fresh" title={ov.data.read_basis.banner}>
-              Current knowledge <span className="k">K={ov.data.read_basis.batch_seq}</span></span>}
+              Records up to <span className="k">release {ov.data.read_basis.batch_seq}</span></span>}
           </div>
         </div>
         <div className="row">
@@ -321,7 +321,7 @@ function Attention() {
                   <span className="small muted" style={{ display: "block" }}>Detected in the admitted records. It may
                     affect a commitment; the records do not establish the impact.</span></span>
                 <span className="acts"><Badge value="open" label={w.kind.replace(/_/g, " ")} />
-                  <button className="link small" onClick={() => ask.ask(`What do we know about ${w.commitment}?`)}>
+                  <button className="link small" onClick={() => ask.ask(`What do the records say about ${w.commitment}, and what is still unknown?`)}>
                     Ask about this</button></span>
               </li>))}
             {items.slice(0, 3).map((t, i) => (
@@ -399,7 +399,8 @@ function RecentIntelligence({ go }: { go: (r: string) => void }) {
             </dl>
             <div className="row">
               <Button variant="primary" onClick={async () => {
-                const t = await product.updateThread(open.update_id); setOpen(null); ask.openThread(t.thread_id); }}>
+                const t = await product.updateThread(open.update_id); setOpen(null);
+                ask.openThread(t.thread_id, `What does "${open.title}" mean for us, and what is still unknown?`); }}>
                 Ask about this</Button>
               <Button disabled={open.evidence.length === 0} onClick={() => evidence.open(open.evidence[0], open.title)}>
                 View evidence</Button>
