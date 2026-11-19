@@ -13,6 +13,17 @@ from __future__ import annotations
 import re
 
 INTENTS: tuple[tuple[str, str], ...] = (       # order matters: the first match wins
+    ("greeting", r"^\s*(hi|hello|hey|hiya|good (morning|afternoon|evening)|namaste|greetings)\b[\s!.,]*"
+                 r"(there|again|team)?[\s!.,]*$"),
+    ("thanks", r"^\s*(thanks?( you)?|thank you( so much)?|cheers|great,? thanks?|ok(ay)?,? thanks?)[\s!.,]*$"),
+    ("help", r"^\s*(help|what can you do|how (do|can) (i|you) (use|help)|what can i ask( you)?)\b"),
+    ("more", r"^\s*(tell me more|more( detail(s)?)?|go on|continue|and\?|elaborate|expand( on that)?|"
+             r"what else)\b"),
+    ("updates", r"\b(any (updates?|news)|what'?s new|latest|what'?s (going on|happening)|project status|"
+                r"status of (the )?(project|work|release)|how is (the )?(project|work|release) going|"
+                r"update me|catch me up|progress)\b"),
+    ("blockers", r"\b(blockers?|blocked|blocking|what'?s holding|holding (us|you|it) (up|back)|impediments?|"
+                 r"dependenc(y|ies)|at risk)\b"),
     ("memory", r"\b(what did i (just )?ask|earlier|previous(ly)?|before that|asked you)\b"),
     ("evidence", r"\b(evidence|sources?|support(s|ed)?|how do you know|cite|proof|where does that come from)\b"),
     ("simpler", r"\b(simpler|simply|plain (english|terms|language)|non[- ]technical|layman|explain (that|it)|"
@@ -34,9 +45,15 @@ SELF_FACTS = {"about": ["self.identity", "self.title", "self.department", "self.
               "role": ["self.title", "self.department"], "manager": ["self.manager"],
               "joined": ["self.join_date"], "status": ["self.status", "self.exit_date"],
               "team": ["self.department", "self.manager"]}
-TOPIC = {"workload": "my current workload or open tasks", "challenge": "what I'm finding hard right now",
+TOPIC = {"updates": "recent updates for my department", "blockers": "anything blocking the work",
+         "workload": "my current workload or open tasks", "challenge": "what I'm finding hard right now",
          "team": "what my team is working on", "role": "my role", "manager": "my reporting line",
          "joined": "when I joined", "status": "my employment status", "about": "my background"}
+SMALL_TALK = ("greeting", "thanks", "help")
+HELP = ("You can ask me \u201cAny updates?\u201d, \u201cWhat's blocking the work?\u201d, "
+        "\u201cWhat is your role?\u201d, "
+        "\u201cWho do you report to?\u201d, \u201cTell me more\u201d or \u201cShow evidence\u201d. I answer only "
+        "from approved company records, and I'll say so when the records don't cover something.")
 UNKNOWN_LINES = [
     "My records cover my job title, department, reporting line, start date and recorded employment status.",
     "They don't tell me my current workload, how I'm feeling, how I'm performing, or anything private.",
@@ -66,8 +83,18 @@ def intent(message: str) -> str:
     return "other"
 
 
+LEADS = ("From my department's records (not something I can confirm I saw): ",
+         "In my role I'd plausibly have been aware of this: ",
+         "I'd have had access to this record (not that I read it): ")
+
+
 def _sentences(claims: list[dict]) -> str:
-    return " ".join(c["text"].rstrip(".") + "." for c in claims)
+    """Join claim texts; a hedge shared by every claim is said once, at the start (the claims keep it)."""
+    texts = [c["text"] for c in claims]
+    lead = next((h for h in LEADS if texts and all(t.startswith(h) for t in texts)), "")
+    parts = [(t[len(lead):] if lead else t).rstrip(".") for t in texts]
+    body = " ".join((p[:1].upper() + p[1:] if lead else p) + "." for p in parts if p)
+    return (lead.rstrip(": ") + ". " + body) if lead and body else body
 
 
 def self_intents(message: str) -> list[str]:
@@ -98,6 +125,9 @@ def reply(kind: str, claims: list[dict], status: str) -> str:
     if claims:
         return _sentences(claims[:4]) + (" There's more in the sources below." if len(claims) > 4 else "")
     topic = TOPIC.get(kind, "that")
+    if kind == "blockers":
+        return ("My department's records don't show a moved date, paused hiring, incident or open work that I could "
+                "point to as a constraint, and nothing is marked as a blocker. I'd rather not guess.")
     return (f"I don't have a record that tells me {topic}, so I'd rather not guess. "
             "I can tell you my role, my department, who I report to and when I joined.")
 
@@ -130,6 +160,18 @@ def history_reply(kind: str, history: list[dict], persona: list[dict] | None = N
         return f"In short: {(parts or [last['reply']])[0]}", [e["record_id"] for e in last.get("evidence", [])]
     if kind == "unknowns":
         return " ".join(UNKNOWN_LINES), []
+    if kind == "more":
+        last = next((h for h in reversed(prev) if h.get("claims")), None)
+        if last is None:
+            return "There's nothing to expand on yet. Ask me for any updates first.", []
+        rest = last["claims"][4:8]
+        if rest:
+            return " ".join(c["text"].rstrip(".") + "." for c in rest), [r for c in rest for r in c["evidence"]]
+        ids = [e["record_id"] for e in last.get("evidence", [])]
+        unknown = [u for u in last.get("unknowns", []) if "fact(s) rest on" not in u][:2]
+        return ("That's everything my records hold on that. " + (" ".join(u.rstrip(".") + "." for u in unknown)
+                + " " if unknown else "") + f"It rests on {len(ids)} record{'s' if len(ids) != 1 else ''}; ask "
+                "\u201cShow evidence\u201d to see them."), ids
     if kind == "personal":
         if not persona:
             return ("Nothing in the company records covers my personal life, and no persona details are set for me, "
@@ -139,6 +181,19 @@ def history_reply(kind: str, history: list[dict], persona: list[dict] | None = N
         return ("Nothing in the company records covers that. For this simulation my persona was given an invented "
                 f"detail: {detail}. It's a fictional assumption, not a fact about the real employee."), []
     return None
+
+
+def small_talk(kind: str, who: dict) -> str:
+    """Greetings, thanks and help: answered without searching records (nothing here is a company fact)."""
+    name = who.get("display_name")
+    me = (f"the AI representation of {name}" + (f", {who['title']}" if who.get("title") else "")
+          + (f" in {who['department']}" if who.get("department") else "")) if name else "an AI representation"
+    if kind == "greeting":
+        return (f"Hello. I'm {me}, built from approved company records; I'm not the person themselves. "
+                "Ask me for any updates, or about my role.")
+    if kind == "thanks":
+        return "You're welcome. Ask me anything else about the work whenever you like."
+    return f"I'm {me}. " + HELP
 
 
 def refusal_reply(refusal: dict) -> str:

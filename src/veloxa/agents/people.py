@@ -70,7 +70,7 @@ def ground(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int) -> list[str]:
         person_ref = f"person:{p['emp_id']}"
         cur = registry.latest(conn, tenant_id, agent_id)
         if cur and cur.represented_person == person_ref and cur.activation == "active" \
-                and "self.profile" in cur.tools:     # configurations before self_profile get a new version
+                and "self.profile" in cur.tools and "work.updates" in cur.tools:   # older configs: new version
             continue
         cat = DEPT_CATEGORY[p["department"]]
         caps, tools = registry.category_default(cat)

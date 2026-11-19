@@ -62,6 +62,10 @@ class SearchIn(_In):
     limit: int = Field(default=5, ge=1, le=10)
 
 
+class UpdatesIn(_In):
+    focus: Literal["updates", "blockers"] = "updates"
+
+
 class FactOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
     fact_id: str
@@ -242,6 +246,12 @@ def _self_profile(ctx: ToolContext, _: NoArgs) -> dict:
     return out
 
 
+def _updates(ctx: ToolContext, a: UpdatesIn) -> dict:
+    from . import updates
+
+    return updates.build(ctx, a.focus)
+
+
 def _not_admitted(ctx: ToolContext, _: NoArgs) -> dict:          # never reached: refused by availability
     raise RuntimeError("a tool whose source is not admitted must not run")
 
@@ -261,6 +271,9 @@ REGISTRY: dict[str, ToolSpec] = {s.tool_id: s for s in (
              "conflicts", NoArgs, _conflicts),
     ToolSpec("briefing.today", "At most three evidence-backed attention items (unranked while D-15 is pending)",
              "briefing", NoArgs, _today, timeout_s=30.0),
+    ToolSpec("work.updates", "Department-aware updates and recorded constraints from admitted structured records "
+             "(event, record and admission dates kept apart; counts, never named people)", "briefing", UpdatesIn,
+             _updates, timeout_s=20.0),
     ToolSpec("self.profile", "The interviewed agent's own HR work facts (reviewed mapping; not the directory)",
              "self_profile", NoArgs, _self_profile),
     ToolSpec("evidence.search", "Lexical search over admitted documents the interviewer may see",

@@ -53,8 +53,9 @@ from .model import FactsOnlyComposer, LLMClient, ModelOutputInvalid, ModelReques
 LABEL = "AI representation of an employee role, built from records. It is not the employee and takes no action."
 PROMPT_VERSION = "agent-turn/1"
 HEDGES = {"participant": "", "possible": "I'd have had access to this record (not that I read it): ",
-          "role_plausible": "In my role I'd plausibly have been aware of this: "}
-_STRENGTH = {"participant": 0, "possible": 1, "role_plausible": 2}
+          "role_plausible": "In my role I'd plausibly have been aware of this: ",
+          "department_record": "From my department's records (not something I can confirm I saw): "}
+_STRENGTH = {"participant": 0, "possible": 1, "role_plausible": 2, "department_record": 3}
 ESCALATION = {"to": "the accountable human owner", "how": "an approval workflow; the agent takes no action"}
 _ROUTES = (
     ("people.headcount", r"\b(headcount|how many (people|employees|staff))\b"),
@@ -211,6 +212,17 @@ class AgentRuntime:
                                      " ORDER BY executed_at, execution_id", (req.session_id,)).fetchall()
         return [r["response"] for r in rows]
 
+    def _who(self, tenant_id, agent_id: str) -> dict:
+        """The represented person's display name, title and department (the reviewed mapping only)."""
+        from .. import schema
+
+        if not schema.available(self.conn, "company_intelligence"):
+            return {}
+        with tenant_tx(self.conn, tenant_id):
+            r = self.conn.execute("SELECT display_name, title, department FROM runtime.agent_person WHERE agent_id = %s"
+                                  " ORDER BY version DESC LIMIT 1", (agent_id,)).fetchone()
+        return dict(r) if r else {}
+
     def _persona(self, tenant_id, agent_id: str) -> list[dict]:
         from .. import schema
 
@@ -248,7 +260,11 @@ class AgentRuntime:
         from . import conversation
 
         kind = conversation.intent(req.message)
-        if req.tool_calls is None and kind in ("memory", "evidence", "simpler", "unknowns", "personal"):
+        if req.tool_calls is None and kind in conversation.SMALL_TALK:      # no retrieval for a greeting or help
+            who = self._who(req.tenant_id, cfg.agent_id)
+            return base | {"status": "answered", "reply": conversation.small_talk(kind, who),
+                           "conversational": kind}
+        if req.tool_calls is None and kind in ("memory", "evidence", "simpler", "unknowns", "personal", "more"):
             history = self._history(req)
             persona = self._persona(req.tenant_id, cfg.agent_id) if kind == "personal" else None
             text, ids = conversation.history_reply(kind, history, persona)
@@ -261,7 +277,7 @@ class AgentRuntime:
                            "persona": "synthetic assumption, not a fact" if kind == "personal" and persona else None}
 
         calls = list(req.tool_calls) if req.tool_calls is not None else self._route(req.message, cfg)
-        facts, evidence, own = [], {}, {}
+        facts, evidence, own, dept_ctx = [], {}, {}, {}
         for call in calls:
             outcome = self._run_tool(req, s, cfg, basis, call)
             base["tools"].append({k: v for k, v in outcome.items() if k not in ("output",)})
@@ -275,8 +291,15 @@ class AgentRuntime:
             if call.tool_id == "self.profile":         # the agent's own HR record, and its manager's for name/title
                 for r in out.get("self_records", []):
                     own[r] = "participant"
+            if call.tool_id == "work.updates":         # department context: the department's own systems only
+                from .updates import DEPT_FOCUS, DEPT_SYSTEMS
 
-        permitted, labels, excluded = self._knowledge(req, cfg, basis, evidence, own)
+                dept = DEPT_FOCUS.get(str(self._who(req.tenant_id, cfg.agent_id).get("department", "")).lower())
+                for e in out["evidence"]:
+                    if dept and e["system"] in DEPT_SYSTEMS[dept]:
+                        dept_ctx[e["record_id"]] = "department_record"
+
+        permitted, labels, excluded = self._knowledge(req, cfg, basis, evidence, own, dept_ctx)
         base["excluded"] = excluded
         usable = [f for f in facts if f["inputs"] and all(i in permitted for i in f["inputs"])]
         if len(usable) < len(facts):
@@ -333,8 +356,12 @@ class AgentRuntime:
         return base | {"status": status, "claims": claims}
 
     def _route(self, message: str, cfg: registry.AgentConfig) -> list[ToolCall]:
-        calls = [ToolCall(t) for t, rx in _ROUTES if t in cfg.tools and re.search(rx, message, re.IGNORECASE)]
         from . import conversation
+
+        kind = conversation.intent(message)
+        if kind in ("updates", "blockers") and "work.updates" in cfg.tools:      # real retrieval, department-aware
+            return [ToolCall("work.updates", {"focus": kind})]
+        calls = [ToolCall(t) for t, rx in _ROUTES if t in cfg.tools and re.search(rx, message, re.IGNORECASE)]
 
         if "self.profile" in cfg.tools and (_SELF.search(message)               # "what is your role", "your manager"
                                             or conversation.intent(message) in conversation.SELF_FACTS):
@@ -392,7 +419,8 @@ class AgentRuntime:
                           "decision": result["decision"], "reason": result["reason"], "status": result["status"]})
         return result
 
-    def _knowledge(self, req, cfg, basis, evidence: dict, own: dict | None = None) -> tuple[dict, dict, dict]:
+    def _knowledge(self, req, cfg, basis, evidence: dict, own: dict | None = None,
+                   dept_ctx: dict | None = None) -> tuple[dict, dict, dict]:
         """D = KB ∩ AZ ∩ POL over the evidence the tools returned. Returns (permitted, labels, excluded counts)."""
         excluded = {"policy": 0, "authorization": 0, "knowledge": 0}
         pol = {r: e for r, e in evidence.items() if policy_allows(e["data_class"])}
@@ -403,6 +431,9 @@ class AgentRuntime:
         labels = self.kb.labels(cfg, sorted(az), basis) if az else {}
         for r, lab in (own or {}).items():             # self_profile: only records the self tool returned, and only
             if r in az and not labels.get(r):          # after policy and the interviewer's authorization allowed them
+                labels[r] = lab
+        for r, lab in (dept_ctx or {}).items():        # work.updates: department records, labelled as such (never
+            if r in az and not labels.get(r):          # as the person's own knowledge); policy and AZ still apply
                 labels[r] = lab
         permitted = {r: e for r, e in az.items() if labels.get(r)}
         excluded["knowledge"] = len(az) - len(permitted)
