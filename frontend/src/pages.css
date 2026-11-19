@@ -210,3 +210,23 @@
 .diff-table { width: 100%; border-collapse: collapse; }
 .diff-table th, .diff-table td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
 .team-card.test-agent { border-style: dashed; }
+
+/* Overview (CEO): one hierarchy. Headline figures in one row, then priorities, then the business, then facts.
+   Cards in a row share height; spacing follows the 8/16/24 scale. */
+.ov { display: flex; flex-direction: column; gap: 24px; }
+.ov .ov-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin: 0; }
+.ov .ov-head h1 { font-size: 28px; letter-spacing: -0.02em; margin: 0 0 4px; }
+.ov .ov-meta { margin: 0; color: var(--text-2); font-size: 15px; }
+.ov-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
+.ov-kpis .kpi { padding: 16px 18px; display: flex; flex-direction: column; min-height: 112px; }
+.ov-kpis .kpi-value { font-size: 30px; margin: 8px 0 auto; font-variant-numeric: tabular-nums; }
+.ov-kpis .kpi-basis { margin-top: 8px; font-size: 12.5px; }
+.ov-grid { display: grid; gap: 16px; align-items: stretch; }
+.ov-grid > * { margin: 0 !important; height: 100%; }
+.ov-2-1 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+.ov-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ov-1-1 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ov .attention-list li { padding: 12px 0; }
+.ov .status-tag.ranked { font-variant-numeric: tabular-nums; white-space: nowrap; }
+@media (max-width: 1200px) { .ov-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ov-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

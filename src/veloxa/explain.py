@@ -263,8 +263,8 @@ def answer(a: dict) -> dict:
 
 # ---------------------------------------------------------------- brief
 def brief(lines: list[dict]) -> dict:
-    return _explanation("brief", "Where the company stands at the current knowledge point.", [
-        _section("recorded", "Verified figures and registry facts", "recorded",
+    return _explanation("brief", "Where the company stands today.", [
+        _section("recorded", "Verified facts", "recorded",
                  [_item("", ln["text"], ln.get("evidence")) for ln in lines]),
     ], confidence="Deterministic")
 

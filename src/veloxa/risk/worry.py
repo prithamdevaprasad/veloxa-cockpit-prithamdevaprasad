@@ -67,7 +67,7 @@ def build_items(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int, assessed
              "C4": Measure("not_applicable", reason="no reported figure is involved")},
             sorted(d["_records"]), confidence="high", department="Engineering", project=name,
             unknowns=["Why the date moved is not stated in the version record.",
-                      "Whether remaining scope fits the new date is unknown (no supported throughput, Q7)."],
+                      "Whether remaining scope fits the new date is unknown."],
             follow_up=f"Ask the release owner what changed for {name} and whether the new date is firm."))
     # C3: on-call concentration over the trailing 8 rota weeks
     weeks = sorted(((_day(s.split(":", 1)[1]), d) for s, d in _claims(conn, tenant_id, k, "rota_week").items()),
@@ -84,7 +84,7 @@ def build_items(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int, assessed
             items.append(Item(
                 "oncall:primary", f"Primary on-call held by one person in {n} of the last {len(window)} rota weeks",
                 {"C3": Measure("measured", share, 1.0, "C3.oncall_concentration@1",
-                               "rota presence is not qualification: upper bound assumes only that person is qualified"),
+                               "the records don't show who else is qualified to cover"),
                  "C1": Measure("not_applicable", reason=NA_D1502.replace("a delivery risk", "a delivery risk;"
                                                                        " C1 is delivery exposure")),
                  "C2": Measure("missing", reason="no outage cost is recorded (D15-25)"),
@@ -118,7 +118,7 @@ def build_items(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int, assessed
         if str(d.get("status", "")).lower() in ("on hold", "paused", "frozen"):
             items.append(Item(f"hiring:{subj.split(':', 1)[1]}", f"Hiring for {d.get('role', 'a role')} is on hold",
                               {}, sorted(d["_records"]), confidence="high", department=str(d.get("team") or ""),
-                              unknowns=["No approved D-15 measure turns a paused requisition into exposure."],
+                              unknowns=["The records don't say what this pause delays."],
                               follow_up="Ask the hiring manager what the pause delays."))
     for subj, d in _claims(conn, tenant_id, k, "person").items():
         if str(d.get("employment_status", "")).lower() == "notice period":

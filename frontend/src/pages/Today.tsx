@@ -14,7 +14,7 @@ export function TodayPage({ onAsk }: { onAsk: (q: string) => void }) {
     <>
       <PageHead title="Today" intro="What the records say deserves attention now. Items are never ranked until the
         owner records the D-15 ranking decision; every item shows its evidence and what is still unknown.">
-        {today.state === "ready" && <span className="basis">{today.data.read_basis.banner}</span>}
+        {today.state === "ready" && <span className="basis">Up to date with all company records</span>}
       </PageHead>
 
       <div className="stats" style={{ marginBottom: 16 }}>

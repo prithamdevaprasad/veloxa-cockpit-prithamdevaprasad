@@ -177,4 +177,4 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
         return {"system": system, "x": x, "y": y, "agg": agg, "split": split, "points": points,
                 "records": len(rows), "skipped_non_numeric": skipped,
                 "sources": sorted({r["source_path"].rsplit("/", 1)[-1] for r in rows}),
-                "basis": f"computed from {len(rows)} admitted rows (records up to release {basis.batch_seq})"}
+                "basis": f"based on {len(rows)} company records"}

@@ -160,9 +160,9 @@ test("Agent session history survives a page reload", async ({ page }) => {
 test("Overview shows governed figures, recent agent updates from a real session, and asks about one", async ({ page }) => {
   await signIn(page);
   await page.goto("/#/overview");
-  await expect(page.getByRole("heading", { name: /Welcome/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ })).toBeVisible();
   await expect(page.getByText("Headcount", { exact: true })).toBeVisible();
-  await expect(page.getByText("governed metric (HR export)")).toBeVisible();
+  await expect(page.getByText("From HR records").first()).toBeVisible();
   const updates = page.getByRole("region", { name: "Recent intelligence" });
   await expect(updates).toContainText("demo-ppl");
   await expect(updates.getByText("DEMO").first()).toBeVisible();                // synthetic sessions are labelled
@@ -261,7 +261,7 @@ test("Ask expands from the overlay into the full-screen workspace and back witho
   await expect(answer).toContainText("People in the HR export: 2");
   await page.keyboard.press("Escape");                                          // Escape closes the overlay
   await expect(ask).toBeHidden();
-  await expect(page.getByRole("heading", { name: /Welcome/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ })).toBeVisible();
   await page.keyboard.press("Control+k");                                       // reopening keeps the conversation
   await expect(page.getByRole("dialog", { name: "Ask Veloxa" }).getByRole("article", { name: "Answer" }))
     .toContainText("People in the HR export: 2");
@@ -333,12 +333,12 @@ test("AI team: no HR mapping here, so only labelled synthetic agents appear, wit
   await expect(drawer.getByText(/My records cover/).first()).toBeVisible();
 });
 
-test("Overview: what needs attention and the AI team come right after the business figures", async ({ page }) => {
+test("Overview: what needs attention comes right after the business figures", async ({ page }) => {
   await signIn(page);
   await page.goto("/#/overview");
   const attn = page.getByRole("region", { name: "What needs attention" });
   await expect(attn).toBeVisible();
-  await expect(page.getByRole("region", { name: "Meet your AI team" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Meet your AI team" })).toHaveCount(0);   // its own page now
   const figures = await page.getByRole("region", { name: "Key figures" }).boundingBox();
   const box = await attn.boundingBox();
   const brief = await page.getByRole("region", { name: "Executive brief" }).boundingBox();
@@ -444,7 +444,8 @@ test("People is the HR directory; AI assistants are a separate, disclosed sectio
   await expect(page.getByText("AI assistants available")).toBeVisible();
   await page.goto("/#/overview");
   await expect(page.getByRole("region", { name: "People overview" })).toHaveCount(0);     // no second roster
-  await expect(page.getByRole("region", { name: "Meet your AI team" })).toContainText("not the employees");
+  await page.goto("/#/agents");
+  await expect(page.getByRole("note").first()).toBeVisible();                       // disclosed on its own page
 });
 
 test("the Jira task card fills from plain words, uses Jira's own people and dates, and writes nothing unconfirmed",

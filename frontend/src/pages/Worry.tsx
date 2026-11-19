@@ -236,7 +236,7 @@ function Investigation({ f, reload }: { f: Finding; reload: () => void }) {
         {err && <p className="callout bad small" role="alert">{err}</p>}
       </form>}
       {human.length > 0 ? <ol className="plain ws-history small">{human.map((h, i) => (
-        <li key={i}><span className="tnum muted">{when(h.at)}</span> <strong>{h.state === "acknowledged" ? "Acknowledged (earlier record)" : STATE_LABEL[h.state] ?? h.state}</strong>
+        <li key={i}><span className="tnum muted">{when(h.at)}</span> <strong>{h.state === "acknowledged" ? "Acknowledged" : STATE_LABEL[h.state] ?? h.state}</strong>
           {" "}by {who(h.actor)}{h.responsible ? `; responsible: ${h.responsible}` : ""}{h.note ? `: ${h.note}` : ""}</li>))}</ol>
         : <p className="small muted">Nobody has started an investigation.</p>}
     </section>);
@@ -330,14 +330,14 @@ export function WorryPage() {
       <div className="worry-hero">
         <PageHead title="What should I worry about?" intro="The concerns in your company records, in priority order, with what
           to do about each one." />
-        {ready && <div className="basis-card small"><Icon name="timeline" size={18} /><span>{ready.read_basis.banner}</span></div>}
+        {ready && <div className="basis-card small"><Icon name="timeline" size={18} /><span>{/current/i.test(ready.read_basis.banner) || !/as known at|as of/i.test(ready.read_basis.banner) ? "Up to date with all company records" : ready.read_basis.banner}</span></div>}
       </div>
       {ready && <section className="ws-summary" aria-label="In short">
         <div><strong className="tnum">{f.state === "ready" ? active.length : "…"}</strong><span>Active findings</span></div>
         <div className="high"><strong className="tnum">{ranked.filter((x) => x.rank === 1).length}</strong><span>Highest attention</span></div>
         <div><strong className="tnum">{f.state === "ready" ? findings.filter((x) => x.state === "investigating").length : "…"}</strong><span>Under investigation</span></div>
         <div><strong className="tnum">{unrankable.length}</strong><span>Need more evidence</span></div>
-        <div className="wide"><strong className="tnum">{lastEval ? when(lastEval) : "Not yet"}</strong><span>Last evaluated (latest finding review)</span></div>
+        <div className="wide"><strong className="tnum">{lastEval ? when(lastEval) : "Not yet"}</strong><span>Last reviewed</span></div>
       </section>}
       <div className="ws-grid">
         <div className="ws-list">
@@ -355,8 +355,8 @@ export function WorryPage() {
           </section>
           <section className="card" aria-label="Unrankable">
             <div className="ws-list-head"><h2>Needs more evidence{unrankable.length ? ` (${unrankable.length})` : ""}</h2></div>
-            <p className="small muted ws-note">The evidence shows these concerns exist but doesn't measure enough of their impact to
-              place them in order. That doesn't mean they're unimportant, low priority, zero risk, or hidden from you.</p>
+            <p className="small muted ws-note">These are real, but the records don't yet show how much they matter, so they aren't placed in the order
+              above. That doesn't make them unimportant.</p>
             {ready && (unrankable.length + (ready.unranked?.length ?? 0) === 0 ? <p className="small muted">None.</p>
               : <ul className="plain ws-rows">{concerns.filter((c) => c.kind === "unassessed").map((c) => (
                   <ConcernRow key={idOf(c)} c={c} finding={findingOf(idOf(c))} active={current === c} onSelect={() => setSel(idOf(c))} />))}
