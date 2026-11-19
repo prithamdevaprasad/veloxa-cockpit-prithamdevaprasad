@@ -45,7 +45,12 @@ export interface Refusal {
   alternative?: string;
 }
 
-export type AnswerStatus = "answered" | "qualified" | "conflict" | "abstained" | "refused";
+export type AnswerStatus = "answered" | "qualified" | "conflict" | "abstained" | "refused" | "action_preview" | "clarify";
+/** A Jira write preview from Ask: shown for explicit confirmation; nothing is written before that. */
+export interface JiraPreview {
+  preview_id: string; operation: "create" | "update"; project?: string; issue_type?: string; key?: string;
+  url?: string; fields: Record<string, unknown>; description?: string | null; comment?: string | null;
+}
 
 export interface Answer {
   status: AnswerStatus;
@@ -64,6 +69,8 @@ export interface Answer {
   confidence?: { level: "high" | "moderate" | "low" | "unknown" | "conflicting"; label: string; reason: string;
                  method?: string };
   follow_ups?: string[];
+  action?: JiraPreview | null;
+  partial_refusals?: { part: string; policy: string; title: string; alternative?: string }[];
   specialists?: { agent_id: string; name: string | null; department: string; reason: string }[];
 }
 

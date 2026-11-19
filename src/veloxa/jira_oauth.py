@@ -50,8 +50,12 @@ class JiraError(Exception):
         self.status, self.code = status, code
 
 
+TOKEN_SETTINGS = ("VELOXA_TOKEN_KEY", "VELOXA_TOKEN_DIR")
+
+
 def load_env_file(path: str | None = None, env: dict | None = None) -> list[str]:
-    """Load ATLASSIAN_* keys from a local env file (outside git). Returns the key NAMES loaded, never values."""
+    """Load ATLASSIAN_* keys and the two token-storage settings from a local env file (outside git). Returns the key
+    NAMES loaded, never values."""
     env = os.environ if env is None else env
     path = path or env.get("VELOXA_ENV_FILE")
     if not path or not Path(path).is_file():
@@ -63,7 +67,7 @@ def load_env_file(path: str | None = None, env: dict | None = None) -> list[str]
             continue
         k, v = line.split("=", 1)
         k = k.strip().removeprefix("export ").strip()
-        if k.startswith("ATLASSIAN_") and not env.get(k):
+        if (k.startswith("ATLASSIAN_") or k in TOKEN_SETTINGS) and not env.get(k):
             env[k] = v.strip().strip('"').strip("'")
             loaded.append(k)
     return loaded
@@ -91,7 +95,7 @@ class Client:
 def env_presence(env: dict | None = None) -> dict:
     env = os.environ if env is None else env
     return {k: bool(env.get(k, "").strip()) for k in ("ATLASSIAN_CLIENT_ID", "ATLASSIAN_CLIENT_SECRET",
-                                                      "VELOXA_PUBLIC_URL")}
+                                                      "VELOXA_PUBLIC_URL", *TOKEN_SETTINGS)}
 
 
 @dataclass
@@ -400,6 +404,25 @@ class Jira:
                                                    "has_default": bool(f.get("hasDefaultValue"))}
                 for f in r.get("fields", r.get("values", []))}
 
+    def assignable(self, tenant: str, key: str, query: str) -> list[dict]:
+        """Users Jira itself says may be assigned this issue (never invented; display names only to the UI)."""
+        r = self.call(tenant, "GET", "/rest/api/3/user/assignable/search",
+                      params={"issueKey": key, "query": query[:60], "maxResults": 10})
+        return [{"account_id": u["accountId"], "name": u.get("displayName")} for u in (r if isinstance(r, list) else [])
+                if u.get("accountId") and u.get("active", True)]
+
+    def overdue(self, tenant: str, project: str | None = None, limit: int = 25) -> list[dict]:
+        scope = f'project = "{project}" AND ' if project else ""
+        return self.search(tenant, scope + "duedate < startOfDay() AND statusCategory != Done ORDER BY duedate ASC",
+                           limit)
+
+    def duplicates(self, tenant: str, project: str, summary: str) -> list[dict]:
+        """Open issues in the project whose summary matches (Jira text search, then an exact check)."""
+        text = summary.replace('"', " ").strip()
+        hits = self.search(tenant, f'project = "{project}" AND statusCategory != Done AND summary ~ "{text}"', 10)
+        norm = lambda v: " ".join(str(v or "").lower().split())  # noqa: E731
+        return [h for h in hits if norm(h["summary"]) == norm(summary)]
+
     # ------------------------------------------------------------------ confirmed writes
     def preview_create(self, tenant: str, principal: str, project: str, issue_type_id: str, summary: str,
                        description: str = "", extra: dict | None = None) -> dict:
@@ -421,6 +444,10 @@ class Jira:
             raise JiraError(f"Jira requires: {', '.join(missing)}.", 422, "missing_required")
         if not summary.strip():
             raise JiraError("A summary is required.", 422, "missing_required")
+        dup = self.duplicates(tenant, project, summary)
+        if dup:                                            # never create a duplicate of an open issue
+            raise JiraError(f"An open issue with this summary already exists: {dup[0]['key']}. Update it instead.",
+                            409, "duplicate")
         show = {"Project": project, "Issue type": types[issue_type_id], "Summary": summary.strip(),
                 **{meta[k]["name"] or k: v for k, v in extra.items()}}
         pid = self.previews.put({"tenant": tenant, "principal": principal, "op": "create", "fields": fields})
@@ -440,10 +467,19 @@ class Jira:
             raise JiraError("Nothing to change.", 422, "empty_update")
         if "description" in fields and isinstance(fields["description"], str):
             fields["description"] = _adf(fields["description"])
+        if "assignee" in fields:                           # only a user Jira lists as assignable for this issue
+            acc = (fields["assignee"] or {}).get("accountId")
+            names = {u["account_id"]: u["name"] for u in self.assignable(tenant, key, "")}
+            if not acc or acc not in names:
+                raise JiraError("That person is not an assignable user for this issue in Jira.", 422,
+                                "not_assignable")
         current = self.issue(tenant, key)
         show = {(meta[k].get("name") or k): {"current": current.get(k if k != "duedate" else "due_date"),
                                              "proposed": _plain(v) if isinstance(v, dict) else v}
                 for k, v in fields.items()}
+        if "assignee" in fields:
+            label = meta["assignee"].get("name") or "assignee"
+            show[label] = {"current": current.get("assignee"), "proposed": names[fields["assignee"]["accountId"]]}
         pid = self.previews.put({"tenant": tenant, "principal": principal, "op": "update", "key": key,
                                  "fields": fields, "comment": comment.strip()})
         return {"preview_id": pid, "operation": "update", "key": key, "url": current["url"], "fields": show,

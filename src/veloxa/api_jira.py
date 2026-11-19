@@ -1,6 +1,9 @@
-"""Admin > Integrations > Jira (OAuth 2.0 3LO). Every route requires workspace administration; every connect,
-disconnect, read and write is an audit event (structure and keys only, never content or tokens). No delete route,
-no transition route. See `jira_oauth` for the security model."""
+"""Admin > Integrations > Jira (OAuth 2.0 3LO). Organisation-level permissions:
+- connecting, choosing the site and disconnecting require workspace ADMINISTRATION;
+- reading and previewing/confirming writes require administration OR the explicit, audited and revocable
+  company_reader grant (e.g. the CEO);
+every connect, disconnect, read and write is an audit event (structure and keys only, never content or tokens).
+No delete route, no transition route. See `jira_oauth` for the security model."""
 
 from __future__ import annotations
 
@@ -52,26 +55,33 @@ def register(app, *, state, principal_of, now_fn, jira_factory=None) -> None:
             state["jira"] = (jira_factory or jira_oauth.Jira)(c, jira_oauth.Vault())
         return state["jira"]
 
-    def admin(conn, authorization):
+    state["jira_get"] = jira
+
+    def admin(conn, authorization, relations=("admin",)):
         p = principal_of(conn, authorization, now_fn())
         if isinstance(p, JSONResponse):
             return p
         with tenant_tx(conn, p.tenant_id, p.principal_id):
-            ok = conn.execute("SELECT policy.holds(%s, %s, 'tenant', %s, 'admin') AS ok",
-                              (p.tenant_id, p.principal_id, str(p.tenant_id))).fetchone()["ok"]
+            ok = any(conn.execute("SELECT policy.holds(%s, %s, 'tenant', %s, %s) AS ok",
+                                  (p.tenant_id, p.principal_id, str(p.tenant_id), rel)).fetchone()["ok"]
+                     for rel in relations)
         if not ok:
-            return JSONResponse(status_code=403, content={"error": "not_permitted",
-                                                          "detail": "workspace administration is required"})
+            need = ("workspace administration" if relations == ("admin",)
+                    else "workspace administration or the company-reader grant")
+            return JSONResponse(status_code=403, content={"error": "not_permitted", "detail": f"{need} is required"})
         return p
+
+    USE = ("admin", "company_reader")
+    state["jira_permission"] = lambda conn, authorization: admin(conn, authorization, USE)
 
     def record(conn, tenant_id, principal_id, kind, detail):
         with tenant_tx(conn, tenant_id, principal_id):
             audit.append(conn, tenant_id, kind, detail)
 
-    def run(authorization, fn, kind=None, detail=None):
-        """Admin gate + Jira availability + safe errors + audit."""
+    def run(authorization, fn, kind=None, detail=None, relations=USE):
+        """Permission gate + Jira availability + safe errors + audit."""
         with connect(state["dsn"]) as conn:
-            p = admin(conn, authorization)
+            p = admin(conn, authorization, relations)
             if isinstance(p, JSONResponse):
                 return p
             j = jira()
@@ -94,7 +104,7 @@ def register(app, *, state, principal_of, now_fn, jira_factory=None) -> None:
     @app.get("/v1/integrations/jira/status")
     def status(authorization: str | None = Header(default=None)):
         with connect(state["dsn"]) as conn:
-            p = admin(conn, authorization)
+            p = admin(conn, authorization, USE)
             if isinstance(p, JSONResponse):
                 return p
         j = jira()
@@ -106,7 +116,7 @@ def register(app, *, state, principal_of, now_fn, jira_factory=None) -> None:
     @app.post("/v1/integrations/jira/connect")
     def connect_start(authorization: str | None = Header(default=None)):
         return run(authorization, lambda j, t, pr: {"authorize_url": j.authorize_url(t, pr)},
-                   "jira.connect_started", {})
+                   "jira.connect_started", {}, ("admin",))
 
     @app.get("/v1/integrations/jira/callback")
     def callback(code: str | None = None, error: str | None = None,
@@ -134,11 +144,22 @@ def register(app, *, state, principal_of, now_fn, jira_factory=None) -> None:
     @app.post("/v1/integrations/jira/site")
     def site(body: SiteIn, authorization: str | None = Header(default=None)):
         return run(authorization, lambda j, t, pr: j.choose_site(t, body.cloud_id), "jira.site_selected",
-                   {"cloud_id": body.cloud_id})
+                   {"cloud_id": body.cloud_id}, ("admin",))
 
     @app.post("/v1/integrations/jira/disconnect")
     def disconnect(authorization: str | None = Header(default=None)):
-        return run(authorization, lambda j, t, pr: (j.disconnect(t), {"connected": False})[1], "jira.disconnected", {})
+        return run(authorization, lambda j, t, pr: (j.disconnect(t), {"connected": False})[1], "jira.disconnected", {},
+                   ("admin",))
+
+    @app.get("/v1/integrations/jira/overdue")
+    def overdue(project: str | None = None, authorization: str | None = Header(default=None)):
+        return run(authorization, lambda j, t, pr: {"issues": j.overdue(t, project)}, "jira.read",
+                   lambda out: {"op": "overdue", "keys": [i["key"] for i in out["issues"]]})
+
+    @app.get("/v1/integrations/jira/issue/{key}/assignable")
+    def assignable(key: str, query: str = "", authorization: str | None = Header(default=None)):
+        return run(authorization, lambda j, t, pr: {"users": j.assignable(t, key, query)}, "jira.read",
+                   {"op": "assignable", "keys": [key]})
 
     @app.get("/v1/integrations/jira/search")
     def search(jql: str, limit: int = 20, authorization: str | None = Header(default=None)):

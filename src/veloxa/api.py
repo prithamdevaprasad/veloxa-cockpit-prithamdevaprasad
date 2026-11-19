@@ -338,6 +338,26 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
                 return _403("the development principal is not an active member of the workspace")
         return _with_access(conn, principal, tid)
 
+    def _jira_chat(conn, principal, authorization, question: str):
+        """A Jira request from Ask: the integration's own permission (administration or the company-reader grant),
+        then a read, a clarifying question or a PREVIEW. Audited (structure only); the write needs confirmation."""
+        import uuid as _uuid
+
+        from . import audit, jira_chat
+        from .db import tenant_tx as _ttx
+
+        allowed = state["jira_permission"](conn, authorization)
+        if isinstance(allowed, JSONResponse):
+            out = jira_chat._result("refused", "Jira actions need workspace administration or the company-reader "
+                                    "grant. Ask an administrator for access.", "I read this as a Jira request.")
+        else:
+            out = jira_chat.handle(state["jira_get"](), str(principal.tenant_id), principal.principal_id, question)
+        with _ttx(conn, principal.tenant_id, principal.principal_id):
+            audit.append(conn, principal.tenant_id, "jira.chat",
+                         {"status": out["status"], "operation": (out.get("action") or {}).get("operation"),
+                          "key": (out.get("action") or {}).get("key")})
+        return out | {"answer_id": str(_uuid.uuid4()), "question": question, "pipeline_version": "jira-chat-1"}
+
     @app.post("/v1/ask")
     def ask(body: AskRequest, authorization: str | None = Header(default=None)):
         now = now_fn()
@@ -346,6 +366,10 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
             if isinstance(principal, JSONResponse):
                 return principal
             tenant_id, tz = principal.tenant_id, _tz(conn, principal.tenant_id)
+            from . import jira_chat
+
+            if jira_chat.asks(body.question) and "jira_permission" in state:     # Jira actions: preview, never write
+                return _jira_chat(conn, principal, authorization, body.question)
             try:
                 return pipeline.answer(conn, tenant_id, tz, principal, body.question, now,
                                        mode=body.mode, as_of=body.as_of, as_known_at=body.as_known_at)

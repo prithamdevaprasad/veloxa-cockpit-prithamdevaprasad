@@ -17,7 +17,8 @@ def _env(monkeypatch):
     monkeypatch.setenv("ATLASSIAN_CLIENT_ID", "placeholder-client-id")
     monkeypatch.setenv("ATLASSIAN_CLIENT_SECRET", SECRET)
     monkeypatch.setenv("VELOXA_PUBLIC_URL", "http://localhost:4175")
-    monkeypatch.delenv("VELOXA_ENV_FILE", raising=False)
+    for k in ("VELOXA_ENV_FILE", "VELOXA_TOKEN_KEY", "VELOXA_TOKEN_DIR"):
+        monkeypatch.delenv(k, raising=False)
 
 
 def test_jira_integration_is_admin_only_audited_and_never_returns_secrets(db, monkeypatch, synth):  # noqa: F811
@@ -27,7 +28,8 @@ def test_jira_integration_is_admin_only_audited_and_never_returns_secrets(db, mo
         assert s.status_code == 200
         body = s.json()
         assert body["callback_url"] == "http://localhost:4175/v1/integrations/jira/callback"
-        assert body["env"] == {"ATLASSIAN_CLIENT_ID": True, "ATLASSIAN_CLIENT_SECRET": True, "VELOXA_PUBLIC_URL": True}
+        assert body["env"] == {"ATLASSIAN_CLIENT_ID": True, "ATLASSIAN_CLIENT_SECRET": True, "VELOXA_PUBLIC_URL": True,
+                               "VELOXA_TOKEN_KEY": False, "VELOXA_TOKEN_DIR": False}
         assert body["connected"] is False and SECRET not in s.text
         r = c.post("/v1/integrations/jira/connect", headers={**H, "X-Veloxa-Request": "1"})
         assert r.status_code == 200 and r.json()["authorize_url"].startswith("https://auth.atlassian.com/authorize?")
@@ -55,3 +57,18 @@ def test_a_non_admin_cannot_see_or_use_the_jira_integration(db, monkeypatch, syn
         assert c.post("/v1/integrations/jira/connect", headers=H).status_code == 403
         assert c.post("/v1/integrations/jira/commit", headers=H,
                       json={"preview_id": "x" * 20, "confirm": True}).status_code == 403
+
+
+def test_jira_requests_in_ask_follow_the_integration_permission(db, monkeypatch, synth):  # noqa: F811
+    _env(monkeypatch)
+    q = {"question": "Create a Jira task for an Engineering blocker"}
+    with api_client(db, monkeypatch, **_fixture(synth["slug"], "person:syn-admin")) as c:
+        a = c.post("/v1/ask", headers=H, json=q).json()
+        assert a["status"] == "abstained" and "isn't connected" in a["answer"] and a["action"] is None
+    with api_client(db, monkeypatch, **_fixture(synth["slug"], "person:syn-user")) as c:
+        a = c.post("/v1/ask", headers=H, json=q).json()
+        assert a["status"] == "refused" and "company-reader grant" in a["answer"]
+    with connect(db.admin_dsn) as conn:
+        kinds = [r["kind"] for r in conn.execute("SELECT kind FROM audit.event WHERE tenant_id = %s",
+                                                  (synth["tenant"],)).fetchall()]
+    assert kinds.count("jira.chat") == 2

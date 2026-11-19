@@ -176,6 +176,7 @@ def _meta(http):
         {"fieldId": "summary", "name": "Summary", "required": True},
         {"fieldId": "description", "name": "Description", "required": False},
         {"fieldId": "duedate", "name": "Due date", "required": False}]}))
+    http.on("POST", "/rest/api/3/search/jql", R(200, {"issues": []}))           # duplicate check: none open
 
 
 def test_create_is_previewed_against_metadata_and_needs_explicit_confirmation():
@@ -238,7 +239,10 @@ def test_env_file_loader_reads_only_atlassian_keys_and_reports_names(tmp_path):
     assert jo.load_env_file(str(f), env) == ["ATLASSIAN_CLIENT_SECRET"]
     assert env == {"ATLASSIAN_CLIENT_ID": "kept", "ATLASSIAN_CLIENT_SECRET": "s3"}
     assert jo.env_presence(env) == {"ATLASSIAN_CLIENT_ID": True, "ATLASSIAN_CLIENT_SECRET": True,
-                                    "VELOXA_PUBLIC_URL": False}
+                                    "VELOXA_PUBLIC_URL": False, "VELOXA_TOKEN_KEY": False, "VELOXA_TOKEN_DIR": False}
+    f.write_text(chr(10).join(["VELOXA_TOKEN_KEY=k", "VELOXA_TOKEN_DIR=d", "VELOXA_DEV_AUTH=1", ""]), encoding="utf-8")
+    env2: dict = {}
+    assert jo.load_env_file(str(f), env2) == ["VELOXA_TOKEN_KEY", "VELOXA_TOKEN_DIR"]     # never other settings
 
 
 def test_vault_encrypts_tokens_at_rest(tmp_path):
@@ -251,3 +255,36 @@ def test_vault_encrypts_tokens_at_rest(tmp_path):
     again = jo.Vault(env={"VELOXA_TOKEN_KEY": key, "VELOXA_TOKEN_DIR": str(tmp_path)})
     assert again.get("t1").access_token == ACCESS
     assert re.fullmatch(r"jira-t1\.bin", (tmp_path / "jira-t1.bin").name)
+
+
+def test_an_open_issue_with_the_same_summary_blocks_creation():
+    j, http, _ = make()
+    connect(j)
+    _meta(http)
+    http.routes[("POST", "/rest/api/3/search/jql")] = [R(200, {"issues": [
+        {"key": "ENG-3", "fields": {"summary": "Fix  the login", "status": {"name": "To Do"}}}]})]
+    with pytest.raises(jo.JiraError) as e:
+        j.preview_create("tenant-a", "admin-1", "ENG", "10001", "fix the login")
+    assert e.value.code == "duplicate" and "ENG-3" in str(e.value)
+
+
+def test_assignment_only_to_a_user_jira_lists_as_assignable_and_the_preview_shows_the_name():
+    j, http, _ = make()
+    connect(j)
+    http.on("GET", "/rest/api/3/issue/ENG-7/editmeta", R(200, {"fields": {"assignee": {"name": "Assignee"}}}))
+    http.on("GET", "/rest/api/3/user/assignable/search", R(200, [{"accountId": "acc-1", "displayName": "Dev One"}]))
+    http.on("GET", "/rest/api/3/issue/ENG-7", R(200, {"key": "ENG-7", "fields": {"assignee": None}}))
+    with pytest.raises(jo.JiraError) as e:
+        j.preview_update("tenant-a", "admin-1", "ENG-7", {"assignee": {"accountId": "invented"}})
+    assert e.value.code == "not_assignable"
+    p = j.preview_update("tenant-a", "admin-1", "ENG-7", {"assignee": {"accountId": "acc-1"}})
+    assert p["fields"]["Assignee"]["proposed"] == "Dev One" and "acc-1" not in str(p["fields"])
+
+
+def test_the_overdue_report_is_a_read_with_a_due_date_query():
+    j, http, _ = make()
+    connect(j)
+    http.on("POST", "/rest/api/3/search/jql", R(200, {"issues": []}))
+    assert j.overdue("tenant-a", "ENG") == []
+    jql = http.calls[-1][2]["json"]["jql"]
+    assert 'project = "ENG"' in jql and "duedate < startOfDay()" in jql and "statusCategory != Done" in jql

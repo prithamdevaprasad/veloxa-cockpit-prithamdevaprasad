@@ -2,19 +2,21 @@
 // This is a PRESENTATION layer only. Every figure and sentence comes from the API's verified claims; the layout
 // regroups them (e.g. a department breakdown) and rewrites a few fixed system notes into plain English. Nothing is
 // added, inferred or dropped: each claim keeps its citations, and the full claim text stays in the accessible text.
-import { useState } from "react";
+import { Fragment, useState } from "react";
+import { ApiError, request } from "../api/client";
 import { product } from "../api/product";
-import type { Answer, Claim, Evidence } from "../api/types";
+import type { Answer, Claim, Evidence, JiraPreview } from "../api/types";
 import { useAsk } from "./Ask";
 import { useEvidence } from "./EvidenceDrawer";
 import { ExplanationView, useExplanation } from "./Explanation";
 import { BarChart } from "./kit";
-import { Badge, Drawer } from "./index";
+import { Badge, Button, Drawer } from "./index";
 
 const STATUS: Record<string, { label: string; tone: string }> = {
   answered: { label: "Answer", tone: "ok" }, qualified: { label: "Qualified answer", tone: "info" },
   conflict: { label: "The sources disagree", tone: "warn" }, abstained: { label: "Not enough evidence", tone: "" },
   refused: { label: "Refused", tone: "bad" },
+  action_preview: { label: "Needs your confirmation", tone: "warn" }, clarify: { label: "Question back to you", tone: "info" },
 };
 const FACTS_ONLY = /^facts only/i;
 
@@ -250,6 +252,7 @@ export function AnswerView({ answer }: { answer: Answer }) {
             .join(", ")}. Why: {answer.specialists![0].reason}.
         </p>
       )}
+      {answer.action && answer.status === "action_preview" && <JiraConfirm p={answer.action} />}
       {(answer.follow_ups?.length ?? 0) > 0 && <FollowUps items={answer.follow_ups!} />}
 
       <footer className="brief-foot">
@@ -287,6 +290,37 @@ export function Highlighted({ text }: { text: string }) {
   const parts = text.split(/(⟦[^⟧]*⟧)/g);
   return <>{parts.map((p, i) => p.startsWith("⟦")
     ? <mark key={i} className="hl">{p.slice(1, -1)}</mark> : <span key={i}>{p}</span>)}</>;
+}
+
+/** A Jira write preview: every proposed value is shown; the write needs an explicit tick and a click. */
+function JiraConfirm({ p }: { p: JiraPreview }) {
+  const [ok, setOk] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<{ key: string; url: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  async function write() {
+    setBusy(true); setError(null);
+    try { setDone(await request("POST", "/v1/integrations/jira/commit", { preview_id: p.preview_id, confirm: true })); }
+    catch (e) { setError(e instanceof ApiError ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
+  if (done) return <p className="callout ok small" role="status">Written to Jira:{" "}
+    {done.url ? <a href={done.url} target="_blank" rel="noreferrer">{done.key}</a> : done.key}.</p>;
+  return (
+    <div className="callout warn stack small" aria-label="Jira change to confirm">
+      <strong>{p.operation === "create" ? `Create in ${p.project} (${p.issue_type})` : `Update ${p.key}`}</strong>
+      <dl className="meta">{Object.entries(p.fields).map(([k, v]) => (
+        <Fragment key={k}><dt>{k}</dt><dd>{typeof v === "object" && v
+          ? `${String((v as { current: unknown }).current ?? "none")} \u2192 ${String((v as { proposed: unknown }).proposed)}`
+          : String(v)}</dd></Fragment>))}</dl>
+      {p.description && <><strong>Description</strong><p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{p.description}</p></>}
+      {p.comment && <><strong>Comment</strong><p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{p.comment}</p></>}
+      <label><input type="checkbox" checked={ok} onChange={(e) => setOk(e.target.checked)} /> I confirm this exact
+        change should be written to Jira.</label>
+      {error && <p className="callout bad">{error}</p>}
+      <div><Button variant="primary" disabled={!ok || busy} onClick={write}>Write to Jira</Button></div>
+    </div>
+  );
 }
 
 function FollowUps({ items }: { items: string[] }) {
