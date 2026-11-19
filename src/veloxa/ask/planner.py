@@ -89,7 +89,9 @@ _INTENTS: list[tuple[str, str]] = [
     ("headcount", r"\b(headcount|head count|how many (people|employees|staff|persons|heads|members)|number of "
                   r"(people|employees|staff|heads)|team sizes?|staff (count|numbers?|size)|size of the (team|company|"
                   r"organi[sz]ation|workforce)|how (big|large) is the (team|company|organi[sz]ation|workforce)|"
-                  r"workforce size|employee count|people do we (have|employ)|employ(ees)? do we have)\b"),
+                  r"workforce size|employee count|people do we (have|employ)|employ(ees)? do we have|"
+                  r"(largest|biggest|smallest) (department|team)s?|which (department|team) is (the )?(largest|"
+                  r"biggest|smallest))\b"),
     ("finance_totals", r"\b(spend|spent|spending|expenses?|expenditure|outgoings|outflows?|costs?|ledger|vendors?|"
                        r"suppliers?|payees?|paying (our )?(vendors|suppliers)|paid to|cost cent(re|er)s?|"
                        r"general ledger|gl)\b"),
@@ -135,6 +137,12 @@ def focus_terms(text: str) -> list[str]:
 
 
 IDENTIFIER = re.compile(r"\b[A-Z][A-Z0-9]{1,}-[A-Z0-9]{1,6}\b")
+FOREIGN = re.compile(r"\b(competitors?'?s?|rivals?'?s?|other compan(y|ies)|another company|industry (average|"
+                     r"benchmark)s?|market leader|peers?'?s?)\b", re.I)
+EVENT = re.compile(r"^\s*(did|has|have|had|was|were|is|are)\b.{0,80}\b(approv\w*|decid\w*|agree\w*|sign\w*|"
+                   r"open\w*|launch\w*|announc\w*|hire[ds]?|fire[ds]?|acquir\w*|merg\w*|vot\w*|reject\w*)\b", re.I)
+FIGURE_ASK = re.compile(r"\b(how (much|many)|what (is|was|are|were) (our|the)\b.{0,30}\b(figure|number|amount|"
+                        r"total|value)|how big)\b", re.I)
 
 
 def plan(question: str, people: list[dict], default_year: int, tz: str) -> Plan:
@@ -144,11 +152,18 @@ def plan(question: str, people: list[dict], default_year: int, tz: str) -> Plan:
     for tool, rx in _INTENTS:
         if not re.search(rx, q, re.IGNORECASE):
             continue
+        # Our reported figures answer questions ABOUT OUR FIGURES only: never a question about another
+        # organisation ("competitor's revenue"), and never a yes/no question about an event ("did the board approve
+        # a London office?"), which a list of figures would appear to answer while saying nothing about it.
+        if tool in ("board_statements", "finance_totals", "headcount") and (FOREIGN.search(q) or (
+                EVENT.search(q) and not FIGURE_ASK.search(q))):
+            continue
         if tool == "headcount":
             named_dept = any(p.get("department") and re.search(rf"\b{re.escape(p['department'])}\b", q, re.I)
                              for p in people)
-            by = "department" if named_dept or re.search(r"\b(by|per|each|across) (department|team|function)s?\b",
-                                                         q, re.I) else None
+            big = re.search(r"\b(largest|biggest|smallest)\b", q, re.I)
+            per_dept = re.search(r"\b(by|per|each|across) (department|team|function)s?\b", q, re.I)
+            by = "department" if named_dept or big or per_dept else None
             steps.append(Step("headcount", {"by": by} if by else {}, "headcount question"))
         elif tool == "finance_totals":
             dims = [d for d, rx2 in (("vendor", r"\b(by|per|each) (vendor|supplier|payee)s?\b"),

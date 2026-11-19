@@ -58,6 +58,8 @@ BLOCKED = re.compile(r"\b(which|what|how many|list)\b.{0,30}\b(issues?|tasks?|ti
                      r"\b(blocked|blocking|stuck)\b|\bblocked (issues?|tasks?|work)\b", re.I)
 BOARD_ABOUT = re.compile(r"\bboard\b.{0,40}\b(say|said|says|report\w*|mention\w*|state\w*)\b.{0,12}\babout\s+"
                          r"(?P<topic>[A-Za-z0-9][\w .-]{1,40}?)(\s+in\s+(?P<when>\w+))?\s*\??$", re.I)
+HIRING = re.compile(r"\b(roles?|positions?|requisitions?|vacanc\w*|openings?|hires?|hiring)\b.{0,40}"
+                    r"\b(on hold|paused|frozen|open|status|filled)\b|\bwhat (are we|is) hiring\b", re.I)
 OWNERS = re.compile(r"\b(who)\b.{0,40}\b(owns?|owners?|working on|assigned|responsible|holds?|has)\b.{0,40}"
                     r"\b(block\w*|issues?|tickets?|tasks?|work|most)\b|\bwhat is (?P<who>[A-Z][a-z]+(?: [A-Z][a-z]+)?)"
                     r" working on\b|\b(workload|owners?) (of|by|per) (person|people|assignee)", re.I)
@@ -188,7 +190,15 @@ class Router:
             out = continuity.answer(self, q)
             if out is not None:
                 return out
-        if OWNERS.search(q):
+        if re.search(r"\bon-?call\b|\brota\b", q, re.I) and re.search(r"\bwho\b|\bhow often\b|\bmost\b", q, re.I):
+            out = self.oncall(q)
+            if out is not None:
+                return out
+        if HIRING.search(q):
+            out = self.hiring(q)
+            if out is not None:
+                return out
+        if OWNERS.search(q) and not re.search(r"\bon-?call\b|\brota\b|\bpager\b", q, re.I):
             out = self.owners(q)
             if out is not None:
                 return out
@@ -323,6 +333,62 @@ class Router:
                        " ".join(c["text"] for c in claims), claims, [recs[i] for c in claims for i in c["evidence"]],
                        ["Board updates are reported statements, not independently verified."])
 
+    def hiring(self, q):
+        """Open roles by status from the hiring records (role, team and status only; never candidate details)."""
+        from .continuity import _claims
+
+        k = self.basis.batch_seq
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id, k):
+            reqs = _claims(self.conn, self.tenant_id, k, "requisition")
+        if not reqs:
+            return None
+        want = re.search(r"\b(on hold|paused|frozen)\b", q, re.I)
+        rows = [(s.split(":", 1)[1], d) for s, d in sorted(reqs.items())
+                if not want or str(d.get("status", "")).lower() in ("on hold", "paused", "frozen")]
+        if not rows:
+            return _result(self.basis_json, "answered", "I read this as: which roles are on hold.",
+                           "No role is recorded as on hold.", [], [], [])
+        recs = self.records({r for _, d in rows for r in d["_records"]})
+        claims = [c for c in (self.claim(f"{d.get('role') or rid} ({d.get('team') or 'team not stated'}): "
+                                         f"{d.get('status') or 'status not stated'}.", sorted(d["_records"]), recs)
+                              for rid, d in rows) if c]
+        if not claims:
+            return None
+        lead = "Roles on hold:" if want else "Roles by hiring status:"
+        return _result(self.basis_json, "answered", "I read this as: " + lead.lower().rstrip(":") + ".",
+                       lead + "\n" + "\n".join(f"- {c['text']}" for c in claims), claims,
+                       [recs[i] for c in claims for i in c["evidence"]],
+                       ["Why a role is paused, and what it delays, is not recorded."])
+
+    def oncall(self, q):
+        """Who held primary on-call, counted over the recorded rota weeks (rota presence, not qualification)."""
+        from collections import Counter
+
+        from .continuity import _claims
+
+        k = self.basis.batch_seq
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id, k):
+            weeks = _claims(self.conn, self.tenant_id, k, "rota_week")
+            names = {r["emp_id"]: r["full_name"] for r in self.conn.execute(
+                "SELECT emp_id, full_name FROM projection.person WHERE tenant_id = %s AND batch_seq ="
+                " (SELECT max(batch_seq) FROM projection.person WHERE tenant_id = %s AND batch_seq <= %s)",
+                (self.tenant_id, self.tenant_id, k)).fetchall()}
+        held = Counter(d.get("primary_source_id") for d in weeks.values() if d.get("primary_source_id"))
+        if not held:
+            return None
+        recs_by = {p: sorted({r for d in weeks.values() if d.get("primary_source_id") == p for r in d["_records"]})
+                   for p in held}
+        recs = self.records({r for v in recs_by.values() for r in v})
+        total = sum(held.values())
+        claims = [c for c in (self.claim(f"{names.get(p, p)}: primary on-call in {n} of {total} recorded weeks.",
+                                         recs_by[p], recs) for p, n in held.most_common(6)) if c]
+        if not claims:
+            return None
+        return _result(self.basis_json, "answered", "I read this as: who holds primary on-call, and how often.",
+                       "Primary on-call by person, most weeks first:\n" + "\n".join(f"- {c['text']}" for c in claims),
+                       claims, [recs[i] for c in claims for i in c["evidence"]],
+                       ["Being on the rota does not show who is qualified to cover; that is not recorded."])
+
     def owners(self, q):
         """Who holds open and blocked tracker work. A person is named only through an approved Jira identity
         mapping (verified e-mail or an administrator's mapping); everything else is counted as unresolved."""
@@ -366,7 +432,8 @@ class Router:
                 return None
             return _result(self.basis_json, "abstained", "I read this as: who holds open tracker work.",
                            f"I can't name owners yet: {unresolved} open issues have Jira assignees that are not yet "
-                           "linked to an employee. An administrator can link them in Admin > People in Jira.",
+                           "linked to an employee. Assignees are linked only when their Jira account is verified to "
+                           "be that employee's, so these stay unnamed rather than guessed.",
                            [], [], ["Jira assignees are linked to employees only through a verified e-mail match or "
                                     "an administrator's mapping, never by name."])
         ranked = sorted(per.items(), key=lambda kv: (-kv[1]["blocking"], -kv[1]["blocked"], -kv[1]["open"]))[:8]
