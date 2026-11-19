@@ -1,0 +1,12 @@
+.git
+.venv
+**/__pycache__
+frontend
+tests
+scripts
+docs
+voice_notes
+*.md
+!README.md
+.env
+.env.*

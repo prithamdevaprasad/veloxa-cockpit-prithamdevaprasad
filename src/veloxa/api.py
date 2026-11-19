@@ -196,6 +196,17 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
     from . import gateway
 
     gateway.install(app)        # C01 controls; installed first so the observability middleware wraps them
+    # Hosted frontend on another origin (e.g. Cloudflare Pages): an EXACT allowlist, never a wildcard, and only when
+    # configured. Same-origin deployments (the lab, a proxied /v1) leave it unset and send no CORS headers at all.
+    cors = [o.strip().rstrip("/") for o in os.environ.get("VELOXA_CORS_ORIGINS", "").split(",") if o.strip()]
+    if cors:
+        if any("*" in o or not o.startswith("https://") for o in cors):
+            raise RuntimeError("VELOXA_CORS_ORIGINS must list exact https origins (no wildcards)")
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(CORSMiddleware, allow_origins=cors, allow_credentials=True, max_age=600,
+                           allow_methods=["GET", "POST", "PUT", "DELETE"],
+                           allow_headers=["Authorization", "Content-Type", "X-Veloxa-Request"])
 
     @app.middleware("http")
     async def session_cookie(request: Request, call_next):

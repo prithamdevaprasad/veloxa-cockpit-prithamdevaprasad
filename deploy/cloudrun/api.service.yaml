@@ -1,0 +1,61 @@
+# Cloud Run service: Veloxa API (staging). NOT applied by any script. Deploy with:
+#   gcloud run services replace deploy/cloudrun/api.service.yaml --region asia-south1 --project ${PROJECT}
+# Placeholders: ${IMAGE} (Artifact Registry image by digest), ${SQL_CONN} (project:asia-south1:instance),
+# ${BUCKET} (evidence bucket), ${FRONTEND_ORIGIN} (exact https origin of the Cloudflare Pages site).
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: veloxa-api
+  labels: {app: veloxa, env: staging}
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"          # staging: scale to zero (cold start ~3-6 s); prod: 1
+        autoscaling.knative.dev/maxScale: "4"
+        run.googleapis.com/cloudsql-instances: "${SQL_CONN}"
+        run.googleapis.com/cpu-throttling: "true"       # request-based billing; no background work here
+        run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/execution-environment: gen2   # required for Cloud Storage volume mounts
+    spec:
+      serviceAccountName: "veloxa-api@${PROJECT}.iam.gserviceaccount.com"
+      containerConcurrency: 40
+      timeoutSeconds: 300
+      containers:
+        - image: "${IMAGE}"
+          ports: [{containerPort: 8080}]
+          resources: {limits: {cpu: "1", memory: 1Gi}}
+          env:
+            - {name: VELOXA_DB_HOST, value: "/cloudsql/${SQL_CONN}"}
+            - {name: VELOXA_DB_NAME, value: veloxa}
+            - {name: VELOXA_DB_POOL_MAX, value: "8"}
+            - {name: VELOXA_OIDC, value: "1"}
+            - {name: VELOXA_CORS_ORIGINS, value: "${FRONTEND_ORIGIN}"}
+            - {name: VELOXA_PUBLIC_URL, value: https://api.example.invalid}   # set to the API's own https URL
+            - {name: VELOXA_ORIGINALS_DIR, value: /mnt/evidence/originals}
+            - {name: VELOXA_TOKEN_DIR, value: /mnt/evidence/tokens}
+            - {name: VELOXA_TRUSTED_PROXY, value: "1"}
+            - {name: VELOXA_RATE_LIMIT_PER_MIN, value: "120"}
+            - {name: VELOXA_RATE_LIMIT_EXPENSIVE_PER_MIN, value: "20"}
+            - {name: VELOXA_METRICS, value: "1"}
+            # Never set in hosted environments: VELOXA_DEV_AUTH, VELOXA_DEMO_LOGIN, VELOXA_TEST_AGENTS_FILE,
+            # VELOXA_JIRA_SYNC (scheduled sync runs in the worker, not in request-serving instances).
+            - name: VELOXA_APP_PASSWORD
+              valueFrom: {secretKeyRef: {name: veloxa-db-app-password, key: latest}}
+            - name: VELOXA_TOKEN_KEY
+              valueFrom: {secretKeyRef: {name: veloxa-token-key, key: latest}}
+            - name: ATLASSIAN_CLIENT_ID
+              valueFrom: {secretKeyRef: {name: veloxa-atlassian-client-id, key: latest}}
+            - name: ATLASSIAN_CLIENT_SECRET
+              valueFrom: {secretKeyRef: {name: veloxa-atlassian-client-secret, key: latest}}
+            - name: VELOXA_WORKFLOW_DATABASE_URL
+              valueFrom: {secretKeyRef: {name: veloxa-workflow-db-url, key: latest}}
+          volumeMounts: [{name: evidence, mountPath: /mnt/evidence}]
+          startupProbe: {httpGet: {path: /health}, periodSeconds: 3, failureThreshold: 20}
+          livenessProbe: {httpGet: {path: /health}, periodSeconds: 30}
+      volumes:
+        - name: evidence
+          csi: {driver: gcsfuse.run.googleapis.com, volumeAttributes: {bucketName: "${BUCKET}"}}
