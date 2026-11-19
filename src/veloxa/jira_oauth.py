@@ -413,6 +413,23 @@ class Jira:
         return [{"account_id": u["accountId"], "name": u.get("displayName")} for u in (r if isinstance(r, list) else [])
                 if u.get("accountId") and u.get("active", True)]
 
+    def users(self, tenant: str, limit: int = 1000) -> list[dict]:
+        """Jira's human user accounts with the identity fields Jira itself returns. `email` is present only when the
+        user's Atlassian profile visibility allows it; it is used for exact matching server side and never logged."""
+        out: list[dict] = []
+        start = 0
+        while start < limit:
+            r = self.call(tenant, "GET", "/rest/api/3/users/search", params={"startAt": start, "maxResults": 100})
+            page = r if isinstance(r, list) else []
+            for u in page:
+                if u.get("accountType") == "atlassian" and u.get("accountId"):
+                    out.append({"account_id": u["accountId"], "name": u.get("displayName"),
+                                "active": u.get("active", True), "email": u.get("emailAddress") or None})
+            if len(page) < 100:
+                break
+            start += 100
+        return out
+
     def overdue(self, tenant: str, project: str | None = None, limit: int = 25) -> list[dict]:
         scope = f'project = "{project}" AND ' if project else ""
         return self.search(tenant, scope + "duedate < startOfDay() AND statusCategory != Done ORDER BY duedate ASC",

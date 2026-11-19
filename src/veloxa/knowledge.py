@@ -115,7 +115,8 @@ ROW_SPECS: dict[str, tuple[str, str, str | None, dict[str, str]]] = {
         "Points": "story_points", "Blocked by": "blocked_by", "Fix Version": "fix_version"}),
     "jira_oauth": ("issue", "Key", None, {                 # issues synced over the Jira OAuth connection
         "Summary": "summary", "Status": "status_at_export", "Assignee": "assignee_name", "Due date": "due_date",
-        "Issue type": "issue_type", "Project": "project", "Fix Version": "fix_version", "Created": "created"}),
+        "Assignee account": "assignee_account_id", "Links": "links", "Issue type": "issue_type", "Project": "project",
+        "Fix Version": "fix_version", "Created": "created"}),
     "release_calendar": ("version", "Version", None, {
         "Project": "project", "Target date": "release_date", "Original date": "original_release_date",
         "Status": "release_status"}),

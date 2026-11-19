@@ -128,8 +128,8 @@ function AgentDetail({ agent }: { agent: AgentSummary }) {
 type Entry = { q: string; key: string; turn?: AgentTurn; error?: ApiError; cancelled?: boolean; task?: boolean };
 // "add a task", "give you a task and add it in Jira": handled by the Jira task card, not by the assistant (which
 // never acts). The card opens right in the interview.
-const TASK = /(task|ticket|jira|todo|to-do)/i;
-const DO = /(add|create|give|assign|make|need|open|log|raise|put|set up|update|change|move)/i;
+const TASK = /\b(task|ticket|jira|todo|to-do)\b/i;
+const DO = /\b(add|create|give|assign|make|need|open|log|raise|put|set up|update|change|move)\b/i;
 
 export function Conversation({ session, history, onClosed, opening }: { session: AgentSession;
   history: SessionDetail | null; onClosed: () => void; opening?: string }) {

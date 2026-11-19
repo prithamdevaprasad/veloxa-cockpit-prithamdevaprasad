@@ -13,7 +13,16 @@ from collections import defaultdict
 
 from ..db import tenant_tx
 
-PER_SYSTEM = 12          # unlinked records shown per system (the rest are counted on the system node)
+PER_SYSTEM = 12
+
+
+def owner_of(owners: dict, d: dict) -> str | None:
+    """The HR emp_id of an issue's assignee, only through an approved Jira identity (never by name)."""
+    for ctx, pred in (("jira.account_id", "assignee_account_id"), ("jira.assignee_code", "assignee_source_id")):
+        v = d.get(pred)
+        if v and (ctx, str(v)) in owners:
+            return owners[(ctx, str(v))]
+    return None          # unlinked records shown per system (the rest are counted on the system node)
 
 
 def build(conn, basis, tz, principal, readable, people_rows, worry_items) -> dict:
@@ -34,14 +43,13 @@ def build(conn, basis, tz, principal, readable, people_rows, worry_items) -> dic
             edges.append({"source": a, "target": b, "relation": rel})
 
     # People and departments (work facts only).
-    by_name, emp = {}, {}
+    emp = {}
     for s in people_rows:
         dep = s.get("department") or "Unassigned"
         node(f"dept:{dep}", "department", dep)
         pid = f"person:{s['emp_id']}"
         node(pid, "person", s["full_name"], detail=s.get("title"), department=dep, record=s["source_record_id"])
         edge(pid, f"dept:{dep}", "works_in")
-        by_name[str(s["full_name"]).lower()] = pid
         emp[s["emp_id"]] = pid
     for s in people_rows:
         if s.get("manager_emp_id") in emp:
@@ -51,11 +59,13 @@ def build(conn, basis, tz, principal, readable, people_rows, worry_items) -> dic
     with tenant_tx(conn, basis.tenant_id, principal.principal_id, k):
         latest = ("SELECT DISTINCT ON (record_id) record_id, system, kind, source_path, batch_seq"
                   " FROM ledger.visible_source_record ORDER BY record_id, version DESC")
-        systems = conn.execute(f"SELECT system, count(*) AS n FROM ({latest}) x GROUP BY system").fetchall()
+        systems = conn.execute(f"SELECT system, count(*) AS n FROM ({latest}) x GROUP BY system").fetchall()  # noqa: S608
         recent = conn.execute(
-            f"SELECT * FROM (SELECT x.*, row_number() OVER (PARTITION BY system ORDER BY batch_seq DESC, record_id)"
+            f"SELECT * FROM (SELECT x.*, row_number() OVER (PARTITION BY system ORDER BY batch_seq DESC, record_id)"  # noqa: S608
             f" AS rn FROM ({latest}) x) y WHERE rn <= %s", (PER_SYSTEM * 3,)).fetchall()
         issues = _claims(conn, basis.tenant_id, k, "issue") if k else {}
+        from ..resolution import jira_identity
+        owners = jira_identity.resolved(conn, basis.tenant_id)      # approved Jira identity -> HR emp_id only
 
     for s in systems:
         node(f"system:{s['system']}", "system", s["system"].replace("_", " "), count=s["n"])
@@ -117,18 +127,24 @@ def build(conn, basis, tz, principal, readable, people_rows, worry_items) -> dic
             hidden += 1
             continue
         key = subj.split(":", 1)[1]
+        emp = owner_of(owners, d)
         node(f"issue:{key}", "issue", key, detail=d.get("summary"), status=d.get("status_at_export"),
-             due=d.get("due_date"), assignee=d.get("assignee_name"))
+             due=d.get("due_date"), assignee=(nodes.get(f"person:{emp}") or {}).get("label") if emp else None,
+             assignee_unresolved=None if emp else (d.get("assignee_name") or d.get("assignee_source_id")))
         for r in recs:
             edge(f"issue:{key}", record(r), "stated_in")
-        who = str(d.get("assignee_name") or "").lower()
-        if who in by_name:
-            edge(f"issue:{key}", by_name[who], "assigned_to")
+        if emp:                                   # only a verified/administrator-approved identity links a person
+            edge(f"issue:{key}", f"person:{emp}", "assigned_to")
         summ = str(d.get("summary") or "").lower()
         for c in commitments:
             first = c["label"].split()[0].lower()
             if len(first) > 2 and re.search(rf"\b{re.escape(first)}\b", summ):
                 edge(f"issue:{key}", c["id"], "mentions")
+
+    for subj, d in issues.items():                # "Blocked by" as recorded in the tracker
+        for b in str(d.get("blocked_by") or "").replace(";", ",").split(","):
+            if b.strip():
+                edge(f"issue:{subj.split(':', 1)[1]}", f"issue:{b.strip()}", "blocked_by")
 
     # Concerns (the worry list) and the records they rest on.
     for i in worry_items:

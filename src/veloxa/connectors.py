@@ -129,6 +129,9 @@ class JiraConnector:
             rec.update({
                 "Key": issue["key"], "Summary": f.get("summary"), "Status": name(f.get("status")),
                 "Assignee": name(f.get("assignee")), "Due date": f.get("duedate"),
+                # Jira's own stable account identifier: the key for identity resolution (never the display name)
+                "Assignee account": (f.get("assignee") or {}).get("accountId") if isinstance(f.get("assignee"), dict)
+                else None,
                 "Issue type": name(f.get("issuetype")),
                 "Project": issue["key"].split("-")[0], "Created": f.get("created"), "Updated": f.get("updated"),
                 "Fix Version": ", ".join(v.get("name", "") for v in f.get("fixVersions") or []) or None,

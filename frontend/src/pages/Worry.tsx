@@ -8,7 +8,7 @@ import { useApi } from "../api/useApi";
 import { useAsk } from "../ui/Ask";
 import { useEvidence } from "../ui/EvidenceDrawer";
 import { ExplanationView, useExplanation } from "../ui/Explanation";
-import { Guidance } from "../ui/kit";
+import { Guidance, Icon } from "../ui/kit";
 import { Badge, Button, ErrorState, Loading, PageHead, Section } from "../ui";
 
 const CRIT: Record<string, string> = { C1: "Delivery", C2: "Financial", C3: "Continuity", C4: "Reporting integrity" };
@@ -24,7 +24,7 @@ export const groupLabel = (rank: number) =>
   rank === 1 ? "Highest attention group" : rank === 2 ? "Next attention group" : "Further attention";
 
 /** One concern: the executive view first; the D-15 calculation one click away. */
-function Item({ x, groupSize }: { x: WorryItem; groupSize: number }) {
+function Item({ x, groupSize, bare }: { x: WorryItem; groupSize: number; bare?: boolean }) {
   const [explain, setExplain] = useState(false);
   const evidence = useEvidence();
   const ask = useAsk();
@@ -37,7 +37,7 @@ function Item({ x, groupSize }: { x: WorryItem; groupSize: number }) {
     && v.reason !== NO_MEASURE).map(([, v]) => v.reason)];
   return (
     <li className="worry-item concern" id={`worry-${x.item_id}`}>
-      <strong className="concern-title">{x.title}</strong>
+      {!bare && <strong className="concern-title">{x.title}</strong>}
       {(x.department || x.project) && <div className="small muted">{[x.department, x.project].filter(Boolean).join(" · ")}</div>}
       {established.length > 0 && <p className="small">{established.map((t) => t.charAt(0).toUpperCase() + t.slice(1)).join(". ")}.</p>}
       {why.length > 0 && <><h4>Why it matters</h4><p className="small">{why.join(" ")}</p></>}
@@ -83,23 +83,6 @@ function Item({ x, groupSize }: { x: WorryItem; groupSize: number }) {
   );
 }
 
-/** Ranked concerns grouped by D-15 band: concerns in one band are presented together, never as "1 tied" each. */
-function Groups({ items }: { items: WorryItem[] }) {
-  const bands = [...new Set(items.map((x) => x.rank))].sort((a, b) => a - b);
-  return (
-    <div className="stack">{bands.map((r) => {
-      const group = items.filter((x) => x.rank === r);
-      return (
-        <section key={r} aria-label={groupLabel(r)} className="attention-group">
-          <h3>{groupLabel(r)} · {group.length} concern{group.length === 1 ? "" : "s"}</h3>
-          {group.length > 1 && <p className="small muted">Current evidence does not allow Veloxa to reliably order these
-            concerns individually.</p>}
-          <ol className="plain">{group.map((x) => <Item key={x.item_id} x={x} groupSize={group.length} />)}</ol>
-        </section>);
-    })}</div>
-  );
-}
-
 function Findings() {
   const [f, reload] = useApi((s) => product.findings(s), []);
   if (f.state === "loading") return <Loading lines={3} />;
@@ -132,33 +115,124 @@ function useScrollToItem(ready: boolean) {
   }, [ready]);
 }
 
+const TONE: Record<number, string> = { 1: "high", 2: "medium" };
+const reasonOf = (x: WorryItem) => {
+  const m = Object.values(x.severity.criteria).find((c) => c.status === "measured");
+  const u = x.unknowns[0];
+  return m ? m.reason.charAt(0).toUpperCase() + m.reason.slice(1) + "."
+    : u ? u.charAt(0).toUpperCase() + u.slice(1) : "The records show this but do not yet measure its impact.";
+};
+
+/** One concern as a card: what it is and its attention group; the full assessment opens in place. */
+function ConcernCard({ x, groupSize }: { x: WorryItem; groupSize: number }) {
+  const [open, setOpen] = useState(() => new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("item") === x.item_id);
+  return (
+    <li className={`concern-card tone-${TONE[x.rank] ?? "low"}${open ? " open" : ""}`} id={`worry-${x.item_id}`}>
+      <button className="concern-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="concern-icon"><Icon name={x.department === "Engineering" || /release|deliver/i.test(x.title)
+          ? "timeline" : /hir|notice|on-call|person/i.test(x.title) ? "agents" : "alert"} size={22} /></span>
+        <span className="concern-text"><strong>{x.title}</strong><span>{reasonOf(x)}</span></span>
+        <span className={`pill sev-${TONE[x.rank] ?? "low"}`}>{groupLabel(x.rank).replace(" group", "")}</span>
+        <span className="chev" aria-hidden="true">›</span>
+      </button>
+      {open && <ol className="plain concern-body"><Item x={x} groupSize={groupSize} bare /></ol>}
+    </li>);
+}
+
+function NextSteps({ steps }: { steps: { text: string; tag: string }[] }) {
+  const ask = useAsk();
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  if (!steps.length) return <p className="small muted">The records suggest no next step yet.</p>;
+  const chosen = [...picked].map((i) => steps[i]);
+  return (
+    <>
+      <ul className="plain next-steps">{steps.map((s, i) => (
+        <li key={s.text}><label>
+          <input type="checkbox" checked={picked.has(i)} onChange={() => {
+            const n = new Set(picked); if (n.has(i)) n.delete(i); else n.add(i); setPicked(n); }} />
+          <span>{s.text}</span></label>{s.tag && <span className="pill">{s.tag}</span>}</li>))}</ul>
+      <Button variant="primary" className="btn wide-btn" disabled={!chosen.length} onClick={() => ask.task(chosen.length === 1
+        ? { summary: chosen[0].text.slice(0, 250), description: "From Veloxa: What should I worry about?" }
+        : { summary: `Follow-ups from What to worry about (${chosen.length})`,
+            description: "From Veloxa: What should I worry about?\n" + chosen.map((c) => `- ${c.text}`).join("\n") })}>
+        + Create {chosen.length > 1 ? "a Jira task for these" : "a Jira task"}</Button>
+    </>);
+}
+
 export function WorryPage() {
   const [w, reload] = useApi((s) => product.worry(undefined, s), []);
   useScrollToItem(w.state === "ready");
+  const ready = w.state === "ready" ? w.data : null;
+  const ranked = ready && ready.ranking_mode !== "pending" ? ready.ranked : [];
+  const unrankable = ready?.unrankable ?? [];
+  const count = (r: (n: number) => boolean) => ranked.filter((x) => r(x.rank)).length;
+  const top = ranked[0];
+  const steps = [...ranked, ...unrankable].filter((x) => x.follow_up)
+    .map((x) => ({ text: x.follow_up!, tag: x.project ?? x.department ?? "" }))
+    .filter((s, i, all) => all.findIndex((o) => o.text === s.text) === i);
+  const records = new Set([...ranked, ...unrankable].flatMap((x) => x.evidence)).size;
   return (
     <>
-      <PageHead title="What should I worry about?" intro="The concerns the company records support, grouped by how
-        much attention they need. Each one shows what is recorded, why it matters and what is still unknown." />
-      <div className="ov-grid">
-        <Section title="Needs attention" className="span-8" aria-label="Ranked worries">
+      <div className="worry-hero">
+        <PageHead title="What should I worry about?" intro="A plain-English view of the main issues in your company
+          records: what they mean, the evidence, and what to do next." />
+        {ready && <div className="basis-card small"><Icon name="timeline" size={18} />
+          <span>{ready.read_basis.banner}</span></div>}
+      </div>
+      {ready && ranked.length > 0 && (
+        <section className="in-short" aria-label="In short">
+          <div className="in-short-text">
+            <span className="small muted">In short</span>
+            <h2>{count((r) => r === 1)} item{count((r) => r === 1) === 1 ? " needs" : "s need"} your attention first
+              {top ? `, led by “${top.title}”` : ""}.</h2>
+            {top && <p>{reasonOf(top)}</p>}
+          </div>
+          <div className="in-short-tiles">
+            <div className="tile high"><strong>{count((r) => r === 1)}</strong><span>Highest attention</span></div>
+            <div className="tile medium"><strong>{count((r) => r === 2)}</strong><span>Next attention</span></div>
+            <div className="tile"><strong>{count((r) => r > 2)}</strong><span>Further attention</span></div>
+            <div className="tile plain"><strong>{unrankable.length}</strong><span>Not enough evidence</span></div>
+          </div>
+        </section>)}
+      <div className="worry-grid">
+        <section className="card" aria-label="Ranked worries">
+          <h2 className="with-icon"><Icon name="alert" size={22} /> Items needing your attention{ranked.length ? ` (${ranked.length})` : ""}</h2>
           {w.state === "loading" && <Loading lines={5} />}
           {w.state === "error" && <ErrorState error={w.error} onRetry={reload} />}
-          {w.state === "ready" && (w.data.ranking_mode === "pending"
-            ? <Guidance title="Not ranked yet">{w.data.note}</Guidance>
-            : w.data.ranked.length === 0 ? <Guidance title="Nothing to rank">No item meets the evidence gate.</Guidance>
-              : <Groups items={w.data.ranked} />)}
-          {w.state === "ready" && <p className="small muted" style={{ marginTop: 8 }}>{w.data.read_basis.banner}.
-            Weights: {Object.entries((w.data.policy as { weights?: Record<string, number> }).weights ?? {})
-              .map(([k, v]) => `${k} ${CRIT[k]} ${pct(v)}`).join(", ") || "not recorded"}. Probabilities are disabled.</p>}
-        </Section>
-        <Section title="Not enough evidence to assess" className="span-4" aria-label="Unrankable"
+          {ready && (ready.ranking_mode === "pending"
+            ? <Guidance title="Not ranked yet">{ready.note}</Guidance>
+            : ranked.length === 0 ? <Guidance title="Nothing to rank">No item meets the evidence gate.</Guidance>
+              : <ul className="plain concern-list">{ranked.map((x) => (
+                  <ConcernCard key={x.item_id} x={x} groupSize={ranked.filter((y) => y.rank === x.rank).length} />))}</ul>)}
+          {ready && ranked.length > 1 && new Set(ranked.map((x) => x.rank)).size < ranked.length &&
+            <p className="small muted">Concerns in the same attention group can't be reliably ordered against each
+              other from the current evidence.</p>}
+        </section>
+        <div className="worry-side">
+          <section className="card" aria-label="What's driving this view">
+            <h3>What's driving this view?</h3>
+            <p className="small muted">Only admitted company records you may read. {ready ? `${records} record${records === 1 ? "" : "s"} support these concerns.` : ""}</p>
+            {ready && <ul className="plain check-list small">{[...new Set([...ranked, ...unrankable]
+              .map((x) => x.department).filter(Boolean))].map((d) => <li key={d!}><Icon name="check" size={16} /> {d} records</li>)}
+              <li><Icon name="check" size={16} /> Jira, documents and approved uploads</li></ul>}
+            {ready && <p className="small muted">Weights: {Object.entries((ready.policy as { weights?: Record<string, number> }).weights ?? {})
+              .map(([k, v]) => `${CRIT[k]} ${pct(v)}`).join(", ") || "not recorded"}. Severity is an ordering, never a probability.</p>}
+          </section>
+          <section className="card" aria-label="What to do next">
+            <h3>What to do next</h3>
+            <NextSteps steps={steps} />
+          </section>
+        </div>
+      </div>
+      <div className="worry-grid lower">
+        <Section title="Not enough evidence to assess" aria-label="Unrankable"
                  subtitle="Unassessed does not mean unimportant or safe: the records lack what is needed to judge it.">
-          {w.state === "ready" && ((w.data.unrankable ?? w.data.unranked ?? []).length === 0
+          {ready && ((unrankable.length + (ready.unranked?.length ?? 0)) === 0
             ? <p className="small muted">None.</p>
-            : <ul className="plain">{(w.data.unrankable ?? []).map((u) => <Unranked key={u.item_id} u={u} />)}
-                {(w.data.unranked ?? []).map((u) => <li key={u.item_id} className="worry-item">{u.title}</li>)}</ul>)}
+            : <ul className="plain">{unrankable.map((u) => <Unranked key={u.item_id} u={u} />)}
+                {(ready.unranked ?? []).map((u) => <li key={u.item_id} className="worry-item">{u.title}</li>)}</ul>)}
         </Section>
-        <Section title="Findings and notifications" className="span-12" aria-label="Findings">
+        <Section title="Findings and notifications" aria-label="Findings">
           <Findings />
         </Section>
       </div>

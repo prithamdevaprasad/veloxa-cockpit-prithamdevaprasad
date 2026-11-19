@@ -58,6 +58,9 @@ BLOCKED = re.compile(r"\b(which|what|how many|list)\b.{0,30}\b(issues?|tasks?|ti
                      r"\b(blocked|blocking|stuck)\b|\bblocked (issues?|tasks?|work)\b", re.I)
 BOARD_ABOUT = re.compile(r"\bboard\b.{0,40}\b(say|said|says|report\w*|mention\w*|state\w*)\b.{0,12}\babout\s+"
                          r"(?P<topic>[A-Za-z0-9][\w .-]{1,40}?)(\s+in\s+(?P<when>\w+))?\s*\??$", re.I)
+OWNERS = re.compile(r"\b(who)\b.{0,40}\b(owns?|owners?|working on|assigned|responsible|holds?|has)\b.{0,40}"
+                    r"\b(block\w*|issues?|tickets?|tasks?|work|most)\b|\bwhat is (?P<who>[A-Z][a-z]+(?: [A-Z][a-z]+)?)"
+                    r" working on\b|\b(workload|owners?) (of|by|per) (person|people|assignee)", re.I)
 COMMITMENTS = re.compile(r"\b(unresolved|open|outstanding|pending|missed|late|overdue|at[- ]risk)\b.{0,20}"
                          r"\bcommitments?\b|\bcommitments?\b.{0,30}\b(unresolved|open|outstanding|missed|at risk|"
                          r"without (a )?(new )?date)\b|\bwhich commitments\b", re.I)
@@ -183,6 +186,10 @@ class Router:
 
         if continuity.asks(q):                      # before DELAY: "what does the resignation do to the release?"
             out = continuity.answer(self, q)
+            if out is not None:
+                return out
+        if OWNERS.search(q):
+            out = self.owners(q)
             if out is not None:
                 return out
         if ISSUE_KEY.search(q) or JIRA_ABOUT.search(q):
@@ -315,6 +322,73 @@ class Router:
         return _result(self.basis_json, "qualified", f"I read this as: what the board updates say about {topic}.",
                        " ".join(c["text"] for c in claims), claims, [recs[i] for c in claims for i in c["evidence"]],
                        ["Board updates are reported statements, not independently verified."])
+
+    def owners(self, q):
+        """Who holds open and blocked tracker work. A person is named only through an approved Jira identity
+        mapping (verified e-mail or an administrator's mapping); everything else is counted as unresolved."""
+        from ..resolution import jira_identity
+        from ..risk.business_map import owner_of
+        from .continuity import _claims
+
+        k = self.basis.batch_seq
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id, k):
+            issues = _claims(self.conn, self.tenant_id, k, "issue")
+            owners = jira_identity.resolved(self.conn, self.tenant_id)
+            names = {r["emp_id"]: (r["full_name"], r["title"]) for r in self.conn.execute(
+                "SELECT emp_id, full_name, title FROM projection.person WHERE tenant_id = %s AND batch_seq ="
+                " (SELECT max(batch_seq) FROM projection.person WHERE tenant_id = %s AND batch_seq <= %s)",
+                (self.tenant_id, self.tenant_id, k)).fetchall()}
+        done = re.compile(r"done|closed|resolved|cancel", re.I)
+        blockers = {b.strip() for d in issues.values() for b in str(d.get("blocked_by") or "").replace(";", ",")
+                    .split(",") if b.strip()}
+        per: dict[str, dict] = {}
+        unresolved = 0
+        for subj, d in issues.items():
+            if done.search(str(d.get("status_at_export") or "")):
+                continue
+            key = subj.split(":", 1)[1]
+            emp = owner_of(owners, d)
+            if not emp:
+                unresolved += 1
+                continue
+            x = per.setdefault(emp, {"open": 0, "blocked": 0, "blocking": 0, "keys": [], "recs": set()})
+            x["open"] += 1
+            x["blocked"] += bool(d.get("blocked_by")) or "block" in str(d.get("status_at_export") or "").lower()
+            x["blocking"] += key in blockers
+            x["keys"].append(key)
+            x["recs"] |= set(d["_records"])
+        m = OWNERS.search(q)
+        wanted = m.group("who") if m and m.group("who") else None
+        if wanted:
+            per = {e: v for e, v in per.items() if names.get(e, ("",))[0].lower().startswith(wanted.lower())}
+        if not per:
+            if not unresolved:
+                return None
+            return _result(self.basis_json, "abstained", "I read this as: who holds open tracker work.",
+                           f"I can't name owners yet: {unresolved} open issues have Jira assignees that are not yet "
+                           "linked to an employee. An administrator can link them in Admin > People in Jira.",
+                           [], [], ["Jira assignees are linked to employees only through a verified e-mail match or "
+                                    "an administrator's mapping, never by name."])
+        ranked = sorted(per.items(), key=lambda kv: (-kv[1]["blocking"], -kv[1]["blocked"], -kv[1]["open"]))[:8]
+        recs = self.records({r for _, v in ranked for r in v["recs"]})
+        claims = []
+        for emp, v in ranked:
+            name, title = names.get(emp, (emp, None))
+            text = (f"{name}{f' ({title})' if title else ''}: {v['open']} open issue{'s' if v['open'] != 1 else ''}"
+                    f", {v['blocked']} blocked, {v['blocking']} blocking other work"
+                    f" ({', '.join(sorted(v['keys'])[:5])}{'…' if len(v['keys']) > 5 else ''}).")
+            c = self.claim(text, sorted(v["recs"]), recs)
+            if c:
+                claims.append(c)
+        if not claims:
+            return None
+        lead = "Open tracker work by owner, those blocking the most other work first:"
+        return _result(self.basis_json, "answered", "I read this as: who owns open and blocked tracker work.",
+                       lead + "\n" + "\n".join(f"- {c['text']}" for c in claims), claims,
+                       [recs[i] for c in claims for i in c["evidence"]],
+                       ([f"{unresolved} open issues have assignees not yet linked to an employee, so they are not "
+                         "counted above."] if unresolved else [])
+                       + ["Owners come from approved Jira identity links; tracker records are as of their last sync."])
 
     def issues(self, q):
         """Named issues ("status of VIT-2") or issues about a topic, from the issue claims (exports and Jira sync)."""

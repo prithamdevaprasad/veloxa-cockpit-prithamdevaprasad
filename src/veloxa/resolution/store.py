@@ -25,6 +25,10 @@ from ..db import tenant_tx
 from . import rules
 
 ORIGINS = ("synthetic_test", "release_pack")
+# Migration 0022: real Jira assignee identities may be approved, but only as a verified exact identifier or an
+# explicit administrator mapping to an HR-anchored person. Name-derived rules never establish a real identity.
+JIRA_CONTEXTS = ("jira.account_id", "jira.assignee_code")
+JIRA_APPROVABLE = ("exact_identifier", "administrator_mapping")
 OUTCOMES = ("approved", "rejected", "deferred")
 SYNTHETIC_PREFIX = "syn-"
 
@@ -123,7 +127,7 @@ def propose(conn: psycopg.Connection, tenant_id: uuid.UUID, identity_id: uuid.UU
     out = []
     with tenant_tx(conn, tenant_id):
         for c in found:
-            if c.classification not in rules.CLASSIFICATIONS:
+            if c.classification not in (*rules.CLASSIFICATIONS, "administrator_mapping"):
                 raise Invalid(f"unknown classification {c.classification!r}")
             row = conn.execute(
                 "INSERT INTO judgement.match_candidate (tenant_id, candidate_id, identity_id, entity_id,"
@@ -139,6 +143,7 @@ def propose(conn: psycopg.Connection, tenant_id: uuid.UUID, identity_id: uuid.UU
 def _candidate(conn, tenant_id, candidate_id):
     return conn.execute(
         "SELECT mc.candidate_id, mc.classification, si.origin AS identity_origin, ai.origin AS anchor_origin,"
+        " si.context AS identity_context, ai.system AS anchor_system,"
         " cs.latest_version AS latest, cs.latest_decision_id AS latest_id"
         " FROM judgement.match_candidate mc"
         " JOIN judgement.source_identity si ON si.tenant_id = mc.tenant_id AND si.identity_id = mc.identity_id"
@@ -202,9 +207,14 @@ def decide(conn: psycopg.Connection, tenant_id: uuid.UUID, decided_by: str, cand
                         "version": prior["version"], "outcome": outcome,
                         "decided_at": prior["decided_at"].isoformat(), "replayed": True}
         if outcome == "approved":
-            if c["identity_origin"] != "synthetic_test" or c["anchor_origin"] != "synthetic_test":
+            synthetic = c["identity_origin"] == "synthetic_test" and c["anchor_origin"] == "synthetic_test"
+            jira_ok = (c["identity_context"] in JIRA_CONTEXTS and c["anchor_system"] == "hr"
+                       and c["classification"] in JIRA_APPROVABLE)
+            if c["classification"] in ("ambiguous", "conflicting"):
+                refusal = f"a {c['classification']} candidate cannot be approved"
+            elif not synthetic and not jira_ok:
                 refusal = "only synthetic test identities may be approved; real candidates stay unresolved"
-            elif c["classification"] not in rules.APPROVABLE:
+            elif synthetic and c["classification"] not in rules.APPROVABLE:
                 refusal = f"a {c['classification']} candidate cannot be approved"
         if refusal is None:
             version = (c["latest"] or 0) + 1

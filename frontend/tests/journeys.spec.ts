@@ -345,7 +345,7 @@ test("Overview: what needs attention and the AI team come right after the busine
   expect(box!.y).toBeGreaterThan(figures!.y);
   expect(box!.y).toBeLessThan(brief!.y);                                         // above the lower dashboard rows
   await expect(attn).not.toContainText("[object Object]");
-  await expect(attn).not.toContainText(/tied|Ranked #/);                       // attention groups, no jargon
+  await expect(attn).not.toContainText(/\btied\b|Ranked #/);                       // attention groups, no jargon
   const warn = await page.getByRole("region", { name: "Early warnings" }).boundingBox();
   expect(warn!.y).toBeLessThan(brief!.y);                                        // early warnings right after it
   await attn.getByRole("button", { name: "View all concerns" }).click();

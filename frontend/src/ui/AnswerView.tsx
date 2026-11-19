@@ -237,7 +237,7 @@ export function AnswerView({ answer }: { answer: Answer }) {
               <div className="conflict-grid">
                 {d.claims.map((c) => (
                   <div key={c.record_id} className="conflict-side">
-                    <div className="val">{c.value}{c.unit && !(c.unit === "INR" && /Rs\.?|\u20b9|crore|lakh|Cr/i.test(c.value))
+                    <div className="val">{c.value}{c.unit && !(c.unit === "INR" && /Rs\.?|\u20b9|crore|lakh|\bCr\b/i.test(c.value))
                       ? ` ${c.unit}` : ""}</div>
                     <div className="small muted">{c.source}{c.period ? `, ${c.period}` : ""}</div>
                     {index.has(c.record_id) && <button className="cite" onClick={() => evidence.open(c.record_id, d.subject)}

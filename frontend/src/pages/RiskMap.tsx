@@ -10,7 +10,7 @@ import { Button, EmptyState, ErrorState, Loading } from "../ui";
 
 interface MapNode { id: string; kind: string; label: string; degree: number; detail?: string | null; status?: string;
   due?: string; assignee?: string; count?: number; system?: string; record?: string; department?: string;
-  warnings?: string[]; unknowns?: string[] }
+  warnings?: string[]; unknowns?: string[]; assignee_unresolved?: string | null }
 interface MapEdge { source: string; target: string; relation: string }
 interface MapOut { nodes: MapNode[]; edges: MapEdge[]; hidden_for_access: number; notes: string[];
   read_basis: { batch_seq: number; banner?: string } }
@@ -26,7 +26,7 @@ const KINDS: Record<string, { label: string; color: string }> = {
 };
 const RELATION: Record<string, string> = {
   works_in: "works in", reports_to: "reports to", from_system: "comes from", stated_in: "stated in",
-  evidence_for: "rests on", assigned_to: "assigned to", mentions: "mentions", concerns: "concerns", conflict: "conflicts with",
+  evidence_for: "rests on", assigned_to: "assigned to", blocked_by: "blocked by", mentions: "mentions", concerns: "concerns", conflict: "conflicts with",
 };
 
 type Sim = { x: number; y: number; vx: number; vy: number; fixed?: boolean };
@@ -34,17 +34,11 @@ type Sim = { x: number; y: number; vx: number; vy: number; fixed?: boolean };
 export function RiskMapPage() {
   const [m, reload] = useApi((s) => get<MapOut>("/v1/map", s), []);
   return (
-    <div className="map-page">
-      <header className="page-hero compact">
-        <span className="hero-icon"><Icon name="graph" size={24} /></span>
-        <div><h1>Risk & dependency map</h1>
-          <p>Every source Veloxa has admitted, joined by the links the records state: people, teams, releases, Jira
-            issues, documents, transcripts and the concerns they support. Nothing is inferred.</p></div>
-      </header>
-      {m.state === "loading" && <Loading lines={6} label="Building the map" />}
-      {m.state === "error" && <ErrorState error={m.error} onRetry={reload} />}
+    <div className="map-full">
+      {m.state === "loading" && <div className="map-status"><Loading lines={6} label="Building the map" /></div>}
+      {m.state === "error" && <div className="map-status"><ErrorState error={m.error} onRetry={reload} /></div>}
       {m.state === "ready" && (m.data.nodes.length === 0
-        ? <EmptyState title="Nothing to map yet">{m.data.notes[0]}</EmptyState>
+        ? <div className="map-status"><EmptyState title="Nothing to map yet">{m.data.notes[0]}</EmptyState></div>
         : <MapView data={m.data} />)}
     </div>
   );
@@ -105,7 +99,7 @@ function MapView({ data }: { data: MapOut }) {
           let dx = a.x - b.x, dy = a.y - b.y, d2 = dx * dx + dy * dy;
           if (d2 < 1) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 1; }
           if (d2 > 250000) continue;
-          const f = (900 / d2) * alpha.current;
+          const f = (1600 / d2) * alpha.current;
           a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f;
         }
         a.vx -= a.x * 0.004 * alpha.current; a.vy -= a.y * 0.004 * alpha.current;
@@ -115,7 +109,7 @@ function MapView({ data }: { data: MapOut }) {
         const a = P.get(e.source), b = P.get(e.target);
         if (!a || !b) continue;
         const dx = b.x - a.x, dy = b.y - a.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
-        const f = ((d - 60) / d) * 0.06 * alpha.current;
+        const f = ((d - 70) / d) * 0.05 * alpha.current;
         a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f;
       }
       for (const n of ns) {
@@ -241,44 +235,36 @@ function MapView({ data }: { data: MapOut }) {
     setQuestion("");
   }
 
+  const QUICK = ["Who owns the most blocked work?", "What depends on Atlas GA?", "Which concerns rest on a single source?"];
   return (
-    <div className="map-layout">
-      <div className="map-canvas" ref={wrap}>
-        <canvas ref={canvas} aria-label="Risk and dependency map. Use the search and the panel to explore it with a keyboard." />
-        <div className="map-legend" role="group" aria-label="Show or hide node types">
-          {Object.entries(KINDS).map(([k, v]) => counts[k] > 0 && (
-            <label key={k} className={hidden.has(k) ? "off" : ""}>
-              <input type="checkbox" checked={!hidden.has(k)} onChange={() => {
-                const s = new Set(hidden); if (s.has(k)) s.delete(k); else s.add(k); setHidden(s); alpha.current = 0.6; }} />
-              <span className="dot" style={{ background: v.color }} /> {v.label} <span className="muted">{counts[k]}</span>
-            </label>))}
-        </div>
-        <div className="map-zoom">
-          <button className="icon-btn" aria-label="Zoom in" onClick={() => { target.current = { ...view.current, k: Math.min(6, view.current.k * 1.4) }; }}>+</button>
-          <button className="icon-btn" aria-label="Zoom out" onClick={() => { target.current = { ...view.current, k: Math.max(0.15, view.current.k / 1.4) }; }}>−</button>
-          <button className="icon-btn" aria-label="Reset view" onClick={() => { setSelected(null); target.current = { x: 0, y: 0, k: 0.8 }; }}>⟲</button>
-        </div>
-      </div>
-      <aside className="map-panel" aria-label="Map details">
-        <div className="map-search">
-          <Icon name="search" size={16} />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a person, release, issue, document…"
-                 aria-label="Find a node" onKeyDown={(e) => { if (e.key === "Enter" && matches[0]) { flyTo(matches[0].id); setQuery(""); } }} />
-        </div>
-        {matches.length > 0 && <ul className="plain map-results">{matches.map((n) => (
-          <li key={n.id}><button onClick={() => { flyTo(n.id); setQuery(""); }}>
-            <span className="dot" style={{ background: KINDS[n.kind]?.color }} />{n.label}
-            <span className="muted small">{KINDS[n.kind]?.label}</span></button></li>))}</ul>}
+    <div className="map-stage" ref={wrap}>
+      <canvas ref={canvas} aria-label="Risk and dependency map. Use the search and the panel to explore it with a keyboard." />
 
+      <div className="map-legend" role="group" aria-label="Show or hide node types">
+        <strong className="map-title">Risk & dependency map</strong>
+        {Object.entries(KINDS).map(([k, v]) => counts[k] > 0 && (
+          <label key={k} className={hidden.has(k) ? "off" : ""}>
+            <input type="checkbox" checked={!hidden.has(k)} onChange={() => {
+              const s = new Set(hidden); if (s.has(k)) s.delete(k); else s.add(k); setHidden(s); alpha.current = 0.6; }} />
+            <span className="dot" style={{ background: v.color }} /> {v.label} <span className="muted">{counts[k]}</span>
+          </label>))}
+        {data.hidden_for_access > 0 && <span className="muted small">{data.hidden_for_access} hidden (no access)</span>}
+      </div>
+
+      <aside className="map-float" aria-label="Map details">
         {sel ? (
           <div className="map-node">
-            <span className="kind-tag" style={{ borderColor: KINDS[sel.kind]?.color }}>{KINDS[sel.kind]?.label.replace(/s$/, "")}</span>
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <span className="kind-tag" style={{ borderColor: KINDS[sel.kind]?.color }}>{KINDS[sel.kind]?.label.replace(/s$/, "")}</span>
+              <button className="link small" onClick={() => setSelected(null)}>Close</button>
+            </div>
             <h2>{sel.label}</h2>
-            {sel.detail && <p>{sel.detail}</p>}
+            {sel.detail && <p className="small">{sel.detail}</p>}
             <dl className="meta small">
               {sel.status && <><dt>Status</dt><dd>{sel.status}</dd></>}
               {sel.due && <><dt>Due</dt><dd>{sel.due}</dd></>}
-              {sel.assignee && <><dt>Assignee</dt><dd>{sel.assignee}</dd></>}
+              {sel.kind === "issue" && <><dt>Owner</dt><dd>{sel.assignee ?? (sel.assignee_unresolved
+                ? <span className="muted">{sel.assignee_unresolved} (not yet linked to an employee)</span> : "Unassigned")}</dd></>}
               {sel.department && <><dt>Department</dt><dd>{sel.department}</dd></>}
               {sel.system && <><dt>Source</dt><dd>{sel.system.replace(/_/g, " ")}</dd></>}
               {sel.count !== undefined && <><dt>Records</dt><dd>{sel.count}</dd></>}
@@ -287,16 +273,18 @@ function MapView({ data }: { data: MapOut }) {
               <ul className="bullets small">{sel.warnings!.map((w) => <li key={w}>{w}</li>)}</ul></>}
             {(sel.unknowns?.length ?? 0) > 0 && <><h4>Still unknown</h4>
               <ul className="bullets small">{sel.unknowns!.map((w) => <li key={w}>{w}</li>)}</ul></>}
-            <h4>Linked to ({selLinks.length})</h4>
-            <ul className="plain map-links">{selLinks.slice(0, 40).map((l, i) => {
-              const o = byId.get(l.other);
-              return o && <li key={l.other + i}><button onClick={() => flyTo(o.id)}>
-                <span className="dot" style={{ background: KINDS[o.kind]?.color }} />
-                <span className="rel">{l.out ? RELATION[l.relation] ?? l.relation : `← ${RELATION[l.relation] ?? l.relation}`}</span>
-                {o.label}</button></li>;
-            })}</ul>
-            <div className="row" style={{ gap: 8 }}>
-              <Button variant="primary" onClick={() => askAbout(`What do the records say about this, what depends on it, and what is still unknown?`)}>
+            <details open={selLinks.length <= 12}>
+              <summary><strong>Linked to ({selLinks.length})</strong></summary>
+              <ul className="plain map-links">{selLinks.slice(0, 60).map((l, i) => {
+                const o = byId.get(l.other);
+                return o && <li key={l.other + i}><button onClick={() => flyTo(o.id)}>
+                  <span className="dot" style={{ background: KINDS[o.kind]?.color }} />
+                  <span className="rel">{l.out ? RELATION[l.relation] ?? l.relation : `← ${RELATION[l.relation] ?? l.relation}`}</span>
+                  <span className="lbl">{o.label}</span></button></li>;
+              })}</ul>
+            </details>
+            <div className="row" style={{ gap: 8, marginTop: 10 }}>
+              <Button variant="primary" onClick={() => askAbout("What do the records say about this, what depends on it, and what is still unknown?")}>
                 Ask about this</Button>
               {["concern", "commitment", "issue"].includes(sel.kind) &&
                 <Button onClick={() => ask.task(sel.kind === "issue" ? { key: sel.label, mode: "update" }
@@ -305,23 +293,37 @@ function MapView({ data }: { data: MapOut }) {
             </div>
           </div>
         ) : (
-          <div className="map-node muted">
-            <h2>Explore the map</h2>
-            <p className="small">Click any dot to see what it is linked to. Drag to move around, scroll to zoom, and
-              use the search to jump to a node. Red lines are figures the sources disagree on.</p>
-            <ul className="bullets small">{data.notes.map((x) => <li key={x}>{x}</li>)}
-              {data.hidden_for_access > 0 && <li>{data.hidden_for_access} items are hidden because you can't read their evidence.</li>}</ul>
+          <div className="map-node">
+            <h2>Ask about the map</h2>
+            <p className="small muted">Click a dot to see its links, drag to move, scroll to zoom. Red lines are figures
+              the sources disagree on. Only links the records state are drawn.</p>
+            <div className="follow-ups">{QUICK.map((q) => <button key={q} className="chip" onClick={() => askAbout(q)}>{q}</button>)}</div>
           </div>
         )}
         <form className="map-ask" onSubmit={(e) => { e.preventDefault(); askAbout(question); }}>
-          <label className="small muted" htmlFor="map-q">{sel ? `Ask about “${sel.label}”` : "Ask about the map"}</label>
-          <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
-            <input id="map-q" className="input" value={question} onChange={(e) => setQuestion(e.target.value)}
-                   placeholder={sel ? "e.g. who is affected if this slips?" : "e.g. what depends on Atlas GA?"} />
-            <Button variant="primary" type="submit" disabled={!question.trim()}>Ask</Button>
-          </div>
+          <input className="input" value={question} onChange={(e) => setQuestion(e.target.value)} aria-label="Question about the map"
+                 placeholder={sel ? `Ask about “${sel.label.slice(0, 30)}”` : "e.g. who is blocking Atlas GA?"} />
+          <Button variant="primary" type="submit" disabled={!question.trim()}>Ask</Button>
         </form>
       </aside>
+
+      <div className="map-searchbar">
+        {matches.length > 0 && <ul className="plain map-results">{matches.map((n) => (
+          <li key={n.id}><button onClick={() => { flyTo(n.id); setQuery(""); }}>
+            <span className="dot" style={{ background: KINDS[n.kind]?.color }} /><span className="lbl">{n.label}</span>
+            <span className="muted small">{KINDS[n.kind]?.label}</span></button></li>))}</ul>}
+        <div className="map-search">
+          <Icon name="search" size={16} />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find a person, release, issue, document…"
+                 aria-label="Find a node" onKeyDown={(e) => { if (e.key === "Enter" && matches[0]) { flyTo(matches[0].id); setQuery(""); } }} />
+        </div>
+      </div>
+
+      <div className="map-zoom">
+        <button className="icon-btn" aria-label="Zoom in" onClick={() => { target.current = { ...view.current, k: Math.min(6, view.current.k * 1.4) }; }}>+</button>
+        <button className="icon-btn" aria-label="Zoom out" onClick={() => { target.current = { ...view.current, k: Math.max(0.15, view.current.k / 1.4) }; }}>−</button>
+        <button className="icon-btn" aria-label="Reset view" onClick={() => { setSelected(null); target.current = { x: 0, y: 0, k: 0.8 }; }}>⟲</button>
+      </div>
     </div>
   );
 }

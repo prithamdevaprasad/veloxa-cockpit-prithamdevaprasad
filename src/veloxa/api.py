@@ -112,6 +112,13 @@ class DecisionRequest(BaseModel):
                                     description="a replay with the same key returns the original decision")
 
 
+class JiraMapIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    identity_id: uuid.UUID
+    emp_id: str | None = Field(default=None, min_length=1, max_length=64)
+    reason: str = Field(min_length=3, max_length=2000)
+
+
 class ResolutionRequest(BaseModel):
     """Asks for a human decision on a candidate; the requester is the authenticated principal."""
     model_config = ConfigDict(extra="forbid")
@@ -646,6 +653,66 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
                 return JSONResponse(status_code=403, content={"error": "decision_not_permitted", "detail": str(e)})
             except resolution.Invalid as e:
                 return JSONResponse(status_code=422, content={"error": "invalid_decision", "detail": str(e)})
+
+    def _jira_identity_ctx(conn, authorization):
+        principal = _resolver(conn, authorization)
+        if isinstance(principal, JSONResponse):
+            return principal, 0
+        basis = _scenario_basis(conn, None, principal.tenant_id, _tz(conn, principal.tenant_id))
+        return principal, basis.batch_seq
+
+    @app.get("/v1/identity/jira")
+    def jira_identities(authorization: str | None = Header(default=None)):
+        """Jira assignee identities and their HR mapping state, suggestions and decision history (administrators
+        holding `resolve` only: the employee list and mappings are not shown to anyone else)."""
+        from .resolution import jira_identity
+
+        with connect(state["dsn"]) as conn:
+            principal, k = _jira_identity_ctx(conn, authorization)
+            if isinstance(principal, JSONResponse):
+                return principal
+            return {**jira_identity.overview(conn, principal.tenant_id, k), "batch_seq": k}
+
+    @app.post("/v1/identity/jira/verify")
+    def jira_identities_verify(authorization: str | None = Header(default=None)):
+        """Read Jira's user list and map accounts whose Jira e-mail equals exactly one HR work e-mail."""
+        from .resolution import jira_identity
+
+        with connect(state["dsn"]) as conn:
+            principal, k = _jira_identity_ctx(conn, authorization)
+            if isinstance(principal, JSONResponse):
+                return principal
+            j = state.get("jira_get", lambda: None)()
+            if j is None or not j.status(str(principal.tenant_id)).get("connected"):
+                return JSONResponse(status_code=409, content={"error": "jira_not_connected",
+                                                              "detail": "Connect Jira first."})
+            users = j.users(str(principal.tenant_id))
+            out = jira_identity.verify_with_jira(conn, principal.tenant_id, principal.principal_id, users, k)
+            from . import audit
+            from .db import tenant_tx
+            with tenant_tx(conn, principal.tenant_id, principal.principal_id):
+                audit.append(conn, principal.tenant_id, "identity.jira_verified", out)   # counts only, no values
+            return {**out, "fields_available": {"account_id": True, "display_name": True,
+                                                "email": out["with_email"] > 0}}
+
+    @app.post("/v1/identity/jira/map")
+    def jira_identity_map(body: JiraMapIn, authorization: str | None = Header(default=None)):
+        from .resolution import jira_identity
+
+        with connect(state["dsn"]) as conn:
+            principal, k = _jira_identity_ctx(conn, authorization)
+            if isinstance(principal, JSONResponse):
+                return principal
+            try:
+                if body.emp_id is None:
+                    return jira_identity.unmap_identity(conn, principal.tenant_id, principal.principal_id,
+                                                        body.identity_id, body.reason)
+                return jira_identity.map_identity(conn, principal.tenant_id, principal.principal_id,
+                                                  body.identity_id, body.emp_id, body.reason, k)
+            except resolution.NotPermitted as e:
+                return JSONResponse(status_code=403, content={"error": "decision_not_permitted", "detail": str(e)})
+            except resolution.Invalid as e:
+                return JSONResponse(status_code=422, content={"error": "invalid_mapping", "detail": str(e)})
 
     @app.get("/v1/briefing/{snapshot_id}")
     def get_briefing_snapshot(snapshot_id: uuid.UUID, authorization: str | None = Header(default=None)):
