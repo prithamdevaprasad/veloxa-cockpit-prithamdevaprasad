@@ -124,3 +124,13 @@ def test_without_a_configured_decision_file_ranking_is_unavailable(monkeypatch):
     monkeypatch.delenv(r.POLICY_ENV, raising=False)
     with pytest.raises(r.PolicyMissing):
         r.load_policy()
+
+
+def test_an_item_on_the_eligibility_threshold_is_sensitive():
+    """Audit 20 Nov 2026: C1 + C3 not applicable = exactly 50 percent counted with nothing measured. A small weight
+    move takes it below the gate, so it must be reported as sensitive (v1 previously said 'not sensitive')."""
+    edge = item("edge", c2=MISSING, c4=r.Measure("unmapped"))
+    clear = item("clear", c1=m(2.0), c2=m(1000))
+    out = r.rank([edge, clear], POLICY)
+    flags = {x["item_id"]: x["sensitive"] for x in out["ranked"] + out["unrankable"]}
+    assert flags["edge"] is True and flags["clear"] is False

@@ -132,12 +132,17 @@ def bands(scored: list[tuple[Item, dict]]) -> list[list[tuple[Item, dict]]]:
 
 
 def _positions(policy: dict, items: list[Item], weights: dict) -> dict[str, int]:
+    """Band per item under `weights`; 0 = not eligible (the eligibility gate depends on the weights too)."""
     scored = [(i, score(policy, i, weights)) for i in items]
-    return {it.item_id: b for b, band in enumerate(bands(scored), 1) for it, _ in band}
+    ok = [(i, s) for i, s in scored if not eligibility(policy, i, s)]
+    pos = {i.item_id: 0 for i in items}
+    pos |= {it.item_id: b for b, band in enumerate(bands(ok), 1) for it, _ in band}
+    return pos
 
 
 def sensitivity(policy: dict, items: list[Item]) -> dict[str, bool]:
-    """True when any +/- delta move of the weights (renormalised) changes an item's band position."""
+    """True when any +/- delta move of the weights (renormalised) changes an item's band position OR whether it is
+    eligible at all (an item sitting on the measured-weight threshold is sensitive; audit 20 Nov 2026)."""
     base = _positions(policy, items, policy["weights"])
     d = policy["gate_thresholds"]["sensitivity_weight_delta"]
     changed = {i.item_id: False for i in items}
@@ -162,7 +167,7 @@ def rank(items: list[Item], policy: dict | None = None) -> dict:
         s = score(policy, it)
         why = eligibility(policy, it, s)
         (unrankable if why else eligible).append((it, s, why))
-    sens = sensitivity(policy, [e[0] for e in eligible]) if eligible else {}
+    sens = sensitivity(policy, items) if items else {}
     ranked = []
     for b, band in enumerate(bands([(e[0], e[1]) for e in eligible]), 1):
         for it, s in band:
@@ -175,7 +180,8 @@ def rank(items: list[Item], policy: dict | None = None) -> dict:
             "ranked": ranked,
             "unrankable": [{"item_id": it.item_id, "title": it.title, "severity": s, "reasons": why,
                             "evidence": it.evidence, "confidence": it.confidence, "unknowns": it.unknowns,
-                            "follow_up": it.follow_up, "department": it.department, "project": it.project}
+                            "follow_up": it.follow_up, "department": it.department, "project": it.project,
+                            "sensitive": sens.get(it.item_id, False)}
                            for it, s, why in unrankable]}
 
 
