@@ -106,9 +106,60 @@ def _basis_json(basis: ReadBasis) -> dict:
             "notes": list(basis.notes)}
 
 
+_SPLIT = re.compile(r"(?<=[?.!;])\s+|\s+(?:and|also|plus|but)\s+(?=(?:also\s+)?(?:what|how|when|where|why|which|who|is|"
+                    r"are|can|could|show|give|tell|list)\b)", re.I)
+_ASKS = re.compile(r"\?\s*$|^\s*(and\s+)?(what|how|when|where|why|which|who|is|are|was|were|do|does|did|can|could|"
+                   r"show|give|tell|list|summari[sz]e|explain)\b", re.I)
+_PERMISSION_CLAIM = re.compile(r"\b(says?|said)\b.{0,20}\b(fine|ok(ay)?|allowed|approved)\b|\b(approved|signed off)\b",
+                               re.I)
+
+
+def split_parts(question: str) -> list[str]:
+    """Independent questions in one message ("Rank who will quit, and what is the Atlas status?")."""
+    return [x.strip(" ,") for x in _SPLIT.split(question.strip()) if x and x.strip(" ,")]
+
+
 def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: tools.Principal, question: str,
            now: datetime, *, mode: str | None = None, as_of: str | None = None,
            as_known_at: str | None = None) -> dict:
+    """A message with several independent questions: refused parts are refused (each with its policy) and the
+    permitted parts are still answered. A relayed approval ("X says it's fine") is context, never a question and
+    never an authorisation."""
+    question = question.strip()
+    parts = split_parts(question)
+    if len(parts) > 1:
+        current = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), Mode.CURRENT, None, tz, now)
+        people = _people(conn, current)
+        names = [p["full_name"] for p in people] + [p["emp_id"] for p in people]
+        from . import routes as _routes
+
+        refused, allowed = [], []
+        for part in parts:
+            r = policy.prescreen(part, names)
+            if r is None and _routes.pays_an_individual(part):
+                r = policy.Refusal(policy.POLICIES["POL-PAY-01"], "individual compensation")
+            if r:
+                refused.append((part, r))
+            elif _ASKS.search(part) and not _PERMISSION_CLAIM.search(part) and len(part.split()) >= 3:
+                allowed.append(part)
+        if refused and allowed:
+            out = _answer_one(conn, tenant_id, tz, principal, " ".join(allowed), now, mode=mode, as_of=as_of,
+                              as_known_at=as_known_at)
+            notes = list(dict.fromkeys(f"{r.policy.reason} ({r.policy.policy_id})" for _, r in refused))
+            out["answer"] = ("I can't help with part of this: " + " ".join(notes) + "\n\nOn the rest of your "
+                             "question: " + (out.get("answer") or ""))
+            out["partial_refusals"] = [{"part": part, "policy": r.policy.policy_id, "title": r.policy.title,
+                                        "alternative": r.policy.alternative} for part, r in refused]
+            out["interpretation"] = (f"I read this as {len(parts)} parts: {len(refused)} refused by policy and "
+                                     f"{len(allowed)} answered. " + (out.get("interpretation") or ""))
+            return out
+    return _answer_one(conn, tenant_id, tz, principal, question, now, mode=mode, as_of=as_of,
+                       as_known_at=as_known_at)
+
+
+def _answer_one(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: tools.Principal, question: str,
+                now: datetime, *, mode: str | None = None, as_of: str | None = None,
+                as_known_at: str | None = None) -> dict:
     question = question.strip()
     releases = ledger.sealed_releases(conn, tenant_id)
     current = resolve_basis(tenant_id, releases, Mode.CURRENT, None, tz, now)
@@ -204,15 +255,17 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
     if (searched and len(searched) == len(the_plan.steps)) or fallback:
         terms = {t.strip().lower() for st in searched for t in st.args.get("query", "").split(" OR ")} | (
             {t.lower() for t in fallback.split(" OR ")} if fallback else set())
-        need = 2 if len(terms) >= 2 else 1
+        specific = {t for t in terms if t and t not in _GENERIC} or terms
+        need = max(2 if len(specific) >= 2 else 1, -(-len(specific) * 3 // 5))     # >= 60% of the specific terms
         for r in results:
             if r.tool == "text_search" and r.evidence:
-                keep = [e for e in r.evidence
-                        if len({m.lower() for m in re.findall(r"\u27e6([^\u27e7]+)\u27e7", e.excerpt)}) >= need]
+                keep = [e for e in r.evidence if e.system != "challenge_brief"      # the brief is not company evidence
+                        and len({m.lower() for m in re.findall(r"\u27e6([^\u27e7]+)\u27e7", e.excerpt)}
+                                & specific) >= need]
                 r.evidence = keep
                 if not keep:
                     r.status, r.gaps = "no_data", ["no admitted passage matches enough of the question to answer it"]
-        base["diagnostics"]["relevance_threshold"] = f">= {need} distinct query terms per passage"
+        base["diagnostics"]["relevance_threshold"] = f">= {need} of {len(specific)} specific query terms per passage"
     withheld = [r for r in results if r.status == "withheld"]
     if withheld and len(withheld) == len(results):
         return _record(conn, tenant_id, principal, now, basis, base,
@@ -344,6 +397,10 @@ def _refused(p: policy.Policy, basis: ReadBasis, interpretation: str) -> dict:
     return out
 
 
+_GENERIC = {"version", "engineering", "company", "update", "updates", "status", "team", "teams", "people", "morning",
+            "today", "week", "month", "year", "one", "two", "three", "data", "report", "record", "records", "thing",
+            "things", "work", "news", "latest", "new", "time", "board", "call", "said", "say", "know", "mean",
+            "means", "veloxa", "information", "details", "question", "please", "tell", "show", "give"}
 _FORECAST_WORDS = re.compile(r"\b(forecast\w*|project(?:ed|ion)s?|predict\w*)\b", re.I)
 _QUANTITY = re.compile(r"^\s*(what(?:'s| is| was| will)?\b|how (?:much|many)\b)", re.I)
 _FUTURE = re.compile(r"\b(will\b|going to\b|next (?:year|quarter|month|fy)\b|expected to\b|by (?:the )?end of next)",

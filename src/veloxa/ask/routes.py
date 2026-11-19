@@ -43,6 +43,9 @@ BOARD_CHANGE = re.compile(r"\b(what )?(changed|change[sd]?|compare[sd]?|differen
                           r"\bboard\b.{0,40}\b(changed|change[sd]?|compared?)\b|\blatest board update\b", re.I)
 MISSING = re.compile(r"\bwhat (information|data|records?|evidence) (is|are) missing\b|\bmissing (information|data|"
                      r"records|evidence)\b|\bwhat (don't|do not) we know\b|\bknowledge gaps?\b", re.I)
+STATUS = re.compile(r"\b(status|progress|on track|how (is )?.{0,30} (is |are )?(going|doing|tracking)|"
+                    r"where (are|is) we|update on|"
+                    r"latest on|state of)\b", re.I)
 STOP = {"risk", "risks", "concern", "concerns", "worry", "exposure", "what", "our", "the", "is", "are", "about",
         "with", "this", "that", "current", "currently", "biggest", "main", "any", "there"}
 
@@ -134,9 +137,15 @@ class Router:
 
     # ---- routes
     def route(self, q: str) -> dict | None:
+        from . import continuity
+
+        if continuity.asks(q):                      # before DELAY: "what does the resignation do to the release?"
+            out = continuity.answer(self, q)
+            if out is not None:
+                return out
         for test, fn in ((PERSONAL, self.personal), (THIS_CONCERN, self.this_concern), (UNRANKABLE, self.unrankable),
                          (MISSING, self.missing), (DELAY, self.delay), (BOARD_CHANGE, self.board_change),
-                         (WORRY_LIST, self.worry_list)):
+                         (WORRY_LIST, self.worry_list), (STATUS, self.status)):
             if test.search(q):
                 out = fn(q)
                 if out is not None:
@@ -144,6 +153,51 @@ class Router:
         if TOPIC_RISK.search(q):
             return self.topic_risk(q)
         return None
+
+    def status(self, q):
+        """Project / release status from the tracker's structured records (named project only; else None)."""
+        from collections import Counter
+
+        from .continuity import OPEN, _claims
+
+        k = self.basis.batch_seq
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id, k):
+            versions = _claims(self.conn, self.tenant_id, k, "version")
+            issues = _claims(self.conn, self.tenant_id, k, "issue")
+        low = q.lower()
+        named = [(s, d) for s, d in versions.items() if s.split(":", 1)[1].split()[0].lower() in low]
+        if not named:
+            return None
+        recs = self.records({r for _, d in named for r in d["_records"]} |
+                            {r for d in issues.values() for r in d["_records"]})
+        claims = []
+        for s, d in named:
+            name = s.split(":", 1)[1]
+            moved = d.get("original_release_date") and d.get("release_date") != d.get("original_release_date")
+            c = self.claim(f"{name} is due {d.get('release_date')}" + (
+                f"; it was originally due {d.get('original_release_date')} and the date was changed on "
+                f"{d.get('last_changed')}" if moved else "") + ".", sorted(d["_records"]), recs)
+            if c:
+                claims.append(c)
+            mine = {i: x for i, x in issues.items() if x.get("fix_version") == name}
+            if mine:
+                st = Counter(str(x.get("status_at_export")) for x in mine.values())
+                pts = lambda xs: sum(float(x.get("story_points") or 0) for x in xs)  # noqa: E731
+                op = [x for x in mine.values() if OPEN(x.get("status_at_export"))]
+                c = self.claim(f"At the tracker export, {len(mine)} issues target {name}: "
+                               + ", ".join(f"{n} {k_}" for k_, n in st.most_common())
+                               + f". {pts(op):g} of {pts(mine.values()):g} story points are still open.",
+                               sorted({r for x in mine.values() for r in x["_records"]}), recs)
+                if c:
+                    claims.append(c)
+        if not claims:
+            return None
+        unknowns = ["The tracker export is a snapshot; work done since the export is not recorded.",
+                    "Whether the remaining scope fits the current date is not established (no supported throughput)."]
+        return _result(self.basis_json, "answered", "I read this as: the current status of a named release, from the "
+                       "tracker records.", " ".join(c["text"] for c in claims), claims,
+                       [recs[i] for c in claims for i in c["evidence"]], unknowns,
+                       ["Why did the release date move?", "What does the reported resignation mean for the release?"])
 
     def personal(self, q):
         return _result(self.basis_json, "abstained", "I read this as a question about an employee's personal life.",
