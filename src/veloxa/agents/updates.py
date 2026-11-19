@@ -24,6 +24,7 @@ DEPT_SYSTEMS = {"engineering": {"jira", "git", "incident_log", "oncall_rota", "h
                 "marketing": {"documents", "hiring_tracker"}}
 DEPT_FOCUS = {"engineering": "engineering", "finance": "finance", "people": "people", "people & ops": "people",
               "people_ops": "people", "hr": "people", "marketing": "marketing"}
+MAX_CITED = 30                          # records cited per fact (the count itself uses every record)
 OPEN = ("to do", "in progress", "open", "blocked", "in review")
 
 
@@ -71,7 +72,9 @@ def build(ctx, focus: str = "updates") -> dict:
     def add(fid, text, d_or_recs, batch=None):
         recs = set(d_or_recs["_records"]) if isinstance(d_or_recs, dict) else set(d_or_recs)
         b = batch or (d_or_recs.get("_batch") if isinstance(d_or_recs, dict) else None)
-        facts.append((fid, text + (f" ({admitted(b)})" if b else ""), recs))
+        cited = set(sorted(recs)[:MAX_CITED])            # bounded work per fact; the text says when it is a sample
+        note = f"; {len(cited)} of {len(recs)} records cited" if len(recs) > MAX_CITED else ""
+        facts.append((fid, text + (f" ({admitted(b)}{note})" if b else (f" ({note[2:]})" if note else "")), cited))
 
     eng = dept in (None, "engineering")
     if eng:
@@ -79,8 +82,9 @@ def build(ctx, focus: str = "updates") -> dict:
             name = s.split(":", 1)[1]
             moved = d.get("original_release_date") and d.get("release_date") != d.get("original_release_date")
             add(f"upd.version:{name}", f"{name} is due {_day(d.get('release_date'))}" + (
-                f"; it was originally due {_day(d.get('original_release_date'))} and the change was recorded on "
-                f"{_day(d.get('last_changed'))}" if moved else ""), d)
+                f"; it was originally due {_day(d.get('original_release_date'))}"
+                + (f" and the change was recorded on {_day(d.get('last_changed'))}" if d.get("last_changed") else "")
+                if moved else ""), d)
         op = [d for d in issues.values() if str(d.get("status_at_export", "")).lower() in OPEN]
         if issues:
             pts = sum(float(d.get("story_points") or 0) for d in op)

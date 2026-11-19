@@ -1,94 +1,166 @@
-"""Local load and concurrency probe against a RUNNING Veloxa API, normally the synthetic demo (scripts/demo_env.py).
+"""Staged load test against the SYNTHETIC Orbitra lab only (Phase 6). Reports measured numbers, nothing estimated.
 
-LOCAL MEASUREMENT ONLY. It is not a capacity claim or an SLA: one laptop, one process, one synthetic tenant.
-It never targets anything but the loopback address it is given.
+    python scripts/load_test.py --port 8790 --stages 10/25/50/100 --seconds 45 --db veloxa_synthco_v3 --out r.json
 
-    python scripts/load_test.py --base http://127.0.0.1:8765 --clients 8 --requests 40
-
-**Phases:**
-1. **read:** concurrent GETs of /health, /v1/today, /v1/conflicts, /v1/timeline, /v1/dependencies.
-2. **ask:** concurrent POST /v1/ask (an expensive path; deterministic composition, since no model is configured).
-3. **burst:** one client sends `--burst` rapid asks. With the gateway's expensive bucket, every request beyond the
-   limit must be 429 with Retry-After, never a 5xx.
-
-Prints JSON: per-phase count, status histogram, p50, p95 and max latency in ms, and throughput.
+Each virtual user loops over a realistic mix: Ask questions (60%), a turn in its own agent interview (25%) and page
+reads (overview, worry, people; 15%). Measures per stage: requests, throughput, P50/P95/P99 latency, errors by
+type, server CPU% and working set (Windows performance counters for the server PID), PostgreSQL connections to
+the lab database, and DBOS workflow state when its tables exist. Refuses to run unless the workspace is `orbitra`.
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
+import os
+import random
 import statistics
-import sys
+import subprocess
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import urlsplit
+import uuid
+from collections import Counter
+from pathlib import Path
 
-import httpx
-
-DEMO_TOKEN = "synthetic-demo-fixture-token-0123456789abcdef"  # noqa: S105 - the documented local demo fixture
-READS = ["/health", "/v1/today", "/v1/conflicts", "/v1/timeline", "/v1/dependencies"]
-
-
-def _one(client: httpx.Client, method: str, path: str, body=None, token: str = DEMO_TOKEN):
-    t = time.perf_counter()
-    r = client.request(method, path, json=body, headers={"Authorization": f"Bearer {token}"})
-    return r.status_code, (time.perf_counter() - t) * 1000, r.headers.get("retry-after")
+ASK = ["What is our headcount?", "When is Orbit Core 3.0 due?", "Which issues are blocked?", "What is the ARR?",
+       "Who is the CEO?", "Why was Orbit Core 3.0 delayed?", "What is the runway?", "What should I worry about?",
+       "What is our headcount by department?", "When did Pulse 1.5 ship?", "What is the ledger spend?",
+       "Who is likely to resign next, and when is Orbit Core 3.0 due?", "Tell me about the flamingo budget."]
+AGENT = ["Hi", "Any updates?", "Tell me more", "What's blocking the work?", "Show evidence", "What is your role?"]
+AGENTS = ["syn-eng-core", "syn-eng-pulse", "syn-fin-revenue", "syn-ppl-headcount", "syn-mkt-campaigns"]
+PAGES = ["/v1/overview", "/v1/worry", "/v1/people", "/v1/me"]
 
 
-def _summary(name: str, results: list, seconds: float) -> dict:
-    ms = sorted(r[1] for r in results)
-    hist: dict[str, int] = {}
-    for r in results:
-        hist[str(r[0])] = hist.get(str(r[0]), 0) + 1
-    return {"phase": name, "requests": len(results), "status": hist,
-            "p50_ms": round(statistics.median(ms), 1) if ms else None,
-            "p95_ms": round(ms[min(len(ms) - 1, int(len(ms) * 0.95))], 1) if ms else None,
-            "max_ms": round(ms[-1], 1) if ms else None, "seconds": round(seconds, 2),
-            "per_second": round(len(results) / seconds, 1) if seconds else None}
+def pct(xs, p):
+    if not xs:
+        return None
+    xs = sorted(xs)
+    return round(xs[min(len(xs) - 1, int(round(p / 100 * (len(xs) - 1))))], 3)
 
 
-def run(base: str, clients: int, per_client: int, burst: int) -> list[dict]:
-    if urlsplit(base).hostname not in ("127.0.0.1", "localhost", "::1"):
-        raise SystemExit("load_test targets loopback only")
-    out = []
-    with httpx.Client(base_url=base, timeout=60) as c:
-        c.get("/health").raise_for_status()
+class Sampler(threading.Thread):
+    """Server CPU% / working set (typeperf-free: PowerShell Get-Process deltas) and DB connections every 2 s."""
 
-        def reads(i):
-            return [_one(c, "GET", READS[(i + j) % len(READS)]) for j in range(per_client)]
+    def __init__(self, pid: int, admin_dsn: str, db: str):
+        super().__init__(daemon=True)
+        self.pid, self.admin, self.db, self.stop, self.samples = pid, admin_dsn, db, threading.Event(), []
 
-        def asks(i):
-            return [_one(c, "POST", "/v1/ask", {"question": "What are the open conflicts?"},
-                         token=DEMO_TOKEN) for _ in range(max(1, per_client // 4))]
+    def _proc(self):
+        out = subprocess.run(["powershell", "-NoProfile", "-Command",  # noqa: S603, S607 (fixed local command)
+                              f"$p=Get-Process -Id {self.pid}; '{{0}} {{1}}' -f $p.TotalProcessorTime.TotalSeconds,"
+                              " $p.WorkingSet64"], capture_output=True, text=True, timeout=10).stdout.split()
+        return float(out[0]), int(out[1])
 
-        for name, fn in (("read", reads), ("ask", asks)):
-            t = time.perf_counter()
-            with ThreadPoolExecutor(clients) as pool:
-                res = [r for chunk in pool.map(fn, range(clients)) for r in chunk]
-            out.append(_summary(name, res, time.perf_counter() - t))
-        if burst:
-            t = time.perf_counter()
-            with ThreadPoolExecutor(min(burst, 16)) as pool:
-                res = list(pool.map(lambda _: _one(c, "POST", "/v1/ask", {"question": "What changed?"}), range(burst)))
-            s = _summary("burst", res, time.perf_counter() - t)
-            s["limited_with_retry_after"] = sum(1 for r in res if r[0] == 429 and r[2])
-            s["server_errors"] = sum(1 for r in res if r[0] >= 500)
-            out.append(s)
-    return out
+    def run(self):
+        import psycopg
+
+        conn = psycopg.connect(self.admin, autocommit=True)
+        last_cpu, last_t = self._proc()[0], time.monotonic()
+        cores = os.cpu_count() or 1
+        while not self.stop.wait(2.0):
+            try:
+                cpu, ws = self._proc()
+                now = time.monotonic()
+                n = conn.execute("SELECT count(*) FROM pg_stat_activity WHERE datname = %s", (self.db,)).fetchone()[0]
+                self.samples.append({"cpu_pct_of_machine": round((cpu - last_cpu) / (now - last_t) / cores * 100, 1),
+                                     "working_set_mb": round(ws / 2**20, 1), "db_connections": n})
+                last_cpu, last_t = cpu, now
+            except Exception:  # noqa: BLE001, S112 - a missed sample is not a test failure
+                continue
+        conn.close()
+
+
+async def user(client, uid: int, until: float, lat: list, errs: Counter, kinds: Counter):
+    rnd = random.Random(uid)  # noqa: S311 (workload mix, not security)
+    session = None
+    while time.monotonic() < until:
+        r = rnd.random()
+        t0 = time.perf_counter()
+        try:
+            if r < 0.60:
+                kind = "ask"
+                resp = await client.post("/v1/ask", json={"question": rnd.choice(ASK)})
+            elif r < 0.85:
+                kind = "agent"
+                if session is None:
+                    s = await client.post(f"/v1/agents/{rnd.choice(AGENTS)}/sessions", json={})
+                    session = s.json()["session_id"]
+                resp = await client.post(f"/v1/sessions/{session}/messages",
+                                         json={"message": rnd.choice(AGENT), "idempotency_key": str(uuid.uuid4())})
+            else:
+                kind = "page"
+                resp = await client.get(rnd.choice(PAGES))
+            dt = time.perf_counter() - t0
+            kinds[kind] += 1
+            if resp.status_code >= 400:
+                errs[f"HTTP {resp.status_code}"] += 1
+            else:
+                lat.append((kind, dt))
+        except Exception as e:  # noqa: BLE001 - count every failure by type
+            errs[type(e).__name__] += 1
+
+
+async def stage(base, token, n, seconds):
+    import httpx
+
+    lat, errs, kinds = [], Counter(), Counter()
+    limits = httpx.Limits(max_connections=n + 10, max_keepalive_connections=n + 10)
+    headers = {"Authorization": f"Bearer {token}", "X-Veloxa-Request": "1"}
+    async with httpx.AsyncClient(base_url=base, headers=headers, timeout=120, limits=limits) as client:
+        until = time.monotonic() + seconds
+        t0 = time.monotonic()
+        await asyncio.gather(*(user(client, i, until, lat, errs, kinds) for i in range(n)))
+        wall = time.monotonic() - t0
+    all_ = [d for _, d in lat]
+    by = {k: {"n": sum(1 for kk, _ in lat if kk == k), "p50": pct([d for kk, d in lat if kk == k], 50),
+              "p95": pct([d for kk, d in lat if kk == k], 95)} for k in ("ask", "agent", "page")}
+    total = len(all_) + sum(errs.values())
+    return {"users": n, "seconds": round(wall, 1), "requests": total, "ok": len(all_),
+            "throughput_rps": round(len(all_) / wall, 2), "error_rate": round(sum(errs.values()) / max(1, total), 4),
+            "errors": dict(errs), "p50_s": pct(all_, 50), "p95_s": pct(all_, 95), "p99_s": pct(all_, 99),
+            "mean_s": round(statistics.mean(all_), 3) if all_ else None, "by_kind": by}
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="http://127.0.0.1:8765")
-    ap.add_argument("--clients", type=int, default=8)
-    ap.add_argument("--requests", type=int, default=40, help="read requests per client")
-    ap.add_argument("--burst", type=int, default=0, help="rapid asks from one client (rate-limit check)")
+    ap.add_argument("--port", type=int, default=8790)
+    ap.add_argument("--token", default="synthetic-orbitra-lab-fixture-token-0123456789")
+    ap.add_argument("--stages", default="10/25/50/100")
+    ap.add_argument("--seconds", type=int, default=45)
+    ap.add_argument("--db", required=True)
+    ap.add_argument("--pid", type=int, required=True, help="server process id (for CPU/memory)")
+    ap.add_argument("--label", default="")
+    ap.add_argument("--out", type=Path)
     args = ap.parse_args()
-    results = run(args.base, args.clients, args.requests, args.burst)
-    print(json.dumps(results, indent=1))
-    return 1 if any(r.get("server_errors") or any(k.startswith("5") for k in r["status"]) for r in results) else 0
+    import httpx
+
+    base = f"http://127.0.0.1:{args.port}"
+    me = httpx.get(base + "/v1/me", headers={"Authorization": f"Bearer {args.token}"}, timeout=30).json()
+    if me.get("tenant", {}).get("slug") != "orbitra" or not me["tenant"].get("synthetic"):
+        print("refused: synthetic Orbitra workspace only")
+        return 2
+    admin = os.environ["VELOXA_TEST_ADMIN_DSN"]
+    results = []
+    for n in [int(x) for x in args.stages.split("/")]:
+        sampler = Sampler(args.pid, admin, args.db)
+        sampler.start()
+        r = asyncio.run(stage(base, args.token, n, args.seconds))
+        sampler.stop.set()
+        sampler.join(5)
+        ss = sampler.samples
+        r["server"] = {"cpu_pct_peak": max((s["cpu_pct_of_machine"] for s in ss), default=None),
+                       "cpu_pct_mean": round(statistics.mean(s["cpu_pct_of_machine"] for s in ss), 1) if ss else None,
+                       "working_set_mb_peak": max((s["working_set_mb"] for s in ss), default=None),
+                       "db_connections_peak": max((s["db_connections"] for s in ss), default=None)}
+        results.append(r)
+        print(json.dumps({k: r[k] for k in ("users", "requests", "throughput_rps", "error_rate", "errors", "p50_s",
+                                            "p95_s", "p99_s", "server")}), flush=True)
+        time.sleep(5)
+    if args.out:
+        args.out.write_text(json.dumps({"label": args.label, "stages": results}, indent=1), encoding="utf-8")
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

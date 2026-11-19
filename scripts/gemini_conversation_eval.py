@@ -58,6 +58,7 @@ def main() -> int:
     ap.add_argument("--pause", type=float, default=4.5, help="seconds between calls (free-tier rate limit)")
     ap.add_argument("--compose", type=int, default=20)
     ap.add_argument("--out", type=Path)
+    ap.add_argument("--limit", type=int, default=0, help="first N understanding items only (smoke test)")
     args = ap.parse_args()
     H = {"Authorization": f"Bearer {args.token}", "Content-Type": "application/json", "X-Veloxa-Request": "1"}
 
@@ -77,7 +78,9 @@ def main() -> int:
     from veloxa.agents import conversation as conv
 
     load_key(args.env_file)
-    client = genai.Client()
+    from google.genai import types
+
+    client = genai.Client(http_options=types.HttpOptions(timeout=20_000))       # 20 s per call, never hang
     facts = orbitra.generate(Path(tempfile.mkdtemp(prefix="orbitra-facts-")))["facts"]
     items = []
     for c in conversations.cases(facts):
@@ -86,6 +89,8 @@ def main() -> int:
         else:
             items += [(t["q"], TURN_LABEL[t["q"]]) for t in c["turns"] if t["q"] in TURN_LABEL]
     items = list(dict.fromkeys(items))
+    if args.limit:
+        items = items[: args.limit]
 
     def gemini(prompt: str) -> tuple[str | None, float, str | None]:
         t0 = time.perf_counter()
@@ -104,6 +109,7 @@ def main() -> int:
                                f"Message: {q}")
         got = (text or "").lower().strip().strip(".")
         det = DET.get(conv.intent(q))
+        print(f"nlu {len(nlu) + 1}/{len(items)} {'error ' + err if err else 'ok'} {dt:.1f}s", flush=True)
         nlu.append({"q": q, "want": want, "gemini": got, "gemini_ok": got == want, "latency": dt, "error": err,
                     "deterministic": det, "det_ok": det == want if det else None})
     comp = []
