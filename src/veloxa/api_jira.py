@@ -226,6 +226,29 @@ def register(app, *, state, principal_of, now_fn, jira_factory=None) -> None:
                 k: (str(v) if k == "submission_id" else v) for k, v in out.items() if k != "error"}})
             return {k: (str(v) if k == "submission_id" else v) for k, v in out.items()}
 
+    @app.get("/v1/integrations/jira/migration-preview")
+    def migration_preview(authorization: str | None = Header(default=None)):
+        """What admitted company records would become in Jira: projects, candidate tasks, duplicates, missing owners
+        and deadlines, excluded sensitive records, proposed destinations. READ-ONLY: nothing is written."""
+        from datetime import UTC, datetime
+
+        from . import ledger, migration
+        from .temporal import Mode, resolve_basis
+
+        with connect(state["dsn"]) as conn:
+            p = admin(conn, authorization, USE)
+            if isinstance(p, JSONResponse):
+                return p
+            tz = conn.execute("SELECT time_zone FROM directory.tenant WHERE tenant_id = %s",
+                              (p.tenant_id,)).fetchone()["time_zone"]
+            basis = resolve_basis(p.tenant_id, ledger.sealed_releases(conn, p.tenant_id), Mode.CURRENT, None, tz,
+                                  datetime.now(UTC))
+            j = jira()
+            live = j if (j is not None and j.status(str(p.tenant_id)).get("connected")) else None
+            out = migration.preview(conn, basis, tz, live, str(p.tenant_id))
+            record(conn, p.tenant_id, p.principal_id, "jira.migration_previewed", out["summary"])
+            return out
+
     @app.get("/v1/integrations/jira/overdue")
     def overdue(project: str | None = None, authorization: str | None = Header(default=None)):
         return run(authorization, lambda j, t, pr: {"issues": j.overdue(t, project)}, "jira.read",

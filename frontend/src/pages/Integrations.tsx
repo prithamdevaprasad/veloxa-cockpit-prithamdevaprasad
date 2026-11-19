@@ -88,7 +88,7 @@ function JiraBody({ s, busy, connect, act }: { s: JiraStatus; busy: boolean; con
           {(s.sites ?? []).map((x) => <Button key={x.id} disabled={busy}
             onClick={() => act(() => request("POST", `${J}/site`, { cloud_id: x.id }))}>{x.name} ({x.url})</Button>)}
         </div>)}
-      {s.connected && !s.expired && !s.needs_site_choice && <><JiraSearch /><JiraWrite /></>}
+      {s.connected && !s.expired && !s.needs_site_choice && <><JiraSearch /><JiraWrite /><MigrationPreview /></>}
     </div>
   );
 }
@@ -197,6 +197,53 @@ function JiraWrite() {
         </div>)}
       {done && <p className="callout ok small">Written: {done.url ? <a href={done.url} target="_blank" rel="noreferrer">{done.key}</a>
         : done.key}.</p>}
+    </div>
+  );
+}
+
+interface Migration {
+  summary: Record<string, number>; live_duplicate_check: boolean; not_migrated: string;
+  projects: { name: string; due: string | null; epics: { key: string; issues: number }[]; proposed: string }[];
+  candidates: { summary: string; type: string; context: string; department: string | null; due: string | null;
+    evidence: string[]; duplicates: { where: string; key: string; url?: string }[]; missing: string[];
+    proposed_destination: { testing: string; production: string } }[];
+  excluded: { source: string; reason: string; records: number | null }[];
+}
+
+/** What company records would become in Jira. Read-only: nothing is written from this view. */
+function MigrationPreview() {
+  const [m, setM] = useState<Migration | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function load() {
+    setBusy(true); setError(null);
+    try { setM(await get<Migration>(`${J}/migration-preview`)); } catch (e) { setError(err(e)); } finally { setBusy(false); }
+  }
+  return (
+    <div className="stack">
+      <h3>Migration preview: company records to Jira</h3>
+      <p className="small muted">Proposes projects and actionable work only (never documents, employees, metrics or
+        history). Read-only: nothing is written; each write later needs your approval and confirmation.</p>
+      <div><Button onClick={load} disabled={busy}>{busy ? "Preparing…" : m ? "Refresh preview" : "Prepare preview"}</Button></div>
+      {error && <ErrorState error={error} />}
+      {m && <div className="stack small">
+        <p>{m.summary.projects} project(s), {m.summary.candidates} candidate task(s), {m.summary.duplicates} with a
+          duplicate, {m.summary.missing_owner} without an owner, {m.summary.missing_deadline} without a recorded deadline,
+          {" "}{m.summary.excluded_sensitive} sensitive record group(s) excluded.
+          {m.live_duplicate_check ? " Duplicates were also checked in the connected Jira site." : ""}</p>
+        {m.projects.map((p) => <div key={p.name} className="callout info"><strong>{p.name}</strong>{p.due ? `, due ${p.due}` : ""}.
+          {" "}{p.proposed} {p.epics.length > 0 && <>Epics: {p.epics.map((e) => `${e.key} (${e.issues})`).join(", ")}.</>}</div>)}
+        <div className="table-wrap"><table className="crit-table">
+          <thead><tr><th>Candidate task</th><th>Owner</th><th>Deadline</th><th>Evidence</th><th>Duplicates</th><th>Destination</th></tr></thead>
+          <tbody>{m.candidates.map((c) => (
+            <tr key={c.summary}><td>{c.summary}<div className="muted">{c.context}</div></td>
+              <td>{c.department ?? "missing"}</td><td>{c.due ?? "not recorded"}</td><td>{c.evidence.length} record(s)</td>
+              <td>{c.duplicates.length ? c.duplicates.map((d) => `${d.key} (${d.where})`).join("; ") : "none found"}</td>
+              <td>Testing: {c.proposed_destination.testing}<br />Production: {c.proposed_destination.production}</td></tr>))}
+          </tbody></table></div>
+        <strong>Excluded</strong>
+        <ul className="bullets">{m.excluded.map((e) => <li key={e.source}>{e.source.replace(/_/g, " ")}: {e.reason}</li>)}</ul>
+      </div>}
     </div>
   );
 }
