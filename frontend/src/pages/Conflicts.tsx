@@ -58,7 +58,7 @@ export function ConflictsPage() {
               <p className="small muted">{s.source}{s.period ? ` · period ${s.period}` : ""}</p>
               <dl className="small" style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "2px 12px", marginTop: 8 }}>
                 <dt className="muted">Source</dt><dd className="mono" style={{ margin: 0, wordBreak: "break-all" }}>{s.provenance?.source_path ?? s.record_id}</dd>
-                <dt className="muted">Batch K</dt><dd style={{ margin: 0 }}>{s.provenance?.batch_seq ?? "–"} (version {s.provenance?.version ?? "–"})</dd>
+                <dt className="muted">Delivery</dt><dd style={{ margin: 0 }}>{s.provenance?.batch_seq ?? "–"} (version {s.provenance?.version ?? "–"})</dd>
                 <dt className="muted">Recorded</dt><dd style={{ margin: 0 }}>{s.time?.recorded_day ?? "not stated"} ({s.time?.recorded_basis ?? "–"})</dd>
                 <dt className="muted">Valid</dt><dd style={{ margin: 0 }}>{s.time?.valid_from ? `${s.time.valid_from} → ${s.time.valid_to ?? "open"}` : "not stated"}</dd>
                 <dt className="muted">Extracted</dt><dd style={{ margin: 0 }}>{s.time?.extracted_at ?? "–"}</dd>

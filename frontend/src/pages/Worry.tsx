@@ -40,9 +40,11 @@ const who = (p: string) => p.startsWith("queue:") ? `${cap(p.slice(6))} queue` :
 
 /** Severity interval on a 0–1 track (an ordering of exposure, not a probability). */
 function Range({ low, high }: { low: number; high: number }) {
-  return <span className="range" role="img" aria-label={`Exposure range ${low.toFixed(2)} to ${high.toFixed(2)}`}>
+  return <span className="range" role="img" aria-label={`Possible impact: ${level(low)} to ${level(high)}`}>
     <span className="range-bar" style={{ left: `${low * 100}%`, width: `${Math.max(2, (high - low) * 100)}%` }} /></span>;
 }
+
+const level = (v: number) => (v >= 0.5 ? "high" : v >= 0.25 ? "medium" : "low");
 
 function reasonOf(x: { severity?: WorryItem["severity"]; unknowns: string[] }) {
   const m = x.severity ? Object.values(x.severity.criteria).find((c) => c.status === "measured") : undefined;
@@ -50,15 +52,16 @@ function reasonOf(x: { severity?: WorryItem["severity"]; unknowns: string[] }) {
   return m ? cap(m.reason) + "." : u ? cap(u) : "The records show this but do not yet measure its impact.";
 }
 
-function ConcernRow({ c, finding, active, onSelect }: { c: Concern; finding?: Finding; active: boolean;
-  onSelect: () => void }) {
+function ConcernRow({ c, finding, active, onSelect, pos }: { c: Concern; finding?: Finding; active: boolean;
+  onSelect: () => void; pos?: number }) {
   const st = finding ? STATE_LABEL[finding.state] ?? finding.state : "No finding yet";
   return (
     <li>
       <button className={`ws-row${active ? " active" : ""}`} onClick={onSelect} aria-current={active ? "true" : undefined}>
         {c.kind === "ranked"
-          ? <span className={`ws-rank r${Math.min(c.x.rank, 3)}`} title={c.size > 1 ? "Shared position: the exposure ranges overlap" : undefined}>
-              #{c.x.rank}{c.size > 1 && <small>shared</small>}</span>
+          ? <span className={`ws-rank r${Math.min(pos ?? c.x.rank, 3)}`}
+                  title={c.size > 1 ? "Close call: the evidence puts these concerns near each other" : undefined}>
+              #{pos ?? c.x.rank}{c.size > 1 && <small>close call</small>}</span>
           : <span className="ws-rank none" title="Not enough evidence to assess">–</span>}
         <span className="ws-main">
           <strong>{c.x.title}</strong>
@@ -67,7 +70,8 @@ function ConcernRow({ c, finding, active, onSelect }: { c: Concern; finding?: Fi
         </span>
         <span className="ws-meta">
           {c.kind === "ranked" && <><Range low={c.x.severity.low} high={c.x.severity.high} />
-            <span className="small muted tnum">{c.x.severity.low.toFixed(2)}–{c.x.severity.high.toFixed(2)}</span></>}
+            <span className="small muted">Impact {level(c.x.severity.low) === level(c.x.severity.high)
+              ? level(c.x.severity.high) : `${level(c.x.severity.low)} to ${level(c.x.severity.high)}`}</span></>}
           {c.kind === "ranked" && <span className={`pill conf-${c.x.confidence}`}>{c.x.confidence === "conflicting" ? "Sources conflict" : `${cap(c.x.confidence)} confidence`}</span>}
           <span className={`pill st-${finding?.state ?? "none"}`}>{st}</span>
         </span>
@@ -79,26 +83,22 @@ function Assessment({ x, size }: { x: WorryItem; size: number }) {
   const s = x.severity;
   return (
     <details className="small assess">
-      <summary>D-15 calculation</summary>
-      <p>Approved D-15 method: four criteria with recorded weights. Position {x.rank}
-        {size > 1 ? `, shared with ${size - 1} other concern${size > 2 ? "s" : ""}: the exposure ranges overlap, so the evidence cannot order them` : ""}.
-        Exposure {s.low.toFixed(2)} to {s.high.toFixed(2)} on a 0 to 1 scale (an ordering, not a probability).
-        {` ${pct(s.measured_weight)} of the weight is measured or not applicable.`}
-        {x.sensitive ? " Its position changes if the weights move by 5 points." : ""}</p>
+      <summary>How this was scored</summary>
+      <p>Each concern is scored on four areas: delivery, money, keeping services running, and accuracy of reported
+        figures. Where the records don't say, the score allows for the full range rather than assuming zero.
+        {size > 1 ? " This is a close call: the evidence puts it near the other top concerns, so treat them together." : ""}
+        {x.sensitive ? " Its place could change with small changes in how the areas are weighted." : ""}</p>
       <div className="table-wrap"><table className="crit-table">
-        <thead><tr><th>Criterion</th><th>State</th><th>Measure</th><th>Value</th><th>Weight</th><th>Contribution</th><th>Why</th></tr></thead>
+        <thead><tr><th>Area</th><th>What the records show</th><th>Importance</th><th>Detail</th></tr></thead>
         <tbody>{Object.entries(s.criteria).map(([c, v]) => (
           <tr key={c}>
-            <td>{c} {CRIT[c]}</td>
-            <td>{v.reason === NO_MEASURE ? "not declared" : v.status.replace(/_/g, " ")}</td>
-            <td className="mono small">{v.measure ?? "—"}</td>
-            <td>{v.status === "measured" ? `${v.low}${v.high !== v.low ? `–${v.high}` : ""}` : v.status === "not_applicable" ? "n/a" : "unknown"}</td>
+            <td>{CRIT[c] ?? c}</td>
+            <td>{v.status === "measured" ? "Measured" : v.status === "not_applicable" ? "Doesn't apply" : "Not known yet"}</td>
             <td>{pct(v.weight)}</td>
-            <td>{v.contribution_low.toFixed(2)}–{v.contribution_high.toFixed(2)}</td>
-            <td className="small muted">{v.reason}</td>
+            <td className="small muted">{v.reason === NO_MEASURE ? "No record measures this" : cap(v.reason)}</td>
           </tr>))}</tbody>
       </table></div>
-      <p className="muted">Unknown criteria count as their whole range (0 to their weight), never as zero.</p>
+
     </details>);
 }
 
@@ -242,7 +242,8 @@ function Investigation({ f, reload }: { f: Finding; reload: () => void }) {
     </section>);
 }
 
-function Detail({ c, finding, actions, reload }: { c: Concern; finding?: Finding; actions: FollowUp[]; reload: () => void }) {
+function Detail({ c, finding, actions, reload, pos }: { c: Concern; finding?: Finding; actions: FollowUp[];
+  reload: () => void; pos?: number }) {
   const [explain, setExplain] = useState(false);
   const evidence = useEvidence();
   const ask = useAsk();
@@ -257,7 +258,7 @@ function Detail({ c, finding, actions, reload }: { c: Concern; finding?: Finding
   return (
     <article className="ws-detail card" aria-label="Concern details" id={`worry-${x.item_id}`}>
       <header>
-        <div className="small muted">{c.kind === "ranked" ? `${groupLabel(c.x.rank).replace(" group", "")} · D-15 position ${c.x.rank}${c.size > 1 ? " (shared)" : ""}`
+        <div className="small muted">{c.kind === "ranked" ? `Priority #${pos ?? c.x.rank}${c.size > 1 ? " (close call)" : ""}`
           : "Not enough evidence to assess"}{x.department ? ` · ${x.department}` : ""}{x.project ? ` · ${x.project}` : ""}</div>
         <h2>{x.title}</h2>
         <div className="row" style={{ gap: 8 }}>
@@ -279,7 +280,7 @@ function Detail({ c, finding, actions, reload }: { c: Concern; finding?: Finding
       </> : <section className="ws-block"><h3>Why it can't be assessed yet</h3>
         <p className="small">{c.x.reasons.map(cap).join(". ")}.</p>
         <p className="small muted">The records show this concern exists, but not enough of its impact is measured to place it
-          with D-15. That is not the same as unimportant, low priority, zero risk, or hidden from you.</p></section>}
+          yet. That is not the same as unimportant, low priority, zero risk, or hidden from you.</p></section>}
       {unknown.length > 0 && <section className="ws-block"><h3>{c.kind === "ranked" ? "What remains unknown" : "Missing evidence"}</h3>
         <ul className="bullets small">{unknown.map((u) => <li key={u}>{cap(u)}</li>)}</ul></section>}
       <FollowUps c={c} finding={finding} actions={actions} reload={reload} />
@@ -327,8 +328,8 @@ export function WorryPage() {
   return (
     <div className="ws">
       <div className="worry-hero">
-        <PageHead title="What should I worry about?" intro="Concerns from your company records, ranked with the approved
-          D-15 method, with what to do about each one." />
+        <PageHead title="What should I worry about?" intro="The concerns in your company records, in priority order, with what
+          to do about each one." />
         {ready && <div className="basis-card small"><Icon name="timeline" size={18} /><span>{ready.read_basis.banner}</span></div>}
       </div>
       {ready && <section className="ws-summary" aria-label="In short">
@@ -342,20 +343,20 @@ export function WorryPage() {
         <div className="ws-list">
           <section className="card" aria-label="Ranked worries">
             <div className="ws-list-head"><h2>Ranked concerns{ranked.length ? ` (${ranked.length})` : ""}</h2>
-              {ranked.length > 0 && <span className="small muted">{tied ? `${tied} share a position` : "All distinct"}{conflicting ? ` · ${conflicting} with conflicting sources` : ""}</span>}</div>
+              {ranked.length > 0 && <span className="small muted">{tied ? `${tied} close calls` : "Clear order"}{conflicting ? ` · ${conflicting} with conflicting sources` : ""}</span>}</div>
             {w.state === "loading" && <Loading lines={5} />}
             {w.state === "error" && <ErrorState error={w.error} onRetry={reload} />}
             {ready && (ready.ranking_mode === "pending" ? <Guidance title="Not ranked yet">{ready.note}</Guidance>
               : ranked.length === 0 ? <Guidance title="Nothing to rank">No item meets the evidence gate.</Guidance>
-              : <ul className="plain ws-rows">{concerns.filter((c) => c.kind === "ranked").map((c) => (
-                  <ConcernRow key={idOf(c)} c={c} finding={findingOf(idOf(c))} active={current === c} onSelect={() => setSel(idOf(c))} />))}</ul>)}
-            {tied > 1 && <p className="small muted ws-note">A shared position means the exposure ranges overlap, so the evidence
-              can't say which comes first. D-15 records no tie-break, so none is invented.</p>}
+              : <ul className="plain ws-rows">{concerns.filter((c) => c.kind === "ranked").map((c, i) => (
+                  <ConcernRow key={idOf(c)} c={c} pos={i + 1} finding={findingOf(idOf(c))} active={current === c} onSelect={() => setSel(idOf(c))} />))}</ul>)}
+            {tied > 1 && <p className="small muted ws-note">Close calls are ordered by their worst possible impact. The records
+              can't fully separate them yet, so look at them together.</p>}
           </section>
           <section className="card" aria-label="Unrankable">
             <div className="ws-list-head"><h2>Needs more evidence{unrankable.length ? ` (${unrankable.length})` : ""}</h2></div>
-            <p className="small muted ws-note">The evidence shows these concerns exist but doesn't measure enough of their impact for a
-              D-15 assessment. That doesn't mean they're unimportant, low priority, zero risk, or hidden from you.</p>
+            <p className="small muted ws-note">The evidence shows these concerns exist but doesn't measure enough of their impact to
+              place them in order. That doesn't mean they're unimportant, low priority, zero risk, or hidden from you.</p>
             {ready && (unrankable.length + (ready.unranked?.length ?? 0) === 0 ? <p className="small muted">None.</p>
               : <ul className="plain ws-rows">{concerns.filter((c) => c.kind === "unassessed").map((c) => (
                   <ConcernRow key={idOf(c)} c={c} finding={findingOf(idOf(c))} active={current === c} onSelect={() => setSel(idOf(c))} />))}
@@ -366,7 +367,7 @@ export function WorryPage() {
           <Activity findings={findings} actions={actions} />
         </div>
         <div className="ws-side">
-          {current ? <Detail c={current} finding={findingOf(idOf(current))}
+          {current ? <Detail pos={current && current.kind === "ranked" ? concerns.filter((k) => k.kind === "ranked").indexOf(current) + 1 : undefined} c={current} finding={findingOf(idOf(current))}
                              actions={actions.filter((a) => a.item_id === idOf(current))} reload={refresh} />
             : ready && <section className="card"><Guidance title="Nothing to show">No concerns in the records you can read.</Guidance></section>}
           {f.state === "error" && <ErrorState error={f.error} onRetry={reloadF} />}

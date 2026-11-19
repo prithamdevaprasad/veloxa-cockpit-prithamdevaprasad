@@ -50,6 +50,7 @@ function MapView({ data }: { data: MapOut }) {
   const wrap = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
+  const [askOpen, setAskOpen] = useState(false);
   const [hidden, setHidden] = useState<Set<string>>(new Set(["record"].filter(() => data.nodes.length > 260)));
   const [query, setQuery] = useState("");
   const [question, setQuestion] = useState("");
@@ -251,6 +252,10 @@ function MapView({ data }: { data: MapOut }) {
         {data.hidden_for_access > 0 && <span className="muted small">{data.hidden_for_access} hidden (no access)</span>}
       </div>
 
+      {!sel && !askOpen ? (
+        <button className="map-ask-toggle" onClick={() => setAskOpen(true)} aria-expanded={false}>
+          Ask about the map</button>
+      ) : (
       <aside className="map-float" aria-label="Map details">
         {sel ? (
           <div className="map-node">
@@ -294,7 +299,10 @@ function MapView({ data }: { data: MapOut }) {
           </div>
         ) : (
           <div className="map-node">
-            <h2>Ask about the map</h2>
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <h2>Ask about the map</h2>
+              <button className="icon-btn" aria-label="Close" onClick={() => setAskOpen(false)}>×</button>
+            </div>
             <p className="small muted">Click a dot to see its links, drag to move, scroll to zoom. Red lines are figures
               the sources disagree on. Only links the records state are drawn.</p>
             <div className="follow-ups">{QUICK.map((q) => <button key={q} className="chip" onClick={() => askAbout(q)}>{q}</button>)}</div>
@@ -305,7 +313,7 @@ function MapView({ data }: { data: MapOut }) {
                  placeholder={sel ? `Ask about “${sel.label.slice(0, 30)}”` : "e.g. who is blocking Atlas GA?"} />
           <Button variant="primary" type="submit" disabled={!question.trim()}>Ask</Button>
         </form>
-      </aside>
+      </aside>)}
 
       <div className="map-searchbar">
         {matches.length > 0 && <ul className="plain map-results">{matches.map((n) => (

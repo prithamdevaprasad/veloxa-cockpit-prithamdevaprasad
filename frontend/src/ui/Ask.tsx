@@ -14,9 +14,11 @@ import { Button, ErrorState, Loading } from "./index";
 export type AskContext = { kind: string; subject: string };
 type AskCtx = { openThread: (threadId: string, draft?: string) => void;
                 ask: (question: string, context?: AskContext, send?: boolean) => void; open: () => void;
-                task: (draft?: TaskDraft) => void; full: boolean };
+                task: (draft?: TaskDraft) => void; full: boolean;
+                /** Ask in the CURRENT conversation (suggested follow-ups keep their context). */
+                followUp: (question: string) => void };
 const Ctx = createContext<AskCtx>({ openThread: () => undefined, ask: () => undefined, open: () => undefined,
-                                   task: () => undefined, full: false });
+                                   task: () => undefined, full: false, followUp: () => undefined });
 export const useAsk = () => useContext(Ctx);
 
 const isAskRoute = () => /^#\/?ask$/.test(window.location.hash);
@@ -77,6 +79,7 @@ export function AskProvider({ children }: { children: ReactNode }) {
       if (q && send) setSendTick((t) => t + 1);
     },
     task: (d) => { setTaskDraft(d ?? {}); setOpen(true); },
+    followUp: (q) => { setDraft(q); setOpen(true); setSendTick((t) => t + 1); },
     open: () => { setOpen(true); setFocusTick((t) => t + 1); },
     full,
   }), [full]);

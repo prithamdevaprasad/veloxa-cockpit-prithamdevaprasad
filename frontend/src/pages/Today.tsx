@@ -28,14 +28,13 @@ export function TodayPage({ onAsk }: { onAsk: (q: string) => void }) {
           <div className="v">{conflicts.state === "ready" ? conflicts.data.conflicts.length : "–"}</div>
         </div>
         <div className="stat">
-          <div className="k">Employee agents active</div>
+          <div className="k">AI assistants available</div>
           <div className="v">{agents.state === "ready" ? agents.data.agents.filter((a) => a.activation === "active").length : "–"}
-            <span className="s"> of {agents.state === "ready" ? agents.data.agents.filter((a) => a.agent_id.startsWith("agent-")).length : "–"} slots</span></div>
+            <span className="s"> of {agents.state === "ready" ? agents.data.agents.filter((a) => a.agent_id.startsWith("agent-")).length : "–"}</span></div>
         </div>
         <div className="stat">
           <div className="k">Ranking</div>
           <div className="v" style={{ fontSize: 15 }}>{today.state === "ready" ? (today.data.top_three === null ? "Unranked" : "Ranked") : "–"}</div>
-          <div className="s">{today.state === "ready" ? `D-15: ${today.data.owner_decision_status.replace(/_/g, " ")}` : ""}</div>
         </div>
       </div>
 

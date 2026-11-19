@@ -150,11 +150,9 @@ export function AnswerView({ answer }: { answer: Answer }) {
         <Badge value={answer.status} label={st.label} />
         {answer.confidence && (
           <span className={`conf conf-${answer.confidence.level}`} title={`${answer.confidence.reason}. `
-            + "Deterministic: based on source authority, corroboration and conflicts; not a probability."}>
+            + "Based on how reliable the sources are, whether they agree, and whether any disagree."}>
             Confidence: {answer.confidence.label}</span>)}
         {partial && <Badge value="open" label="Partial" title="Some matching information is not shown" />}
-        <Badge value={answer.grade.value} label={`Grade ${answer.grade.value}`}
-               title={`${answer.grade.label}: ${answer.grade.reasons.join("; ")}`} />
       </div>
 
       <div className={`brief-lead ${leadTone}`}><RichText text={lead} /></div>
@@ -275,7 +273,7 @@ export function AnswerView({ answer }: { answer: Answer }) {
       <footer className="brief-foot">
         {answer.evidence.length > 0 && (
           <button className="btn" onClick={() => setOpen(true)}>Evidence ({answer.evidence.length})</button>)}
-        <span title={answer.read_basis.banner ?? undefined}>Records up to release {answer.read_basis.batch_seq}</span>
+        <span title={answer.read_basis.banner ?? undefined}>Based on all company records received so far</span>
         <details className="small" style={{ flexBasis: "100%" }}>
           <summary>How Veloxa read the question</summary>
           <p style={{ marginTop: 4 }}>{answer.interpretation}</p>
@@ -427,7 +425,7 @@ function FollowUps({ items }: { items: string[] }) {
   const ask = useAsk();
   return (
     <div className="follow-ups" role="group" aria-label="Suggested follow-ups">
-      {items.map((q) => <button key={q} className="chip" onClick={() => ask.ask(q)}>{q}</button>)}
+      {items.map((q) => <button key={q} className="chip" onClick={() => ask.followUp(q)}>{q}</button>)}
     </div>
   );
 }

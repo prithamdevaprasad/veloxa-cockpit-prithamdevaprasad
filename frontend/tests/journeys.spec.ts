@@ -33,7 +33,7 @@ test("Journey A: Today, evidence packs and a follow-up question", async ({ page 
   await ws.getByRole("button", { name: "Send" }).click();
   const answer = ws.getByRole("article", { name: "Answer" });
   await expect(answer).toContainText("People in the HR export: 2");
-  await expect(answer.getByText(/Grade [AB]/)).toBeVisible();
+  await expect(answer.getByText(/Confidence: (High|Moderate)/)).toBeVisible();
   await answer.getByRole("button", { name: /Evidence \(\d+\)/ }).click();
   const drawer = page.getByRole("dialog", { name: "Evidence" });
   await expect(drawer).toContainText("keka_hrms:");
@@ -297,7 +297,7 @@ test("an answer separates the direct answer, figures, caveats and evidence", asy
   const answer = ws.getByRole("article", { name: "Answer" });
   await expect(answer.locator(".brief-lead")).toBeVisible({ timeout: 15_000 });
   await expect(answer.getByRole("list", { name: "Values" })).toContainText("Testing");   // a breakdown of verified claims
-  await expect(answer.getByText(/Grade [AB]/)).toBeVisible();
+  await expect(answer.getByText(/Confidence: (High|Moderate)/)).toBeVisible();
   await expect(answer.getByText(/contractors are not included/i).first()).toBeVisible();          // the scope caveat is kept
   await answer.getByRole("button", { name: "Show source 1" }).first().click();
   await expect(page.getByRole("dialog", { name: "Employee_Master.xlsx" })).toBeVisible();

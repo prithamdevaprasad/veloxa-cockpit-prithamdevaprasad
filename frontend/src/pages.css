@@ -99,7 +99,9 @@
 .map-legend input { accent-color: #9b82f0; margin: 0; }
 .map-legend .muted { color: #a59fbd; margin-left: auto; padding-left: 10px; font-variant-numeric: tabular-nums; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; }
-.map-float { position: absolute; right: 16px; top: 16px; width: 380px; max-height: calc(100% - 120px);
+.map-ask-toggle { position: absolute; right: 16px; top: 16px; padding: 10px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,.16); background: rgba(23,18,42,.92); color: #ece8fa; font: inherit; font-weight: 600; cursor: pointer; }
+.map-ask-toggle:hover, .map-ask-toggle:focus-visible { background: #2a2147; }
+.map-float { position: absolute; right: 16px; top: 16px; width: 340px; max-height: calc(100% - 120px);
   display: flex; flex-direction: column; background: var(--surface); border-radius: var(--r-panel);
   box-shadow: var(--shadow-panel); overflow: hidden; }
 .map-float .map-node { padding: 16px 18px 8px; overflow: auto; }

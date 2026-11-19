@@ -36,7 +36,7 @@ function Changes() {
         const events = (h.data as unknown as { events?: { batch_seq: number; change: string; subject?: string;
           risk_id?: string; fields?: string[] }[] }).events ?? [];
         return events.length === 0
-          ? <Guidance title="No changes recorded">Changes appear when a later admitted batch alters an earlier signal.</Guidance>
+          ? <Guidance title="No changes recorded">Changes appear when newer records change an earlier signal.</Guidance>
           : <ul className="plain stack">{events.map((e, i) => (
               <li key={i} className="row-item"><Badge value="open" label={e.change} />
                 <span>{e.subject ?? e.risk_id}</span><span className="small muted">release {e.batch_seq}
