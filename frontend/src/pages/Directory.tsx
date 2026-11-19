@@ -5,7 +5,7 @@ import { useApi } from "../api/useApi";
 import { ErrorState, Loading, PageHead, Section } from "../ui";
 
 interface Row { name: string; title: string; department: string; status: string; join_date: string | null;
-  manager: string | null; has_ai_representation: boolean }
+  manager: string | null; has_ai_representation: boolean; assistant_id: string | null }
 
 export function DirectoryPage() {
   const [d] = useApi((s) => get<{ people: Row[]; count: number; withheld: number }>("/v1/directory", s), []);
@@ -16,8 +16,10 @@ export function DirectoryPage() {
   return (
     <>
       <PageHead title="People" intro="The company's people as recorded in the HR export: role, department, reporting
-        line and recorded status. Pay, leave and personal details are not shown. AI representations are separate
-        assistants; see AI team." />
+        line and recorded status. Pay, leave and personal details are not shown." />
+      <p className="callout info small" style={{ maxWidth: 900 }}><strong>What is an AI assistant?</strong> For some
+        people, Veloxa offers an AI assistant you can interview about their area of work. It answers only from approved
+        company records about that role. It is not the person, does not speak for them and cannot act for them.</p>
       <Section title="Directory" subtitle={d.state === "ready" ? `${d.data.count} people in the HR export` +
                (d.data.withheld ? ` (${d.data.withheld} not visible to you)` : "") : undefined}>
         {d.state === "loading" && <Loading lines={6} />}
@@ -29,11 +31,11 @@ export function DirectoryPage() {
             <div key={dep} className="stack" style={{ marginBottom: 16 }}>
               <h3>{dep} <span className="small muted">({rows.filter((r) => r.department === dep).length})</span></h3>
               <div className="table-wrap"><table className="crit-table">
-                <thead><tr><th>Name</th><th>Title</th><th>Reports to</th><th>Recorded status</th><th>Joined</th><th>AI representation</th></tr></thead>
+                <thead><tr><th>Name</th><th>Title</th><th>Reports to</th><th>Recorded status</th><th>Joined</th><th>AI assistant</th></tr></thead>
                 <tbody>{rows.filter((r) => r.department === dep).map((r) => (
                   <tr key={r.name + r.title}><td>{r.name}</td><td>{r.title}</td><td>{r.manager ?? "—"}</td>
                     <td>{r.status}</td><td>{r.join_date ?? "—"}</td>
-                    <td>{r.has_ai_representation ? <a href="#/agents">Available (not the person)</a> : <span className="muted">None</span>}</td></tr>))}
+                    <td>{r.assistant_id ? <a href={`#/agents?interview=${r.assistant_id}`}>Interview assistant</a> : <span className="muted">None</span>}</td></tr>))}
                 </tbody></table></div>
             </div>))}
         </>}

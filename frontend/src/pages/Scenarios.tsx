@@ -42,10 +42,14 @@ export function ScenariosPage() {
         {subs.state === "ready" && (list.length === 0
           ? <EmptyState title="Nothing to analyse">The admitted evidence names no release or commitment.</EmptyState>
           : <div className="stack">
-              <form className="row" onSubmit={(e) => { e.preventDefault(); if (text.trim()) void run({ text }); }}>
-                <input className="input" style={{ flex: 1 }} value={text} onChange={(e) => setText(e.target.value)}
-                       aria-label="Scenario" placeholder={`e.g. move ${list[0].name} by 2 weeks`} />
-                <Button variant="primary" type="submit" disabled={!text.trim() || busy}>{busy ? "Analysing…" : "Analyse"}</Button>
+              <form className="stack" onSubmit={(e) => { e.preventDefault(); if (text.trim()) void run({ text }); }}>
+                <textarea className="input scenario-box" rows={3} value={text} onChange={(e) => setText(e.target.value)}
+                          aria-label="Scenario" placeholder={`Describe the change, e.g. "What if ${list[0].name} moves by 3 weeks?"`}
+                          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (text.trim()) void run({ text }); } }} />
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+                  <span className="small muted">Enter runs the scenario. You can change several things at once.</span>
+                  <Button variant="primary" type="submit" disabled={!text.trim() || busy}>{busy ? "Analysing…" : "Run scenario"}</Button>
+                </div>
               </form>
               <div className="small muted">Releases and commitments in the records (click to add a change):</div>
               <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>{list.map((s) => (
@@ -67,29 +71,38 @@ export function ScenariosPage() {
       </Section>
       {error && <Section><ErrorState error={error} /></Section>}
       {out && (
-        <Section title="Scenario result" subtitle="A hypothesis, isolated from real commitments.">
-          <div className="stack">
-            {out.changes.map((c) => (
-              <article key={c.subject} className="concern" aria-label={`Scenario for ${c.subject}`}>
-                <strong className="concern-title">{c.subject}</strong>
-                <p className="small"><strong>Baseline:</strong> due {day(c.baseline.date)}
-                  {c.baseline.original_date && c.baseline.original_date !== c.baseline.date ? ` (originally ${day(c.baseline.original_date)})` : ""}
-                  {c.baseline.status ? `; status: ${c.baseline.status}` : ""}.</p>
-                <p className="small"><strong>Assumption:</strong> {c.assumption}</p>
-                {c.calculations.length > 0 && <><h4>What Veloxa can calculate</h4>
-                  <ul className="bullets small">{c.calculations.map((x) => <li key={x}>{x}</li>)}</ul></>}
-                <h4>Affected work</h4>
-                <p className="small">{c.affected_issues.total
-                  ? `${c.affected_issues.open} of ${c.affected_issues.total} tracker issues are still open (${Object.entries(c.affected_issues.by_status).map(([k, v]) => `${v} ${k}`).join(", ")}).`
-                  : "No tracker issues are linked to this subject."}</p>
-                {c.dependencies.length > 0 && <><h4>Recorded dependencies</h4>
-                  <ul className="bullets small">{c.dependencies.map((d) => <li key={d.blocked_by}>{d.blocked_by}: blocks {d.issues} issue{d.issues === 1 ? "" : "s"}</li>)}</ul></>}
-              </article>))}
-            {out.order_after_changes && <p className="small"><strong>Order after the changes:</strong> {out.order_after_changes}.</p>}
-            <h4>What the records cannot tell you</h4>
-            <ul className="bullets small muted">{out.unknowns.map((u) => <li key={u}>{u}</li>)}</ul>
+        <section className="scenario-result" aria-label="Scenario result">
+          <div className="scenario-banner">
+            <strong>Scenario result</strong>
+            <span>A hypothesis only. Nothing was saved to company records or Jira.</span>
           </div>
-        </Section>)}
+          {out.order_after_changes && <p className="scenario-order"><strong>New order:</strong> {out.order_after_changes}</p>}
+          <div className="scenario-grid">
+            {out.changes.map((c) => (
+              <article key={c.subject} className="scenario-card" aria-label={`Scenario for ${c.subject}`}>
+                <h2>{c.subject}</h2>
+                <div className="scenario-dates">
+                  <div><span className="lbl">Today's date</span><span className="big">{day(c.baseline.date)}</span></div>
+                  <div className="arrow" aria-hidden="true">→</div>
+                  <div><span className="lbl">If it moves</span><span className="big accent">{day(c.new_date)}</span></div>
+                </div>
+                <h4>What you assumed</h4>
+                <p>{c.assumption}</p>
+                {c.calculations.length > 0 && <><h4>What moves</h4>
+                  <ul className="bullets">{c.calculations.map((x) => <li key={x}>{x}</li>)}</ul></>}
+                <h4>Work affected</h4>
+                <p>{c.affected_issues.total
+                  ? <><strong className="big-inline">{c.affected_issues.open}</strong> of {c.affected_issues.total} tracker issues are still open.</>
+                  : "No tracker issues are linked to this."}</p>
+                {c.dependencies.length > 0 && <><h4>What's blocking it</h4>
+                  <ul className="bullets">{c.dependencies.map((d) => <li key={d.blocked_by}><strong>{d.blocked_by}</strong> blocks {d.issues} issue{d.issues === 1 ? "" : "s"}</li>)}</ul></>}
+              </article>))}
+          </div>
+          <div className="scenario-unknowns">
+            <h4>What Veloxa can't tell you</h4>
+            <ul className="bullets">{out.unknowns.map((u) => <li key={u}>{u}</li>)}</ul>
+          </div>
+        </section>)}
     </>
   );
 }

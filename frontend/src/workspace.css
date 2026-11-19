@@ -492,3 +492,24 @@ mark.hl { background: #fdeccb; color: var(--text); padding: 0 2px; border-radius
 .concern-title { font-size: 15px; }
 .concern.compact { gap: 4px; }
 .assess summary { cursor: pointer; color: var(--accent); }
+
+/* What-if: a clear, readable result */
+.scenario-box { font-size: 16px; line-height: 1.5; min-height: 84px; resize: vertical; }
+.scenario-result { display: grid; gap: 16px; margin-top: 8px; }
+.scenario-banner { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; padding: 12px 16px;
+  border-radius: 12px; background: var(--surface-2); border-left: 3px solid var(--accent); }
+.scenario-banner strong { font-size: 18px; }
+.scenario-order { font-size: 16px; margin: 0; }
+.scenario-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+.scenario-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; }
+.scenario-card h2 { font-size: 22px; margin: 0 0 12px; }
+.scenario-card h4 { font-size: 14px; text-transform: none; margin: 16px 0 4px; }
+.scenario-card p { margin: 0; font-size: 15px; }
+.scenario-dates { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.scenario-dates .lbl { display: block; font-size: 12px; color: var(--text-3); }
+.scenario-dates .big { display: block; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.scenario-dates .accent { color: var(--accent); }
+.scenario-dates .arrow { font-size: 22px; color: var(--text-3); }
+.big-inline { font-size: 20px; }
+.scenario-unknowns { padding: 12px 16px; border-radius: 12px; background: var(--surface-2); }
+.brief.conversational .brief-lead { font-size: 16px; }

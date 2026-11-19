@@ -84,13 +84,15 @@ def ask_in_thread(conn, tenant_id, principal: tools.Principal, tz: str, thread_i
         raise ProductError("not_found", "no such thread")
     asked = contextual_question(question, t["context"])
     with tenant_tx(conn, tenant_id, principal.principal_id):
-        last = conn.execute("SELECT a.question FROM runtime.thread_answer t JOIN runtime.answer a ON a.tenant_id ="
+        last = conn.execute("SELECT a.question, a.answer FROM runtime.thread_answer t JOIN runtime.answer a"
+                            " ON a.tenant_id ="
                             " t.tenant_id AND a.answer_id = t.answer_id WHERE t.tenant_id = %s AND t.thread_id = %s"
                             " ORDER BY t.seq DESC LIMIT 1", (tenant_id, thread_id)).fetchone()
     from . import assistant
 
     answer = assistant.respond(conn, tenant_id, principal, tz, asked, now, state=state or {},
-                               thread_last=last["question"] if last else None, **time_kw)
+                               thread_last=last["question"] if last else None,
+                               thread_last_answer=last["answer"] if last else None, **time_kw)
     with tenant_tx(conn, tenant_id, principal.principal_id):
         seq = conn.execute("SELECT coalesce(max(seq), 0) + 1 AS s FROM runtime.thread_answer WHERE tenant_id = %s"
                            " AND thread_id = %s", (tenant_id, thread_id)).fetchone()["s"]

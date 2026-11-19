@@ -219,4 +219,5 @@ def _describe(s: Step) -> str:
         return "dated events" + (f" between {a['start']} and {a['end']}" if a else "")
     if s.tool == "conflicts":
         return "owner-reviewed conflicts between sources"
-    return f"a text search for {a.get('query', '')!r}"
+    words = [w for w in str(a.get("query", "")).split(" OR ") if w][:4]
+    return "passages that mention " + (", ".join(words) if words else "your question")

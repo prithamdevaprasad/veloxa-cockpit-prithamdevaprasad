@@ -126,9 +126,22 @@ export function AnswerView({ answer }: { answer: Answer }) {
   else if (answer.claims.length === 1 && text.length === 1) lead = clean(answer.claims[0].text);
   else {
     const search = subject && /^a text search for (.*)$/i.exec(subject);
-    lead = search ? `What the records say about ${search[1]}` : subject ? cap(subject) : `${answer.claims.length} verified facts`;
+    lead = search ? "Matching passages from the records" : subject ? cap(subject) : `${answer.claims.length} verified facts`;
   }
 
+  const diag = (answer as { diagnostics?: { stage?: string; intent?: string } }).diagnostics;
+  const conversational = (diag?.stage === "assistant" && ["small_talk", "confirm", "review_request", "jira_action"]
+    .includes(diag?.intent ?? "")) || answer.status === "action_preview" || answer.status === "clarify";
+  if (conversational && answer.status !== "refused") {
+    return (
+      <article className="brief conversational" aria-label="Answer">
+        <div className="brief-lead"><RichText text={answer.answer} /></div>
+        {answer.action?.preview_id && (answer.action.operation === "internal_request"
+          ? <RequestConfirm p={answer.action as unknown as InternalRequest} /> : <JiraConfirm p={answer.action} />)}
+        {(answer.follow_ups?.length ?? 0) > 0 && <FollowUps items={answer.follow_ups!} />}
+      </article>);
+  }
+  const routedLead = ["routed", "assistant"].includes(diag?.stage ?? "");
   return (
     <article className="brief" aria-label="Answer">
       <div className="brief-status">
@@ -143,7 +156,7 @@ export function AnswerView({ answer }: { answer: Answer }) {
       </div>
 
       <div className={`brief-lead ${leadTone}`}><RichText text={lead} /></div>
-      {explainable && <ExplanationView ex={ex} compact />}
+      {explainable && <ExplanationView ex={ex} compact noHead={routedLead} />}
 
       {answer.refusal && (
         <div className="callout bad" role="note">
@@ -253,7 +266,7 @@ export function AnswerView({ answer }: { answer: Answer }) {
             .join(", ")}. Why: {answer.specialists![0].reason}.
         </p>
       )}
-      {answer.action && answer.status === "action_preview" && (answer.action.operation === "internal_request"
+      {answer.action?.preview_id && (answer.action.operation === "internal_request"
         ? <RequestConfirm p={answer.action as unknown as InternalRequest} /> : <JiraConfirm p={answer.action} />)}
       {(answer.follow_ups?.length ?? 0) > 0 && <FollowUps items={answer.follow_ups!} />}
 

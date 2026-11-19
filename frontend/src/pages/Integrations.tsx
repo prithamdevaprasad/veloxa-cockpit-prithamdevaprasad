@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { ApiError, get, request } from "../api/client";
 import { useApi } from "../api/useApi";
+import { useAsk } from "../ui/Ask";
 import { Badge, Button, ErrorState, Loading, Section } from "../ui";
 
 interface Site { id: string; name: string | null; url: string | null }
@@ -212,6 +213,7 @@ interface Migration {
 
 /** What company records would become in Jira. Read-only: nothing is written from this view. */
 function MigrationPreview() {
+  const ask = useAsk();
   const [m, setM] = useState<Migration | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
@@ -222,8 +224,15 @@ function MigrationPreview() {
   return (
     <div className="stack">
       <h3>Migration preview: company records to Jira</h3>
-      <p className="small muted">Proposes projects and actionable work only (never documents, employees, metrics or
-        history). Read-only: nothing is written; each write later needs your approval and confirmation.</p>
+      <div className="callout info small">
+        <strong>What this is for:</strong> Veloxa reads your company records and suggests the work that belongs in Jira
+        (follow-ups, blockers, missing dates), so it can be tracked there. Nothing is written by this list.
+        <ol style={{ margin: "6px 0 0 18px" }}>
+          <li>Review the suggested tasks below.</li>
+          <li>Click <strong>Prepare in Jira</strong> on a task. Ask Veloxa opens with the request filled in.</li>
+          <li>Send it, check the preview, then confirm. Only then is the task created (in VIT while testing).</li>
+        </ol>
+      </div>
       <div><Button onClick={load} disabled={busy}>{busy ? "Preparing…" : m ? "Refresh preview" : "Prepare preview"}</Button></div>
       {error && <ErrorState error={error} />}
       {m && <div className="stack small">
@@ -234,12 +243,13 @@ function MigrationPreview() {
         {m.projects.map((p) => <div key={p.name} className="callout info"><strong>{p.name}</strong>{p.due ? `, due ${p.due}` : ""}.
           {" "}{p.proposed} {p.epics.length > 0 && <>Epics: {p.epics.map((e) => `${e.key} (${e.issues})`).join(", ")}.</>}</div>)}
         <div className="table-wrap"><table className="crit-table">
-          <thead><tr><th>Candidate task</th><th>Owner</th><th>Deadline</th><th>Evidence</th><th>Duplicates</th><th>Destination</th></tr></thead>
+          <thead><tr><th>Candidate task</th><th>Owner</th><th>Deadline</th><th>Evidence</th><th>Duplicates</th><th></th></tr></thead>
           <tbody>{m.candidates.map((c) => (
             <tr key={c.summary}><td>{c.summary}<div className="muted">{c.context}</div></td>
               <td>{c.department ?? "missing"}</td><td>{c.due ?? "not recorded"}</td><td>{c.evidence.length} record(s)</td>
               <td>{c.duplicates.length ? c.duplicates.map((d) => `${d.key} (${d.where})`).join("; ") : "none found"}</td>
-              <td>Testing: {c.proposed_destination.testing}<br />Production: {c.proposed_destination.production}</td></tr>))}
+              <td>{c.duplicates.length ? <span className="muted">Already in Jira</span>
+                : <Button onClick={() => ask.ask(`Create a Jira task in VIT for "${c.summary}"`)}>Prepare in Jira</Button>}</td></tr>))}
           </tbody></table></div>
         <strong>Excluded</strong>
         <ul className="bullets">{m.excluded.map((e) => <li key={e.source}>{e.source.replace(/_/g, " ")}: {e.reason}</li>)}</ul>

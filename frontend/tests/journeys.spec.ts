@@ -441,7 +441,7 @@ test("People is the HR directory; AI representations are a separate, disclosed s
   await page.goto("/#/people");
   await expect(page.getByRole("heading", { name: "People", exact: true })).toBeVisible();
   await expect(page.getByText(/people in the HR export/)).toBeVisible();
-  await expect(page.getByText(/AI representations are separate/)).toBeVisible();
+  await expect(page.getByText(/It is not the person, does not speak for them/)).toBeVisible();
   await page.goto("/#/overview");
   await expect(page.getByRole("region", { name: "People overview" })).toHaveCount(0);     // no second roster
   await expect(page.getByRole("region", { name: "Meet your AI team" })).toContainText("not the employees");

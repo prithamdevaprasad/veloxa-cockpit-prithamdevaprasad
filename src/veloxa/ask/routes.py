@@ -58,6 +58,11 @@ BLOCKED = re.compile(r"\b(which|what|how many|list)\b.{0,30}\b(issues?|tasks?|ti
                      r"\b(blocked|blocking|stuck)\b|\bblocked (issues?|tasks?|work)\b", re.I)
 BOARD_ABOUT = re.compile(r"\bboard\b.{0,40}\b(say|said|says|report\w*|mention\w*|state\w*)\b.{0,12}\babout\s+"
                          r"(?P<topic>[A-Za-z0-9][\w .-]{1,40}?)(\s+in\s+(?P<when>\w+))?\s*\??$", re.I)
+COMMITMENTS = re.compile(r"\b(unresolved|open|outstanding|pending|missed|late|overdue|at[- ]risk)\b.{0,20}"
+                         r"\bcommitments?\b|\bcommitments?\b.{0,30}\b(unresolved|open|outstanding|missed|at risk|"
+                         r"without (a )?(new )?date)\b|\bwhich commitments\b", re.I)
+TOPIC_ABOUT = re.compile(r"\b(what (do|does) (the )?records? (say|show)|what do we know|tell me|summari[sz]e)\b.{0,10}"
+                         r"\babout\s+(?P<topic>[A-Za-z0-9][\w .-]{1,40}?)\s*(,|\band what\b|\?|$)", re.I)
 STOP = {"risk", "risks", "concern", "concerns", "worry", "exposure", "what", "our", "the", "is", "are", "about",
         "with", "this", "that", "current", "currently", "biggest", "main", "any", "there"}
 
@@ -177,6 +182,16 @@ class Router:
             out = continuity.answer(self, q)
             if out is not None:
                 return out
+        if COMMITMENTS.search(q):
+            out = self.commitments(q)
+            if out is not None:
+                return out
+        m = TOPIC_ABOUT.search(q)
+        if m:                                       # "what do the records say about Atlas?": the structured status
+            out = self.status(f"status of {m.group('topic')}")
+            if out is not None:
+                out["interpretation"] = f"I read this as: what the records show about {m.group('topic')}."
+                return out
         for test, fn in ((PERSONAL, self.personal), (THIS_CONCERN, self.this_concern), (UNRANKABLE, self.unrankable),
                          (MISSING, self.missing), (DELAY, self.delay), (BOARD_CHANGE, self.board_change),
                          (WORRY_LIST, self.worry_list), (ROLE_HOLDER, self.role_holder), (BLOCKED, self.blocked),
@@ -293,6 +308,31 @@ class Router:
         return _result(self.basis_json, "qualified", f"I read this as: what the board updates say about {topic}.",
                        " ".join(c["text"] for c in claims), claims, [recs[i] for c in claims for i in c["evidence"]],
                        ["Board updates are reported statements, not independently verified."])
+
+    def commitments(self, q):
+        """Recorded commitments and what is unresolved about each (moved without a new date, no date, one source)."""
+        from ..risk import graph
+
+        g = graph.build(self.conn, self.basis, self.tz)
+        ws = [w for w in g.get("warnings", []) if w.get("commitment")]
+        if not ws:
+            return None
+        plain = {"moved_without_replacement_date": "was moved and no replacement date is recorded",
+                 "no_stated_date": "has no stated date", "single_source": "rests on a single record",
+                 "shared_evidence": "rests on evidence shared with other commitments",
+                 "conflicted_evidence": "rests on evidence that other records contradict"}
+        recs = self.records({r for w in ws for r in w.get("evidence", [])})
+        claims = [c for w in ws if (c := self.claim(f"{w['commitment']} {plain.get(w['kind'], w['kind'])}: "
+                                                    f"{w['statement']}", w.get("evidence", []), recs))]
+        if not claims:
+            return None
+        names = sorted({w["commitment"] for w in ws})
+        return _result(self.basis_json, "qualified", "I read this as: which recorded commitments have something "
+                       "unresolved.", f"{len(names)} recorded commitment{'s' if len(names) != 1 else ''} with "
+                       f"something unresolved: " + "; ".join(c["text"] for c in claims), claims,
+                       [recs[i] for c in claims for i in c["evidence"]],
+                       ["Only commitments stated in admitted records are listed; others may exist."],
+                       [f"What if {names[0]} moves by 3 weeks?", f"Why did {names[0]} move?"])
 
     def role_holder(self, q):
         """Who holds a named role, from the HR export's titles (work facts only; nothing about the person)."""

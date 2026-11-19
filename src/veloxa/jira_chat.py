@@ -120,6 +120,16 @@ def _create(j, tenant, principal, q):
                        "one this project offers.",
                        options=[f"{q.rstrip('.?!')} as a {t['name']}" for t in types[:4]])
     summary = _summary(q)
+    filler = {"engineering", "finance", "marketing", "sales", "operations", "people", "ops", "hr", "support",
+              "leadership", "jira", "task", "ticket", "issue", "bug", "story", "a", "an", "the", "in", "project",
+              "space", "for", "team", proj["key"].lower(), *str(proj.get("name") or "").lower().split()}
+    if not re.search(r"[\"“]", q) and len([w for w in re.findall(r"[a-z0-9]+", summary.lower())
+                                                 if w not in filler]) < 2:
+        res = _result("clarify", f"What should the {proj['key']} task say? Give a short title, for example: "
+                      "“Confirm the replacement GA date with the release owner”.",
+                      "I read this as: create a Jira task, but no task title was given.")
+        res["awaiting"] = {"field": "summary", "project": proj["key"], "type": match[0]["name"]}
+        return res
     description = f"Requested in Veloxa: “{q.strip()}”"
     p = j.preview_create(tenant, principal, proj["key"], match[0]["id"], summary, description)
     return _result("action_preview", f"Here is the issue I would create in {proj['key']}. Check it, then confirm to "

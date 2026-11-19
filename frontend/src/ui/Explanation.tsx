@@ -35,7 +35,8 @@ export function useExplanation(load: () => Promise<Explanation>, deps: unknown[]
  * explanation. `compact` (inside an answer) shows only the explanation and what the answer does not establish,
  * because the answer's own figures and citations are already on screen.
  */
-export function ExplanationView({ ex, compact = false }: { ex: ReturnType<typeof useExplanation>; compact?: boolean }) {
+export function ExplanationView({ ex, compact = false, noHead = false }: { ex: ReturnType<typeof useExplanation>;
+  compact?: boolean; noHead?: boolean }) {
   const evidence = useEvidence();
   if (ex.error) {
     return <div className="explain"><ErrorState error={ex.error} onRetry={ex.retry} /></div>;
@@ -50,7 +51,7 @@ export function ExplanationView({ ex, compact = false }: { ex: ReturnType<typeof
   const sources = e.sections.flatMap((s) => s.items).filter((it) => it.evidence.length || it.detail);
   return (
     <div className="explain" aria-label="Explanation">
-      <p className="explain-head">{(ai && w.summary) || e.summary || e.headline}</p>
+      {!noHead && <p className="explain-head">{(ai && w.summary) || e.summary || e.headline}</p>}
       {shown.map((s) => (
         <section key={s.key} className={`explain-sec callout ${BASIS[s.basis].tone}`} aria-label={s.title}>
           <div className="explain-sec-head"><h4>{s.title}</h4>

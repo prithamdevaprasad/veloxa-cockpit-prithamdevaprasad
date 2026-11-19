@@ -97,15 +97,17 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
                 return {"read_basis": basis_json(basis), "people": [], "count": 0}
             with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
                 staff = [dict(r) for r in people._people_at(conn, p.tenant_id, basis.batch_seq)]
-                mapped = {r["person_record"] for r in conn.execute(
-                    "SELECT person_record FROM runtime.agent_person").fetchall()} if schema.available(
-                    conn, "company_intelligence") else set()
+                mapped = {r["person_record"]: r["agent_id"] for r in conn.execute(
+                    "SELECT DISTINCT ON (person_record) person_record, agent_id FROM runtime.agent_person"
+                    " ORDER BY person_record, version DESC").fetchall()} if schema.available(
+                    conn, "company_intelligence") else {}
             ok = readable(conn, p, basis, [s["source_record_id"] for s in staff])
             names = {s["emp_id"]: s["full_name"] for s in staff}
             rows = [{"name": s["full_name"], "title": s["title"], "department": s["department"],
                      "status": s["status"], "join_date": str(s["join_date"]) if s.get("join_date") else None,
                      "manager": names.get(s.get("manager_emp_id")), "record": s["source_record_id"],
-                     "has_ai_representation": s["source_record_id"] in mapped}
+                     "has_ai_representation": s["source_record_id"] in mapped,
+                     "assistant_id": mapped.get(s["source_record_id"])}
                     for s in staff if s["source_record_id"] in ok]
             return {"read_basis": basis_json(basis), "people": rows, "count": len(rows),
                     "withheld": len(staff) - len(rows)}
@@ -218,7 +220,6 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
         (a live connection test must pass), and 'synchronised' is not 'admitted' or 'queryable'."""
         import os as _os
 
-        from . import connectors
         from .llm import config as llm_config
 
         with connect(state["dsn"]) as conn:
@@ -251,7 +252,19 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
               "workspace": t["slug"], "workspace_synthetic": bool(t["synthetic"]), "workspace_in_scope": in_scope,
               "scope_reason": scope_reason, "configuration": status,
               "what_it_does": "re-words verified explanations only; never answers, ranks or computes"}
-        return {"connectors": [connectors.jira_status()] + planned, "runs": runs, "ai_wording": ai,
+        j = state.get("jira_get", lambda: None)()
+        if j is None:
+            jira_row = {"connector": "jira", "state": "not configured: set ATLASSIAN_CLIENT_ID and "
+                        "ATLASSIAN_CLIENT_SECRET "
+                        "on the server, then connect in Administration > Integrations"}
+        else:
+            st = j.status(str(p.tenant_id))
+            site = (st.get("site") or {}).get("name")
+            jira_row = {"connector": "jira", "state": (
+                "access expired: reconnect in Integrations" if st.get("expired") else
+                f"connected over Atlassian OAuth{f' to {site}' if site else ''}; sync runs from Integrations"
+                if st.get("connected") else "not connected: connect in Administration > Integrations")}
+        return {"connectors": [jira_row] + planned, "runs": runs, "ai_wording": ai,
                 "model": status,
                 "gemini_experiment": {"key_configured": bool(_os.environ.get("GEMINI_API_KEY")),
                                       "synthetic_tenants": [x for x in _os.environ.get("VELOXA_GEMINI_TENANTS",

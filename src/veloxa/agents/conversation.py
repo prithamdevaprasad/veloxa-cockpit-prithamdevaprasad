@@ -21,7 +21,8 @@ INTENTS: tuple[tuple[str, str], ...] = (       # order matters: the first match 
              r"what else)\b"),
     ("updates", r"\b(any (updates?|news)|what'?s new|latest|what'?s (going on|happening)|project status|"
                 r"status of (the )?(project|work|release)|how is (the )?(project|work|release) going|"
-                r"update me|catch me up|progress)\b"),
+                r"update me|catch me up|progress|(current|main|key|open|biggest) (issues?|problems?|risks?|"
+                r"concerns?)|issues? in your (area|team|department)|what is (happening|going on) in your)\b"),
     ("blockers", r"\b(blockers?|blocked|blocking|what'?s holding|holding (us|you|it) (up|back)|impediments?|"
                  r"dependenc(y|ies)|at risk)\b"),
     ("memory", r"\b(what did i (just )?ask|earlier|previous(ly)?|before that|asked you)\b"),

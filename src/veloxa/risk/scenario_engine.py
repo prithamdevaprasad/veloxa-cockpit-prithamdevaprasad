@@ -74,12 +74,17 @@ def parse(text: str, names: list[str]) -> list[dict]:
     days", "-10 days", "a month later"). Unknown subjects are never invented."""
     low = text.lower()
     changes = []
+    firsts = [n.split()[0].lower() for n in names]
     for name in sorted(names, key=len, reverse=True):
-        i = low.find(name.lower())
+        i, used = low.find(name.lower()), name
+        first = name.split()[0]
+        if i < 0 and len(first) >= 3 and firsts.count(first.lower()) == 1:      # "Atlas" for "Atlas GA" if unique
+            m0 = re.search(rf"\b{re.escape(first.lower())}\b", low)
+            i, used = (m0.start(), first) if m0 else (-1, name)
         if i < 0 or any(c["subject"].lower() in name.lower() or name.lower() in c["subject"].lower()
                         for c in changes):
             continue
-        tail = low[i + len(name): i + len(name) + 60]
+        tail = low[i + len(used): i + len(used) + 60]
         m = re.search(r"(earlier|sooner|forward|back|later|delay(?:ed)?|slip(?:s|ped)?)?\s*(?:by\s+)?"
                       r"([+-]?\d+|a|an|one)\s*(day|days|week|weeks|month|months)\b\s*"
                       r"(earlier|sooner|later|forward|back)?", tail)

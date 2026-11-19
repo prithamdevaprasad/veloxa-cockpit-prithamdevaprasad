@@ -66,9 +66,58 @@ def _store(conn, tenant_id, principal, now, question, result) -> dict:
     return {**out, "status": shown}
 
 
+CONFIRM = re.compile(r"^\s*(yes|yep|yeah|confirm(ed)?|go ahead|do it|create it|submit( it)?|send it|please do|"
+                     r"proceed|ok(ay)?|sure)\b[\s,.!]*(please|do it|create it|go ahead|confirm(ed)?|thanks)?[\s.!]*$",
+                     re.I)
+
+
+def _confirm(conn, tenant_id, principal, now, q, state, last_answer) -> dict | None:
+    """A typed confirmation ("yes, create it") of the preview shown in this thread: the same explicit approval as
+    the button. Nothing pending -> say so; never act on anything else."""
+    action = (last_answer or {}).get("action") or {}
+    pid = action.get("preview_id")
+    if not pid:
+        return _store(conn, tenant_id, principal, now, q, _simple(
+            "abstained", "There's nothing waiting for your confirmation in this conversation. Ask me to prepare a "
+            "Jira task or a review request first.", "I read this as a confirmation.", intent="confirm"))
+    from . import audit
+    from .db import tenant_tx
+
+    try:
+        if action.get("operation") == "internal_request":
+            out = commit_request(conn, tenant_id, principal, pid, True)
+            text = f"Done: the review request for {out['department']} is recorded ({out['state']}). Veloxa has not " \
+                   "contacted anyone; share it with the reviewer."
+        else:
+            if "jira_permission_for" not in state or not state["jira_permission_for"](conn, principal):
+                raise ValueError("Jira actions need workspace administration or the company-reader grant.")
+            out = state["jira_get"]().commit(str(tenant_id), principal.principal_id, pid, True)
+            with tenant_tx(conn, tenant_id, principal.principal_id):
+                audit.append(conn, tenant_id, "jira.write", {"op": out["operation"], "key": out["key"],
+                                                             "outcome": "ok", "via": "typed confirmation"})
+            text = (f"Done: created {out['key']} in Jira." if out["operation"] == "create" else
+                    f"Done: updated {out['key']} in Jira.") + (f" {out['url']}" if out.get("url") else "")
+    except (ValueError, jira_oauth.JiraError) as e:
+        return _store(conn, tenant_id, principal, now, q, _simple("abstained", f"Nothing was written: {e}",
+                                                                  "I read this as a confirmation.", intent="confirm"))
+    return _store(conn, tenant_id, principal, now, q, _simple("answered", text, "I read this as your explicit "
+                                                              "confirmation of the preview above.", intent="confirm"))
+
+
 def respond(conn, tenant_id, principal, tz: str, question: str, now, *, state: dict, thread_last: str | None = None,
-            **time_kw) -> dict:
+            thread_last_answer: dict | None = None, **time_kw) -> dict:
     q = question.strip()
+    if CONFIRM.match(q) and thread_last:                                 # 0: a typed approval of the last preview
+        return _confirm(conn, tenant_id, principal, now, q, state, thread_last_answer)
+    awaiting = (thread_last_answer or {}).get("awaiting") or {}
+    if awaiting.get("field") == "summary" and thread_last and not CONFIRM.match(q):   # the title Veloxa asked for
+        title = q.strip().strip("\"“”").rstrip(".")
+        q = f'Create a Jira {awaiting.get("type", "task").lower()} in {awaiting["project"]} for "{title}"'
+        thread_last_answer = None
+    last_intent = ((thread_last_answer or {}).get("diagnostics") or {}).get("intent")
+    if (thread_last and last_intent in ("jira_action", "review_request", "scenario") and len(q.split()) <= 5
+            and not q.endswith("?") and (thread_last_answer or {}).get("status") in ("abstained", "clarify")):
+        q = f"{thread_last.rstrip('.?! ')} {q}"                          # a reply to the question I asked back
     if SMALL.match(q):                                                   # 1
         text = ("You're welcome." if re.match(r"\s*(thanks?|thank you|cheers)", q, re.I) else
                 "Hello. " + HELP if re.match(r"\s*(hi|hello|hey|good|namaste)", q, re.I) else HELP)
