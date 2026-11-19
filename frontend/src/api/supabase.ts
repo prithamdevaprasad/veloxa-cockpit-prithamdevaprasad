@@ -72,10 +72,12 @@ export async function restore(): Promise<"recovery" | "session" | "none"> {
   return data.session ? "session" : "none";
 }
 
-/** Always reports success (no account enumeration). Supabase sends mail only to existing accounts. */
+/** Reports success whether or not the account exists (no enumeration). Only a refusal to send at all (e.g. the
+ * mailer's hourly limit) is reported, because it says nothing about any account. */
 export async function requestReset(email: string): Promise<void> {
-  await sb().auth.resetPasswordForEmail(email.trim(),
-    { redirectTo: window.location.origin + "/" }).catch(() => undefined);
+  const { error } = await sb().auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin + "/" });
+  if (error && (error.status === 429 || /rate limit/i.test(error.message)))
+    throw new Error("E-mail sending is temporarily limited. Wait an hour and try again, or ask your administrator.");
 }
 
 export function passwordProblems(p: string, email = ""): string[] {

@@ -137,6 +137,7 @@ function Forgot({ onBack }: { onBack: () => void }) {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   return sent ? (
     <div className="stack" style={{ gap: 8 }}>
       <p className="callout ok small" role="status">If an account exists for {email}, a link to set a new password is
@@ -145,8 +146,11 @@ function Forgot({ onBack }: { onBack: () => void }) {
     </div>
   ) : (
     <form className="stack" style={{ gap: 8 }} onSubmit={async (e) => {
-      e.preventDefault(); if (busy) return; setBusy(true);
-      await sb.requestReset(email); setBusy(false); setSent(true); }}>
+      e.preventDefault(); if (busy) return; setBusy(true); setErr(null);
+      try { await sb.requestReset(email); setSent(true); }
+      catch (x) { setErr(x instanceof Error ? x.message : "The reset e-mail couldn't be sent. Try again later."); }
+      finally { setBusy(false); } }}>
+      {err && <div className="callout bad small" role="alert">{err}</div>}
       <p className="small muted">Enter your work e-mail. This also sets your first password if your administrator
         has provisioned your account.</p>
       <label className="small">Work e-mail
