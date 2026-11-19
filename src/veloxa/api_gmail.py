@@ -120,7 +120,7 @@ def register(app, *, state, gmail_factory=None) -> None:
     def sync(body: SyncIn, authorization: str | None = Header(default=None)):
         def fn(g, t, pr, conn):
             before = (g.vault.get(t).history_id if g.vault.get(t) else None)
-            recs, info = g.fetch(t)
+            recs, info = g.fetch(t, advance=not body.dry_run)
             if body.dry_run:
                 return {"dry_run": True, **info, "preview": [{k: r[k] for k in ("message_id", "from", "subject",
                                                                                  "date")} for r in recs[:10]],

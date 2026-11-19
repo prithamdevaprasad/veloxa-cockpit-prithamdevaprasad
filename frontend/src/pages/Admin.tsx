@@ -3,6 +3,7 @@ import { ApiError, getToken } from "../api/client";
 import { product } from "../api/product";
 import { AgentAdministration } from "./Agents";
 import { JiraIntegration } from "./Integrations";
+import { GmailIntegration } from "./GmailIntegration";
 import { useApi } from "../api/useApi";
 import { Guidance } from "../ui/kit";
 import { Badge, Button, ErrorState, Loading, PageHead, Section } from "../ui";
@@ -17,6 +18,7 @@ export function AdminPage({ onSignOut }: { onSignOut: () => void }) {
       <WhoAmI />
       <Workspace />
       <JiraIntegration />
+      <GmailIntegration />
       <Connectors />
       <AgentAdministration />
     </>

@@ -275,7 +275,7 @@ class Gmail:
                                  "senders": scope["senders"]},
                 "evidence_kind": "communication (not verified fact)"}
 
-    def fetch(self, tenant: str) -> tuple[list[dict], dict]:
+    def fetch(self, tenant: str, advance: bool = True) -> tuple[list[dict], dict]:
         """Bounded initial import, or incremental since the stored historyId (recovering from an expired one)."""
         g = self._grant(tenant)
         if not g.scope:
@@ -319,8 +319,9 @@ class Gmail:
                     break
             newest = self.call(tenant, "GET", "/profile").get("historyId")
         recs = [r for r in (self._message(tenant, i, scope) for i in dict.fromkeys(ids)) if r]
-        g = self.vault.get(tenant)
-        g.history_id, g.last_sync, g.last_error = newest, self.clock(), None
-        self.vault.put(tenant, g)
+        if advance:                                    # a preview never moves the cursor
+            g = self.vault.get(tenant)
+            g.history_id, g.last_sync, g.last_error = newest, self.clock(), None
+            self.vault.put(tenant, g)
         info |= {"listed": len(ids), "kept": len(recs), "cursor": newest}
         return recs, info
