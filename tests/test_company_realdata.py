@@ -131,3 +131,27 @@ def test_t6d_mixed_questions_and_irrelevant_search_on_real_data(db, company, mon
         for q in ("What is the morning engineering version update?", "Tell me about the quarterly flamingo budget."):
             r = ask(q)
             assert r["status"] == "abstained" and r["evidence"] == []
+
+
+def test_the_unresolved_commitment_question_never_cites_the_privacy_voice_note(db, company, monkeypatch):
+    """Regression (screenshot): the early-warning question matched T6c only on "say/says"."""
+    from fastapi.testclient import TestClient
+
+    from veloxa.api import PRIVILEGED_ENV, create_app
+    from veloxa.db import connect, tenant_tx
+
+    with connect(db.admin_dsn) as c, tenant_tx(c, company["tid"]):
+        ceo = c.execute("SELECT emp_id FROM projection.person WHERE title = 'CEO' LIMIT 1").fetchone()["emp_id"]
+    for k in PRIVILEGED_ENV:
+        monkeypatch.delenv(k, raising=False)
+    tok = "realdata-local-fixture-token-0123456789abcdef"
+    for k, v in {"VELOXA_DEV_AUTH": "1", "VELOXA_DEV_TOKEN": tok, "VELOXA_DEV_PRINCIPAL": ceo,
+                 "VELOXA_RATE_LIMIT_EXPENSIVE_PER_MIN": "600"}.items():
+        monkeypatch.setenv(k, v)
+    with TestClient(create_app(dsn=db.dsn("app"))) as client:
+        h = {"Authorization": f"Bearer {tok}"}
+        a = client.post("/v1/ask", json={"question": "What do the records say about unresolved commitment, and what "
+                                                     "is still unknown?"}, headers=h).json()
+        assert not any("T6c" in (e.get("source_path") or "") for e in a["evidence"])
+        assert "unresolved commitment" not in [w["commitment"] for w in
+                                               client.get("/v1/dependencies", headers=h).json()["warnings"]]

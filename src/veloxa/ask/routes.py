@@ -39,7 +39,9 @@ TOPIC_RISK = re.compile(r"\b(risk|concern|worry|exposure)\b", re.I)
 DELAY = re.compile(r"\b(why|what caused|reason)\b.{0,60}\b(ga|launch|release|go-?live|delivery|ship\w*|"
                    r"(?:product|atlas)\b).{0,40}\b(delay\w*|slip\w*|moved?|late|postponed)\b|"
                    r"\b(delay\w*|slip\w*|moved?|postponed)\b.{0,40}\b(ga|launch|release)\b|"
-                   r"\bwhy (was|did|is|has)\b.{0,60}\b(delay\w*|slip\w*|moved?|late|postponed)\b", re.I)
+                   r"\bwhy (was|did|is|has)\b.{0,60}\b(delay\w*|slip\w*|moved?|late|postponed)\b|"
+                   r"\b(hiring|pause|freeze|staffing|incidents?|reliability|vendor)\b.{0,40}\b(affect\w*|impact\w*|"
+                   r"delay\w*)\b.{0,40}\b(ga|launch|release|delivery|atlas|version)\b", re.I)
 BOARD_CHANGE = re.compile(r"\b(what )?(changed|change[sd]?|compare[sd]?|difference)\b.{0,40}\bboard\b|"
                           r"\bboard\b.{0,40}\b(changed|change[sd]?|compared?)\b|\blatest board update\b", re.I)
 MISSING = re.compile(r"\bwhat (information|data|records?|evidence) (is|are) missing\b|\bmissing (information|data|"

@@ -67,8 +67,10 @@ def test_oauth_sync_submits_for_review_skips_unchanged_and_resubmits_updates(db,
     upd = run(db, room, fake)
     assert upd["changed"] == 1 and upd["submission_id"]
     with connect(db.admin_dsn) as a, tenant_tx(a, room["tenant"]):
-        states = [r["state"] for r in a.execute("SELECT state FROM intake.submission_state").fetchall()]
-        admitted = a.execute("SELECT count(*) AS n FROM ledger.source_record WHERE system = 'jira'").fetchone()["n"]
+        states = [r["state"] for r in a.execute("SELECT state FROM intake.submission_state WHERE tenant_id = %s",
+                                                (room["tenant"],)).fetchall()]
+        admitted = a.execute("SELECT count(*) AS n FROM ledger.source_record WHERE system = 'jira' AND tenant_id = %s",
+                             (room["tenant"],)).fetchone()["n"]
     assert len(states) == 2 and "admitted" not in states and admitted == 0      # pending review, never admitted here
     assert all(c[0] == "POST" and c[1] == "/rest/api/3/search/jql" for c in fake.calls)
 
