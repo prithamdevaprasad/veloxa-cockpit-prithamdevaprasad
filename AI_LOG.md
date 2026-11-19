@@ -1110,3 +1110,33 @@ public scans, dependency audit, and the fresh-clone one-command start with the r
 - D4 was not opened, hashed or admitted; it remains refused until 10:00 IST on 19 Nov 2026.
 - The real `veloxa` database stays at migration 0012; `veloxa_demolab` was not touched.
 - No company data reached Gemini; private review files and transcripts stay in `private/`.
+
+## 19 Nov 2026 (after the D4 release, 10:00 IST): D4 admission, publication and voice-note responses
+
+### Task given to AI
+
+Complete the D4 release: confirm the release time on the real clock, authorise and admit D4 source by source under
+the owner's K-13 decision, check point-in-time behaviour on the real data, publish the D4 items held in
+TRANSCRIPT_NOTES and ASSUMPTIONS, and publish the T6c and T6d responses.
+
+### Where AI was wrong, and what changed
+
+- The pre-release T6c draft said the pulse survey was not admitted; it was admitted with D2. Corrected.
+- The pre-release T6d draft said the engineering sources were not admitted; they were admitted with D3. The facts
+  were re-checked against the admitted records and the wording updated.
+- Three tests asserted that D4 was not authorised, which was true only before the release. Updated.
+- No owner conclusions were given for the D4 items, so the AI left every owner-conclusion field blank and kept
+  A-020 as a draft rather than writing conclusions on the owner's behalf.
+
+### Verification actually run
+
+Release time checked on the system clock (10:06 IST) before D4 was opened; dry run, then admission to the company
+lab (2 files, 2 records, sealed as K=4); every new evidence reference resolved against the original file; T6c
+verbatim, its message half and an "HR approved it" variant refused at pre-screen; T6d cited at K=4 and not when
+asked as known at 09:59 IST; full pytest (762 passed); real-data suites; safety and public scans.
+
+### Confirmations
+
+- The real `veloxa` database was not modified; admission went to the isolated company lab only.
+- ARCHITECTURE.md is unchanged; its D4 held items were not restored (standing owner instruction).
+- No names, identifiers, figures or quotations are published; the reference map stays private.

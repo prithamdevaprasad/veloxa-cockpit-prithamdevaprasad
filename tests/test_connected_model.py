@@ -104,5 +104,5 @@ def test_a_parsed_source_is_not_an_admitted_source():
     with pytest.raises(catalogue.UnclassifiedSource):
         catalogue.classify(rules, "data_room/engineering/Synthetic_Tracker_Export.xlsx")
     auth = load_authorisations()
-    assert "D4" not in auth and all(auth[p].sources for p in ("D2", "D3"))
+    assert all(auth[p].sources for p in ("D2", "D3", "D4"))           # K-13: every later pack is per source
     assert "data_room/hr/Pulse_Survey.xlsx" in auth["D2"].sources

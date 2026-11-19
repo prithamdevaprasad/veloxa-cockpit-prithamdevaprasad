@@ -19,7 +19,7 @@ The register of suspected mishearings, contradictions and open uncertainties acr
 
 | Visible from | Items currently in this file |
 |---|---|
-| D1 | M-01*, M-02, M-03*, M-04*, M-07*, M-08, M-09*, M-10*, M-12*, M-13*; C-01*, C-02, C-03, C-04, C-18, C-21, C-22, C-23, C-30*; U-01, U-02 |
+| D1 | M-02, M-03*, M-04*, M-07*, M-08, M-09*, M-10*, M-12*; C-01*, C-02, C-03, C-04, C-18, C-21, C-22, C-23, C-30*; U-01, U-02 |
 
 \* **Day 1 version:** the item's full evidence spans later packs. This file currently carries only its Day 1 evidence, and the full version replaces it on the release day shown under "Held for later release".
 
@@ -31,7 +31,7 @@ The "candidate reading" is the most direct match in the exports. It is **not** a
 
 | ID | What is suspected | Evidence | Candidate reading(s) | What would settle it | Visible from | Owner conclusion |
 |---|---|---|---|---|---|---|
-| M-01* | A first name in the CEO call is spelled differently from the HR export | [EV-040 · T1 · D1]; [EV-031 · HR export · D1] | The single HR-export employee with a matching first name | A record using the call's spelling | D1 | |
+| M-01 | A first name spelled differently from the HR export | [EV-040 · T1 · D1], [EV-096 · T5 · D3], [EV-117 · T6d · D4]; The HR export has one person with that first name [D1]. [EV-096 · T5 · D3] gives the same person a routing-lead role [D3]. [EV-102 · Email · D3] names them as leading the core engine [D3] | The Staff Engineer ([EV-062 · HR export · D1]) | A record using the transcript spelling | D4 | |
 | M-02 | A finance team member's first name is spelled differently from the HR export | [EV-049 · T2 · D1]; [EV-032 · HR export · D1] | The HR-export employee in that department with a matching name and duties | — | D1 | |
 | M-03* | A finance team member's surname is spelled differently from the HR export | [EV-049 · T2 · D1]; [EV-033 · HR export · D1]; [EV-012 · Email · D1] | The HR-export employee with matching duties; an email refers to the same person by first name | — | D1 | |
 | M-04* | A nickname in the CFO call matches no export | [EV-052 · T2 · D1]; [EV-034 · HR export · D1] | (a) A nickname for a leadership-team member; (b) someone not in the exports | A record using the nickname | D1 | |
@@ -40,7 +40,7 @@ The "candidate reading" is the most direct match in the exports. It is **not** a
 | M-09* | The HR system's name is misspelled phonetically | [EV-048 · T2 · D1]; [EV-007 · README · D1]; [EV-026 · HR export · D1] | Keka | — | D1 | |
 | M-10* | The survey tool's name is misspelled phonetically | [EV-042 · T1 · D1]; [EV-007 · README · D1] | Culture Amp | — | D1 | |
 | M-12* | The CRM product's name is misspelled phonetically (an action item asks for its export) | [EV-044 · T1 · D1] | HubSpot. No CRM export is supplied (GR-04) | — | D1 | |
-| M-13* | The chat product's name is misspelled phonetically (a channel is mentioned) | [EV-045 · T1 · D1] | Slack. No chat export is supplied (GR-04) | — | D1 | |
+| M-13 | Phonetic misspelling of the chat product | [EV-045 · T1 · D1], [EV-115 · T6c · D4]; No chat export supplied (GR-04) | Slack | — | D4 | |
 | M-11 | A misspelt hiring-tool name | [EV-083 · T3 · D2] [D2] | See C-13 (the conclusion is recorded there) | — | — | D2 | Keka Hire is the documented hiring tool. Treat the transcript wording as a likely mishearing; there is no supplied evidence establishing Lever. (19 Nov 2026) |
 | M-05 | A short form of a first name | [EV-084 · T3 · D2] [D2], [EV-088 · T4 · D3] [D3] | The Product Marketing Manager ([EV-066 · HR export · D1]) | The work-email local part in [EV-103 · Email · D3] matches the short form [D3]. The resignation letter PDF in `documents/` is signed with the full first name [D2] | — | D3 | The short name is consistent with the Product Marketing Manager: the work-email local part and signed resignation letter provide corroborating evidence. Map it to that HR record, retaining the source references. (19 Nov 2026) |
 | M-06 | A first name spelled differently from the HR export | [EV-087 · T4 · D3], [EV-088 · T4 · D3], [EV-086 · T4 · D3] [D3] | The Performance Marketing Manager ([EV-064 · HR export · D1]) | The role described in T4 (performance marketing) matches [D3] | — | D3 | The described performance-marketing role is consistent with the Performance Marketing Manager in the HR export. The role match supports the interpretation, but the supplied evidence does not independently prove the spelling is an alias for that person's name. (19 Nov 2026) |
@@ -530,6 +530,76 @@ The "candidate reading" is the most direct match in the exports. It is **not** a
 |---|---|---|
 | The personal account may belong to the Staff Engineer, given the matching name and repository activity, but the supplied evidence does not prove account ownership. | Keep the identity unlinked until an account mapping is available. Commit counts and timing must not be used as productivity or wellbeing signals. | 19 Nov 2026 |
 
+### Released with D4 (owner conclusions pending)
+
+Released 19 Nov 2026, 10:00 IST. The owner-conclusion fields are blank until the owner records a conclusion.
+
+### C-15 · Whether the CEO should see pulse comments
+- **Visible from:** D4 (its D2 evidence alone also supports the item).
+- **Evidence:**
+  - [EV-080 · T3 · D2]: the Head of People wants the CEO to see survey comments directly. [EV-114 · T3 · D2] records the visibility decision as an action for the CEO [D2].
+  - [EV-108 · Email · D2] (29 Sep): the Head of People tells the CEO the team is too small for comments to be shared [D2].
+  - [EV-113 · Pulse survey · D2]: every comment cell is suppressed for small teams [D2].
+  - [EV-115 · T6c · D4]: a second-hand claim that the Head of People approves. The request it accompanies concerns chat messages and a ranking, not pulse comments (A-021) [D4].
+- **Candidate interpretations:**
+  - (a) The T3 call was before or after the email (its date is unknown), and the position changed.
+  - (b) The summariser inverted the position.
+  - (c) The Head of People meant aggregate commentary rather than verbatim comments.
+  - (d) The later second-hand claim refers to something else.
+- **What would settle it:** The T3 call date; a written statement from the Head of People.
+
+| Owner conclusion | Owner reasoning (source believed, and why) | Date |
+|---|---|---|
+| | | |
+
+### C-24 · Notice period
+- **Visible from:** D4
+- **Evidence:**
+  - [EV-117 · T6d · D4]: the CEO gives an approximate notice period and hedges it [D4].
+  - The resignation letter PDF in `documents/`, from another employee, implies a shorter notice period than the CEO's figure [D2].
+- **Candidate interpretations:**
+  - (a) Notice terms differ by role or contract.
+  - (b) The CEO's approximation.
+  - (c) The policy changed.
+- **What would settle it:** The offer letter or the HR notice policy (not supplied).
+
+| Owner conclusion | Owner reasoning (source believed, and why) | Date |
+|---|---|---|
+| | | |
+
+### C-25 · The Staff Engineer's employment status
+- **Visible from:** D4
+- **Evidence:**
+  - [EV-062 · HR export · D1]: the Staff Engineer is active as at 31 Oct 2026 [D1].
+  - [EV-117 · T6d · D4]: the CEO reports that this person has resigned [D4].
+- **Candidate interpretations:**
+  - (a) Different valid times: the resignation came after the 31 Oct export, so the two are not in conflict.
+  - (b) The resignation came before 31 Oct but was not yet recorded.
+  - (c) The report is inaccurate.
+  - (See C-29 for timing and A-020 for how the report is modelled.)
+- **What would settle it:** An HR-system update or a resignation letter.
+
+| Owner conclusion | Owner reasoning (source believed, and why) | Date |
+|---|---|---|
+| | | |
+
+### C-29 · When the reported resignation happened
+- **Visible from:** D4
+- **Evidence:**
+  - [EV-117 · T6d · D4]: the resignation happened "this morning", relative to an unknown recording date [D4].
+  - The T6d file's creation time [EV-116 · T6d · D4] is several days before its pack's release (A-006).
+  - The pack is treated as released on 19 Nov 2026 at 10:00 IST (`email.md` line 44) [—].
+  - [EV-062 · HR export · D1]: active at 31 Oct [D1].
+- **Candidate interpretations:**
+  - (a) On or before the file's creation date.
+  - (b) The release day.
+  - (c) Unknown, so only "after 31 Oct and no later than the report" can be stated.
+- **What would settle it:** An HR-system update or a dated resignation letter.
+
+| Owner conclusion | Owner reasoning (source believed, and why) | Date |
+|---|---|---|
+| | | |
+
 ## Part D. Open ambiguities with no conflicting source
 
 | ID | Ambiguity | Evidence | Note | Visible from | Owner note |
@@ -549,7 +619,7 @@ These items exist in the owner's private working register. They are withheld for
 |---|---|---|
 | D2 (Tue 17 Nov) | Published 19 Nov 2026 (M-11; C-12, C-13, C-14, C-16, C-28, C-32; U-03) | M-03, M-04, M-09, M-10; C-01, C-30 |
 | D3 (Wed 18 Nov) | Published 19 Nov 2026 (M-05, M-06, M-14; C-05 to C-11, C-17, C-19, C-20, C-26, C-27, C-31; I-01; U-04) | M-07, M-12 |
-| D4 (Thu 19 Nov) | C-15 (its D2 evidence alone can be released on D2), C-24, C-25, C-29 | M-01, M-13 |
+| D4 (Thu 19 Nov) | Published 19 Nov 2026 (C-15, C-24, C-25, C-29; owner conclusions pending) | M-01, M-13 (full versions published) |
 
 ---
 
@@ -559,3 +629,4 @@ These items exist in the owner's private working register. They are withheld for
 |---|---|---|
 | 16 Nov 2026 | Day 1 public edition prepared from the owner's private working register:<br>• D1 items only, plus Day 1 versions of ten mixed-pack items;<br>• opaque evidence references;<br>• no quotations, names, identifiers, figures or individual pay details;<br>• C-21 generalised to a payroll-process finding.<br>Every owner-conclusion field is blank | AI (Claude Code), for owner review |
 | 19 Nov 2026 | D2/D3 items (26) | Published after release with the owner's conclusions; evidence cited by new opaque references; C-08 wording adjusted to the record | Owner conclusions; publication by AI (Claude Code) |
+| 19 Nov 2026 | D4 items | C-15, C-24, C-25, C-29 and the full M-01 and M-13 published after the D4 release; evidence cited by opaque references; owner-conclusion fields blank | AI (Claude Code), for owner review |

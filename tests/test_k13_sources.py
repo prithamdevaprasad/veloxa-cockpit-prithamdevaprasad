@@ -28,11 +28,11 @@ def test_a_pack_wide_authorisation_without_sources_is_rejected(tmp_path):
         load_authorisations(p)
 
 
-def test_configured_d2_d3_authorisations_list_sources_and_d4_is_not_authorised():
+def test_configured_d2_to_d4_authorisations_list_sources():
     auth = load_authorisations()
     assert auth["D1"].baseline
     assert len(auth["D2"].sources) == 10 and len(auth["D3"].sources) == 14
-    assert "D4" not in auth                                          # embargoed and not authorised
+    assert auth["D4"].sources == ("transcripts/T6c_CEO_Voice_Note.docx", "transcripts/T6d_CEO_Voice_Note.docx")
 
 
 def test_every_authorised_source_has_a_catalogue_rule():

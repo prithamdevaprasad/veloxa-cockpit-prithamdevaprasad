@@ -246,7 +246,7 @@ Reclassified as **GR-06** on 16 Nov 2026: it is an observed fact. GR-06 is held 
 | Would change my mind | A written compensation-visibility policy, or a CEO/CFO instruction that says otherwise |
 | Status | Draft: owner to review. **Not approved** |
 
-A-018, A-019 and A-020 are held for later release.
+A-018 and A-019 are published in section 4b; A-020 in section 4c.
 
 ### A-021 · CEO voice notes are requests, not statements of fact
 | | |
@@ -379,6 +379,19 @@ A-023 is held for later release.
 | Confidence (proposed) | Low–Medium |
 | Would change my mind | The delivery burndown (GR-07) or the issue tracker's change history |
 | Status | Owner decision (19 Nov 2026): keep as a low-to-medium-confidence limitation. The delivery bound depends on Jira's resolved story points representing completed work and a fixed scope. Continued commits alongside no resolved points in the final month weaken that assumption. It is not a delivery forecast. |
+
+## 4c. Released with D4 (19 Nov 2026; owner review pending)
+
+### A-020 · The voice-note resignation report is a reported, unverified status
+| | |
+|---|---|
+| Date | 16 Nov 2026 |
+| Assumption | The resignation reported in a CEO voice note is treated as a *reported* status, known from the D4 admission (19 Nov 2026, 10:00 IST). It does not overwrite the HR export. When the resignation happened is **not** assumed: the note's "this morning" is relative to an unknown recording date (C-29) |
+| Source | [EV-117 · T6d · D4]; [EV-062 · HR export · D1] (Status column, as at 31 Oct) |
+| Pack | D4 |
+| Confidence (proposed) | Medium |
+| Would change my mind | An HR-system update or a resignation letter |
+| Status | Draft: owner to review |
 
 ## 5. Assumptions considered and deliberately not made
 
@@ -613,7 +626,7 @@ Common fields for every entry below:
 |---|---|
 | D2 (Tue 17 Nov) | Published 19 Nov 2026 (A-018, A-023; section 4b) |
 | D3 (Wed 18 Nov) | Published 19 Nov 2026 (GR-06, GR-07; A-007, A-019; section 4b) |
-| D4 (Thu 19 Nov) | A-020 |
+| D4 (Thu 19 Nov) | Published 19 Nov 2026 (A-020; section 4c) |
 
 ## Revision log
 
@@ -625,3 +638,4 @@ Common fields for every entry below:
 | 16 Nov 2026 | A-024, A-025 r2, A-026 | Approved by the owner: A-024 with strict fail-closed handling; A-025 in its corrected r2 form (actual extraction timestamps); A-026 as written | Owner decision, recorded by AI (Claude Code) |
 | 19 Nov 2026 | A-101 to A-114 | Persona inventions for the 14 agent slots logged from the deterministic generator (9 categories each, 126 details); never evidence | AI (Claude Code), for owner review |
 | 19 Nov 2026 | A-018, A-023, GR-06, GR-07, A-007, A-019 | Published after release with the owner's decisions; evidence cited by new opaque references | Owner decisions; publication by AI (Claude Code) |
+| 19 Nov 2026 | A-020 | Published after the D4 release; status remains draft for owner review | AI (Claude Code), for owner review |

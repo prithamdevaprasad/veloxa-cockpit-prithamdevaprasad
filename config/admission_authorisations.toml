@@ -52,3 +52,14 @@ sources = [
   "transcripts/T5_VP_Engineering_Call.docx",
   "transcripts/T6b_CEO_Voice_Note.docx",
 ]
+
+# K-13 (owner decision, 18 Nov 2026): D4 per source, only after 2026-11-19 10:00 IST (admitted after that time).
+[[pack]]
+id = "D4"
+approved_by = "Owner"
+approved_on = 2026-11-18
+decision_record = "Owner directive 18 Nov 2026 (Company Intelligence Foundation), K-13 per-source authorisation"
+sources = [
+  "transcripts/T6c_CEO_Voice_Note.docx",       # meeting_summaries / confidential
+  "transcripts/T6d_CEO_Voice_Note.docx",
+]

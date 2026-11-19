@@ -46,7 +46,7 @@ def company(db):
 
 def test_released_and_authorised_day_folders_are_admitted_source_by_source(company):
     r = company["results"]
-    assert [p for p in r] == ["D1", "D2", "D3"][:len(r)] and len(r) >= 3
+    assert [p for p in r] == ["D1", "D2", "D3", "D4"][:len(r)] and len(r) >= 3     # D4 only after its release
     assert (r["D2"].file_count, r["D3"].file_count) == (10, 14)
     if datetime.now(UTC) < datetime.fromisoformat("2026-11-19T10:00:00+05:30"):
         assert company["d4"] in ("not_yet_released", "not_authorised")      # D4 embargoed: never opened
