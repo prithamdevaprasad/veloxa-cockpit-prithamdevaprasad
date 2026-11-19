@@ -134,7 +134,7 @@ def cases(f: dict) -> list[dict]:
     eng, fin, ppl, mkt = "syn-eng-core", "syn-fin-revenue", "syn-ppl-headcount", "syn-mkt-campaigns"
     for i, (a, _label) in enumerate(((eng, "engineering"), (fin, "finance"), (ppl, "people"), (mkt, "marketing"))):
         c.append(_g(f"G0{i + 1}", "greeting", a, [
-            _t("Hi", ("answered",), ["AI representation", "not the person"]),
+            _t("Hi", ("answered",), ["AI assistant", "not the person"]),
             _t("What can you do?", ("answered",), ["Any updates?"]),
             _t("Thanks!", ("answered",), ["welcome"]),
         ]))
@@ -167,7 +167,7 @@ def cases(f: dict) -> list[dict]:
             _t("What did I ask you earlier?", ("answered",), ["Any updates?"]),
         ]))
     c.append(_g("G05", "greeting", eng, [_t("Good morning", ("answered",), ["Hello"])]))
-    c.append(_g("G06", "greeting", "syn-eng-pulse", [_t("hello there!", ("answered",), ["AI representation"])]))
+    c.append(_g("G06", "greeting", "syn-eng-pulse", [_t("hello there!", ("answered",), ["AI assistant"])]))
     c.append(_g("F05", "follow_up", "syn-eng-vega", [_t("Tell me more", ("answered",), ["nothing to expand"])]))
     c.append(_g("F06", "follow_up", "syn-fin-cash", [_t("Show evidence", ("answered",), ["nothing to cite"])]))
     return c

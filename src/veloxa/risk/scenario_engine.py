@@ -101,8 +101,9 @@ def parse(text: str, names: list[str]) -> list[dict]:
 
 def run(conn, basis, tz: str, changes: list[dict]) -> dict:
     if not changes:
-        raise ScenarioError("no change was recognised; name a release or commitment and a shift, e.g. "
-                            "“move Orbit Core 3.0 by 3 weeks”")
+        names = [s["name"] for s in subjects(conn, basis, tz)]
+        example = f"“move {names[0]} by 3 weeks”" if names else "a release named in the records and a shift"
+        raise ScenarioError("no change was recognised; name a release or commitment and a shift, e.g. " + example)
     if len(changes) > 6:
         raise ScenarioError("at most six simultaneous changes")
     known = {s["name"].lower(): s for s in subjects(conn, basis, tz)}

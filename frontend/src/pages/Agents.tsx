@@ -1,3 +1,4 @@
+import { JiraTaskCard } from "../ui/JiraTask";
 import { useRef, useState } from "react";
 import { api, ApiError, newIdempotencyKey } from "../api/client";
 import { useApi } from "../api/useApi";
@@ -106,7 +107,7 @@ function AgentDetail({ agent }: { agent: AgentSummary }) {
           <HistoryView agentId={agent.agent_id} onOpen={(d) => {
             setResume(d);
             setSession({ session_id: d.session_id, agent_id: d.agent_id, config_version: d.config_version,
-                         batch_seq: d.batch_seq, label: d.turns[0]?.label ?? "AI representation of an employee role." });
+                         batch_seq: d.batch_seq, label: d.turns[0]?.label ?? "AI assistant of an employee role." });
             setTab("interview");
           }} />
         ) : !canInterview(agent) ? (
@@ -124,7 +125,11 @@ function AgentDetail({ agent }: { agent: AgentSummary }) {
   );
 }
 
-type Entry = { q: string; key: string; turn?: AgentTurn; error?: ApiError; cancelled?: boolean };
+type Entry = { q: string; key: string; turn?: AgentTurn; error?: ApiError; cancelled?: boolean; task?: boolean };
+// "add a task", "give you a task and add it in Jira": handled by the Jira task card, not by the assistant (which
+// never acts). The card opens right in the interview.
+const TASK = /(task|ticket|jira|todo|to-do)/i;
+const DO = /(add|create|give|assign|make|need|open|log|raise|put|set up|update|change|move)/i;
 
 export function Conversation({ session, history, onClosed, opening }: { session: AgentSession;
   history: SessionDetail | null; onClosed: () => void; opening?: string }) {
@@ -154,6 +159,7 @@ export function Conversation({ session, history, onClosed, opening }: { session:
     const q = msg.trim();
     if (!q || busy) return;
     setMsg("");
+    if (TASK.test(q) && DO.test(q)) { setLog((l) => [...l, { q, key: newIdempotencyKey(), task: true }]); return; }
     await run(q, newIdempotencyKey());               // one key per message: a retry can never duplicate the turn
   }
 
@@ -171,7 +177,11 @@ export function Conversation({ session, history, onClosed, opening }: { session:
         {log.map((l, i) => (
           <div key={i} className="stack">
             <div className="bubble me">{l.q}</div>
-            {l.cancelled ? (
+            {l.task ? <>
+                <div className="bubble agent">I can't act for anyone, but you can create or update the Jira task
+                  right here. Fill in what you need and check the preview before it is written.</div>
+                <JiraTaskCard draft={{ description: `Requested in a Veloxa interview: “${l.q}”` }} />
+              </> : l.cancelled ? (
               <div className="callout warn small">Cancelled. The server may still finish this turn; Retry sends the
                 same request, which returns that turn instead of creating a new one.
                 <Button variant="ghost" onClick={() => run(l.q, l.key)} disabled={busy}>Retry</Button></div>

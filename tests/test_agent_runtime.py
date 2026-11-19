@@ -64,7 +64,7 @@ def test_a_full_turn_is_grounded_labelled_audited_and_remembered(db, app_conn, e
     sid = rt.open_session(tenant, ALPHA, cfg.agent_id, basis)["session_id"]
     turn = ask(rt, tenant, sid, "What is our headcount?")
     assert turn["status"] in ("answered", "qualified") and turn["claims"]
-    assert turn["label"].startswith("AI representation") and turn["read_basis"]["batch_seq"] == basis.batch_seq
+    assert turn["label"].startswith("AI assistant") and turn["read_basis"]["batch_seq"] == basis.batch_seq
     assert [t["tool"] for t in turn["tools"]] == ["people.headcount"] and turn["tools"][0]["decision"] == "allowed"
     cited = {e["record_id"] for e in turn["evidence"]}
     assert all(set(c["evidence"]) <= cited for c in turn["claims"])

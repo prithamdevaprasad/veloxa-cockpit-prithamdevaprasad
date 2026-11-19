@@ -8,5 +8,6 @@ import "@fontsource/ibm-plex-mono/latin-600.css";
 import { App } from "./App";
 import "./styles.css";
 import "./workspace.css";
+import "./pages.css";
 
 createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);

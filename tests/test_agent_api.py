@@ -56,7 +56,7 @@ def test_an_interview_round_trip_is_idempotent_and_private_to_its_interviewer(db
     _, cfg = seeded
     with client(db, monkeypatch, runtime="synthetic") as c:
         s = c.post(f"/v1/agents/{cfg.agent_id}/sessions", json={}, headers=AUTH).json()
-        assert s["label"].startswith("AI representation")
+        assert s["label"].startswith("AI assistant")
         msg = {"message": "What is our headcount?", "idempotency_key": "syn-api-0001"}
         t1 = c.post(f"/v1/sessions/{s['session_id']}/messages", json=msg, headers=AUTH).json()
         assert t1["status"] in ("answered", "qualified") and t1["claims"] and t1["replayed"] is False

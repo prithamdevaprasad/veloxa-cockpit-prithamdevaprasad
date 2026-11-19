@@ -186,7 +186,9 @@ function SourcesCard({ sources, loading, go }: { sources: ChartSource[]; loading
  * a way to open its explanation. No colour carries meaning on its own; unranked is never shown as ranked. */
 function WorrySummary({ go }: { go: (r: string) => void }) {
   const [w] = useApi((s) => product.worry(undefined, s), []);
-  const open = (id: string) => { window.location.hash = `/worry?item=${encodeURIComponent(id)}`; };
+  const ask = useAsk();
+  const open = (title: string) => ask.ask(`Explain this concern: "${title}". Why does it matter, what evidence `
+    + "supports it, and what is still unknown?", { kind: "concern", subject: title }, true);
   return (
     <Section title="What needs attention" aria-label="What needs attention"
              subtitle="Concerns backed by company records, grouped by how much attention they need."
@@ -211,14 +213,14 @@ function WorrySummary({ go }: { go: (r: string) => void }) {
                       {(x.severity.criteria.C1?.status === "measured" ? x.severity.criteria.C1.reason
                         : Object.values(x.severity.criteria).find((c) => c.status === "measured")?.reason) ?? ""}
                       {x.evidence.length ? ` ${x.evidence.length} supporting record${x.evidence.length === 1 ? "" : "s"}.` : ""}</span></span>
-                    <button className="link small" onClick={() => open(x.item_id)}>Explain</button>
+                    <button className="link small" onClick={() => open(x.title)}>Explain</button>
                   </li>))}
                 {unranked.slice(0, 3).map((u) => (
                   <li key={u.id}>
                     <span className="status-tag">{u.status}</span>
                     <span className="what">{u.title}<span className="small muted" style={{ display: "block" }}>{u.why}
                       {u.n ? ` ${u.n} record${u.n === 1 ? "" : "s"}.` : ""}</span></span>
-                    <button className="link small" onClick={() => open(u.id)}>Explain</button>
+                    <button className="link small" onClick={() => open(u.title)}>Explain</button>
                   </li>))}
               </ul>);
           })()}

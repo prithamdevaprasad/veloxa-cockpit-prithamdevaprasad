@@ -71,7 +71,7 @@ test("Journey C: a synthetic agent interview, memory and close; slots stay close
   await page.getByRole("cell", { name: "syn-demo-ppl" }).click();
   await expect(page.getByText("Synthetic test agent. It represents no employee.")).toBeVisible();
   await page.getByRole("button", { name: "Start interview" }).click();
-  await expect(page.getByText(/AI representation/).first()).toBeVisible();
+  await expect(page.getByText(/AI assistant of an employee role/).first()).toBeVisible();
   await page.getByLabel("Message to the agent").fill("What is our headcount?");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText("People in the HR export: 2").first()).toBeVisible();
@@ -324,7 +324,7 @@ test("AI team: no HR mapping here, so only labelled synthetic agents appear, wit
   const drawer = page.getByRole("dialog");
   await expect(drawer.getByRole("note")).toContainText("It is not the actual employee.");
   await expect(drawer.getByRole("button", { name: "Start interview" })).toHaveCount(0);   // one click: already started
-  await expect(drawer.getByText(/I'm the AI representation of/)).toBeVisible();            // the agent's opening
+  await expect(drawer.getByText(/AI assistant/)).toBeVisible();            // the agent's opening
   const box = (await drawer.boundingBox())!, vp = page.viewportSize()!;                    // centred modal, not a drawer
   expect(Math.abs(box.x + box.width / 2 - vp.width / 2)).toBeLessThan(4);
   expect(box.width / vp.width).toBeGreaterThan(0.6);
@@ -436,12 +436,12 @@ test("sign-in errors are explained", async ({ page }) => {
   await expect(page.getByRole("alert")).toContainText("Single sign-on isn't configured");
 });
 
-test("People is the HR directory; AI representations are a separate, disclosed section", async ({ page }) => {
+test("People is the HR directory; AI assistants are a separate, disclosed section", async ({ page }) => {
   await signIn(page);
   await page.goto("/#/people");
   await expect(page.getByRole("heading", { name: "People", exact: true })).toBeVisible();
-  await expect(page.getByText(/people in the HR export/)).toBeVisible();
-  await expect(page.getByText(/It is not the person, does not speak for them/)).toBeVisible();
+  await expect(page.getByText(/people in the HR export/i)).toBeVisible();
+  await expect(page.getByText("AI assistants available")).toBeVisible();
   await page.goto("/#/overview");
   await expect(page.getByRole("region", { name: "People overview" })).toHaveCount(0);     // no second roster
   await expect(page.getByRole("region", { name: "Meet your AI team" })).toContainText("not the employees");

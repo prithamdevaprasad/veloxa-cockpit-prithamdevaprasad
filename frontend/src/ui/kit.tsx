@@ -6,6 +6,8 @@ import { AgentAvatar } from "./art";
 const PATHS: Record<string, string> = {
   overview: "M4 13h6V4H4v9zm0 7h6v-4H4v4zm10 0h6v-9h-6v9zm0-16v4h6V4h-6z",
   ask: "M5 5h14v10H9l-4 4V5zm4 4h6M9 12h4",
+  check: "M5 12.5l4.5 4.5L19 7.5",
+  graph: "M6 6m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M18 7m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M12 18m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M7.7 7.2l3.2 9M16.3 8.2l-3.3 8M8 6.2l8 .6",
   agents: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 8c0-3.3 3.1-6 7-6s7 2.7 7 6",
   departments: "M4 20V8l8-4 8 4v12M9 20v-5h6v5M4 20h16",
   evidence: "M7 3h7l5 5v13H7V3zm7 0v5h5M10 13h6M10 17h6",

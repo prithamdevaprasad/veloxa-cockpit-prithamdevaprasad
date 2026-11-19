@@ -404,10 +404,12 @@ class Jira:
                                                    "has_default": bool(f.get("hasDefaultValue"))}
                 for f in r.get("fields", r.get("values", []))}
 
-    def assignable(self, tenant: str, key: str, query: str) -> list[dict]:
-        """Users Jira itself says may be assigned this issue (never invented; display names only to the UI)."""
+    def assignable(self, tenant: str, key: str, query: str, project: str | None = None) -> list[dict]:
+        """Users Jira itself says may be assigned this issue, or new issues in `project` (never invented; display
+        names only to the UI)."""
+        scope = {"project": project} if project else {"issueKey": key}
         r = self.call(tenant, "GET", "/rest/api/3/user/assignable/search",
-                      params={"issueKey": key, "query": query[:60], "maxResults": 10})
+                      params={**scope, "query": query[:60], "maxResults": 10})
         return [{"account_id": u["accountId"], "name": u.get("displayName")} for u in (r if isinstance(r, list) else [])
                 if u.get("accountId") and u.get("active", True)]
 

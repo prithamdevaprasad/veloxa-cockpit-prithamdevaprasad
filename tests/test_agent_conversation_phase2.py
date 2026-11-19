@@ -24,9 +24,9 @@ def test_a_greeting_with_a_question_is_not_small_talk():
 def test_small_talk_says_it_is_an_ai_representation_and_states_no_facts():
     who = {"display_name": "Test Person", "title": "Engineer", "department": "Engineering"}
     hello = c.small_talk("greeting", who)
-    assert "AI representation of Test Person" in hello and "not the person" in hello
+    assert "Test Person's AI assistant" in hello and "not the person" in hello
     assert "Any updates?" in c.small_talk("help", who)
-    assert c.small_talk("greeting", {}).startswith("Hello. I'm an AI representation")
+    assert c.small_talk("greeting", {}).startswith("Hello. I'm an AI assistant")
 
 
 def test_tell_me_more_continues_the_last_answer_and_then_says_it_is_complete():

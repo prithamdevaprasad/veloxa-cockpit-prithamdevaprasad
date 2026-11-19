@@ -710,7 +710,7 @@ def create_app(dsn: str | None = None, clock: Callable[[], datetime] | None = No
 
     @app.post("/v1/sessions/{session_id}/messages")
     def agent_message(session_id: uuid.UUID, body: MessageRequest, authorization: str | None = Header(default=None)):
-        """One agent turn: cited claims from KB ∩ AZ ∩ POL only, labelled as an AI representation; idempotent per
+        """One agent turn: cited claims from KB ∩ AZ ∩ POL only, labelled as an AI assistant; idempotent per
         (session, idempotency_key)."""
         from .agents.runtime import AgentError, AgentRequest
 

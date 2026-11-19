@@ -187,8 +187,8 @@ def history_reply(kind: str, history: list[dict], persona: list[dict] | None = N
 def small_talk(kind: str, who: dict) -> str:
     """Greetings, thanks and help: answered without searching records (nothing here is a company fact)."""
     name = who.get("display_name")
-    me = (f"the AI representation of {name}" + (f", {who['title']}" if who.get("title") else "")
-          + (f" in {who['department']}" if who.get("department") else "")) if name else "an AI representation"
+    me = (f"{name}'s AI assistant" + (f", {who['title']}" if who.get("title") else "")
+          + (f" in {who['department']}" if who.get("department") else "")) if name else "an AI assistant"
     if kind == "greeting":
         return (f"Hello. I'm {me}, built from approved company records; I'm not the person themselves. "
                 "Ask me for any updates, or about my role.")

@@ -29,8 +29,8 @@ export function Profile({ p, onClose, onInterview }: { p: Person; onClose: () =>
           <div><strong>{p.title}</strong><div className="small muted">{p.department}</div></div>
         </div>
         {onInterview && <div className="stack" style={{ gap: 6 }}>
-          <Button variant="primary" onClick={onInterview}>Interview AI representation</Button>
-          <p className="small muted">This is an AI representation grounded in approved company records. It is not the
+          <Button variant="primary" onClick={onInterview}>Interview AI assistant</Button>
+          <p className="small muted">This is an AI assistant grounded in approved company records. It is not the
             actual employee.</p></div>}
         <Tabs label="Profile" value={tab} onChange={setTab} tabs={[{ value: "overview", label: "Overview" },
           { value: "workload", label: "Workload" }, { value: "personal", label: "Personal" },

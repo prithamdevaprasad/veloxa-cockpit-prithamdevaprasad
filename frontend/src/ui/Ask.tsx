@@ -7,12 +7,16 @@ import { ApiError, getToken } from "../api/client";
 import { product } from "../api/product";
 import type { Thread, ThreadSummary } from "../api/product-types";
 import { AnswerView } from "./AnswerView";
+import { JiraTaskCard, type TaskDraft } from "./JiraTask";
 import { Icon } from "./kit";
 import { Button, ErrorState, Loading } from "./index";
 
-type AskCtx = { openThread: (threadId: string, draft?: string) => void; ask: (question: string) => void; open: () => void;
-                full: boolean };
-const Ctx = createContext<AskCtx>({ openThread: () => undefined, ask: () => undefined, open: () => undefined, full: false });
+export type AskContext = { kind: string; subject: string };
+type AskCtx = { openThread: (threadId: string, draft?: string) => void;
+                ask: (question: string, context?: AskContext, send?: boolean) => void; open: () => void;
+                task: (draft?: TaskDraft) => void; full: boolean };
+const Ctx = createContext<AskCtx>({ openThread: () => undefined, ask: () => undefined, open: () => undefined,
+                                   task: () => undefined, full: false });
 export const useAsk = () => useContext(Ctx);
 
 const isAskRoute = () => /^#\/?ask$/.test(window.location.hash);
@@ -25,6 +29,9 @@ export function AskProvider({ children }: { children: ReactNode }) {
   const [threadId, setThreadId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [focusTick, setFocusTick] = useState(0);
+  const [askContext, setAskContext] = useState<AskContext | null>(null);
+  const [sendTick, setSendTick] = useState(0);
+  const [taskDraft, setTaskDraft] = useState<TaskDraft | null>(null);
   const expandedHere = useRef(false);        // true when this session pushed #/ask, so Back returns to the page
   const cameFrom = useRef<string | null>(null);  // the page the overlay expanded from
 
@@ -64,7 +71,12 @@ export function AskProvider({ children }: { children: ReactNode }) {
 
   const ctx = useMemo<AskCtx>(() => ({
     openThread: (id, q) => { setThreadId(id); if (q) setDraft(q); setOpen(true); setFocusTick((t) => t + 1); },
-    ask: (q) => { if (q) { setDraft(q); setThreadId(null); } setOpen(true); setFocusTick((t) => t + 1); },
+    ask: (q, context, send) => {
+      if (q) { setDraft(q); setThreadId(null); setAskContext(context ?? null); }
+      setOpen(true); setFocusTick((t) => t + 1);
+      if (q && send) setSendTick((t) => t + 1);
+    },
+    task: (d) => { setTaskDraft(d ?? {}); setOpen(true); },
     open: () => { setOpen(true); setFocusTick((t) => t + 1); },
     full,
   }), [full]);
@@ -75,14 +87,18 @@ export function AskProvider({ children }: { children: ReactNode }) {
       {children}
       {visible && !full && <div className="ask-backdrop" onClick={close} />}
       {visible && <AskPanel full={full} threadId={threadId} setThreadId={setThreadId} draft={draft} setDraft={setDraft}
-                            focusTick={focusTick} onClose={close} onExpand={expand} onCollapse={leaveFull} />}
+                            focusTick={focusTick} askContext={askContext} sendTick={sendTick}
+                            taskDraft={taskDraft} setTaskDraft={setTaskDraft} onClose={close} onExpand={expand} onCollapse={leaveFull} />}
     </Ctx.Provider>
   );
 }
 
-function AskPanel({ full, threadId, setThreadId, draft, setDraft, focusTick, onClose, onExpand, onCollapse }: {
+function AskPanel({ full, threadId, setThreadId, draft, setDraft, focusTick, askContext, sendTick, taskDraft,
+                    setTaskDraft, onClose, onExpand, onCollapse }: {
   full: boolean; threadId: string | null; setThreadId: (id: string | null) => void; draft: string;
-  setDraft: (s: string) => void; focusTick: number; onClose: () => void; onExpand: () => void; onCollapse: () => void }) {
+  setDraft: (s: string) => void; focusTick: number; askContext: AskContext | null; sendTick: number;
+  taskDraft: TaskDraft | null; setTaskDraft: (d: TaskDraft | null) => void;
+  onClose: () => void; onExpand: () => void; onCollapse: () => void }) {
   const [threads, setThreads] = useState<ThreadSummary[] | null>(null);
   const [thread, setThread] = useState<Thread | null>(null);
   const [filter, setFilter] = useState("");
@@ -127,7 +143,8 @@ function AskPanel({ full, threadId, setThreadId, draft, setDraft, focusTick, onC
     try {
       let id = threadId;
       if (!id) {
-        id = (await product.newThread(question.slice(0, 80))).thread_id;
+        id = (await product.newThread((askContext?.subject ?? question).slice(0, 80),
+                                      askContext ? { ...askContext } : {})).thread_id;
         created.current = id;
         setThreadId(id);
       }
@@ -141,6 +158,8 @@ function AskPanel({ full, threadId, setThreadId, draft, setDraft, focusTick, onC
       setBusy(false); setPending(null);
     }
   }
+
+  useEffect(() => { if (sendTick) void send(); }, [sendTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const shown = (threads ?? []).filter((t) => t.title.toLowerCase().includes(filter.trim().toLowerCase()));
   const context = thread?.context as { kind?: string } | undefined;
@@ -179,6 +198,8 @@ function AskPanel({ full, threadId, setThreadId, draft, setDraft, focusTick, onC
           {context?.kind === "agent_update" &&
             <span className="small muted">About an agent update. Follow-ups keep this context.</span>}
           <span className="spacer" />
+          <Button onClick={() => setTaskDraft(taskDraft ? null : {})} aria-expanded={Boolean(taskDraft)}>
+            <Icon name="plus" size={14} /> Jira task</Button>
           <label className="small">Known as at <input className="input slim" type="date" value={asOf}
                  onChange={(e) => setAsOf(e.target.value)} aria-label="Knowledge-point date" /></label>
           {full
@@ -210,6 +231,7 @@ function AskPanel({ full, threadId, setThreadId, draft, setDraft, focusTick, onC
             ))}
             {pending && <div className="turn"><div className="you">{pending}</div><Loading lines={3} label="Answering" /></div>}
             {error && <ErrorState error={error} />}
+            {taskDraft && <JiraTaskCard key={JSON.stringify(taskDraft)} draft={taskDraft} onClose={() => setTaskDraft(null)} />}
             <div ref={end} />
           </div>
         </div>

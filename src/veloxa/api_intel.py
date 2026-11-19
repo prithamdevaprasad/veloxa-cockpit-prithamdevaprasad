@@ -86,7 +86,7 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
     def directory(as_known_at: str | None = None, authorization: str | None = Header(default=None)):
         """The real HR directory: every person in the HR export at the basis, work facts only (name, title,
         department, recorded status, join date, manager), each row only if the reader may read its record. Whether
-        an AI representation exists is shown, but the person and the AI representation are never the same thing."""
+        an AI assistant exists is shown, but the person and the AI assistant are never the same thing."""
         from .agents import people
 
         with connect(state["dsn"]) as conn:
@@ -111,6 +111,29 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
                     for s in staff if s["source_record_id"] in ok]
             return {"read_basis": basis_json(basis), "people": rows, "count": len(rows),
                     "withheld": len(staff) - len(rows)}
+
+    @app.get("/v1/map")
+    def business_map(as_known_at: str | None = None, authorization: str | None = Header(default=None)):
+        """The business risk and dependency map: every visible source pooled into one graph of stated links."""
+        from .agents import people
+        from .risk import business_map as bm
+        from .risk import worry as w
+        from .signals.registry import assessment_date
+
+        with connect(state["dsn"]) as conn:
+            p, basis, tz = ctx(conn, authorization, as_known_at)
+            if basis is None:
+                return p
+            if not basis.batch_seq:
+                return {"nodes": [], "edges": [], "hidden_for_access": 0, "notes": ["Nothing is admitted yet."],
+                        "read_basis": basis_json(basis)}
+            with tenant_tx(conn, p.tenant_id, p.principal_id, basis.batch_seq):
+                staff = [dict(r) for r in people._people_at(conn, p.tenant_id, basis.batch_seq)]
+                items = w.build_items(conn, p.tenant_id, basis.batch_seq, assessment_date(basis, tz)) \
+                    if schema.available(conn, "company_intelligence") else []
+            ok_people = readable(conn, p, basis, [s["source_record_id"] for s in staff])
+            staff = [s for s in staff if s["source_record_id"] in ok_people]
+            return bm.build(conn, basis, tz, p, lambda ids: readable(conn, p, basis, ids), staff, items)
 
     @app.get("/v1/people")
     def people_list(as_known_at: str | None = None, authorization: str | None = Header(default=None)):

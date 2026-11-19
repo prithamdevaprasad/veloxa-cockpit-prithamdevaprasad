@@ -7,7 +7,7 @@ from veloxa.agents import conversation as cv
 CLAIMS = [
     {
         "fact_id": "self.identity",
-        "text": "I'm the AI representation of Person A, built from their HR record",
+        "text": "I'm Person A's AI assistant, built from their HR record",
         "evidence": ["hr#1"],
     },
     {"fact_id": "self.title", "text": "My job title is Staff Engineer", "evidence": ["hr#1"]},

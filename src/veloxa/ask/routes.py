@@ -434,7 +434,7 @@ class Router:
 
     def personal(self, q):
         return _result(self.basis_json, "abstained", "I read this as a question about an employee's personal life.",
-                       NO_RECORD + " Personal details are not part of the company records. The AI representations "
+                       NO_RECORD + " Personal details are not part of the company records. The AI assistants "
                        "have invented persona details for the simulation; they are labelled as fictional and are "
                        "never facts about a real employee.", [], [],
                        ["personal details are outside the company records"])

@@ -1,5 +1,5 @@
-// The CEO's AI team: the 14 people from the HR record, each with an AI representation that can be interviewed.
-// People = employee records; agents = AI representations of those people; interviews = conversations with them.
+// The CEO's AI team: the 14 people from the HR record, each with an AI assistant that can be interviewed.
+// People = employee records; agents = AI assistants of those people; interviews = conversations with them.
 // The person -> agent link is the explicit owner-approved mapping returned by /v1/people (never inferred here).
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../api/client";
@@ -13,7 +13,7 @@ import { Button, Drawer, ErrorState, Loading, PageHead, Section, Segmented } fro
 import { Conversation, HistoryView } from "./Agents";
 import { Profile } from "./People";
 
-export const DISCLOSURE = "This is an AI representation grounded in approved company records. It is not the actual employee.";
+export const DISCLOSURE = "This is an AI assistant grounded in approved company records. It is not the actual employee.";
 const DEPTS = [["Engineering", "engineering"], ["Finance", "finance"], ["People & Ops", "people_ops"],
                ["Marketing", "marketing"]] as const;
 const HELP: Record<string, string> = {
@@ -72,13 +72,13 @@ export function AiTeamPage() {
   const shown = team.people.filter((p) => dept === "all" || p.department === dept);
   return (
     <>
-      <PageHead title="AI team" intro="The people in your company, and the AI representation of each one that you can
+      <PageHead title="AI team" intro="The people in your company, and the AI assistant of each one that you can
         interview. Every answer comes from approved company records and shows its sources." />
       <p className="callout info small" role="note">{DISCLOSURE}</p>
       {team.loading && <Section><Loading lines={4} /></Section>}
       {team.error && <Section><ErrorState error={team.error} onRetry={team.reload} /></Section>}
       {!team.loading && !team.error && team.people.length === 0 && (
-        <Section><Guidance title="No AI representations yet">An AI representation is created only after the owner
+        <Section><Guidance title="No AI assistants yet">An AI assistant is created only after the owner
           approves which HR record it represents. Administrators can see the configuration under Admin.</Guidance></Section>)}
       {team.people.length > 0 && <>
         <div className="row" style={{ marginBottom: 12 }}>
@@ -119,7 +119,7 @@ export function AiTeamPage() {
   );
 }
 
-/** An interview with ONE person's AI representation; its history and sessions stay with that agent only. */
+/** An interview with ONE person's AI assistant; its history and sessions stay with that agent only. */
 export function InterviewDrawer({ person, agent, onClose }: { person: Person; agent?: AgentSummary; onClose: () => void }) {
   const [session, setSession] = useState<AgentSession | null>(null);
   const [resume, setResume] = useState<SessionDetail | null>(null);
@@ -133,11 +133,11 @@ export function InterviewDrawer({ person, agent, onClose }: { person: Person; ag
   // One click opens the interview: the session starts as soon as the modal mounts (no second button).
   const ok = canInterview(agent);
   useEffect(() => { if (ok && !session) void start(); }, [person.agent_id, ok]); // eslint-disable-line react-hooks/exhaustive-deps
-  const opening = `Hello, I'm the AI representation of ${person.name ?? "this team member"}`
+  const opening = `Hello, I'm ${person.name ? `${person.name}'s` : "this team member's"} AI assistant`
     + `${person.title ? `, ${person.title}` : ""}${person.department ? ` in ${person.department}` : ""}. I answer from `
     + "approved company records only. Ask me about my role, my work, or what the records do and don't show.";
   return (
-    <Drawer modal title={`Interview: ${person.name ?? "AI representation"}`} onClose={onClose}
+    <Drawer modal title={`Interview: ${person.name ?? "AI assistant"}`} onClose={onClose}
             header={<div className="row" style={{ flexWrap: "nowrap", gap: 12 }}>
               <AgentAvatar id={person.name ?? person.agent_id} size={44} />
               <div><h2>{person.name}</h2><div className="small muted">{person.title}, {person.department}</div></div>
@@ -152,7 +152,7 @@ export function InterviewDrawer({ person, agent, onClose }: { person: Person; ag
                          batch_seq: d.batch_seq, label: d.turns[0]?.label ?? DISCLOSURE });
             setTab("interview");
           }} />
-          : !canInterview(agent) ? <p className="callout small">Interviews with this AI representation are not available
+          : !canInterview(agent) ? <p className="callout small">Interviews with this AI assistant are not available
               to you.</p>
           : session ? <Conversation key={session.session_id} session={session} history={resume}
                                     opening={resume ? undefined : opening}
@@ -174,7 +174,7 @@ export function MeetYourAiTeam({ go }: { go: (r: string) => void }) {
              subtitle="Non-human assistants grounded in employee records. They are not the employees and act for no one."
              actions={<button className="link small" onClick={() => go("agents")}>See everyone</button>}>
       {team.loading ? <Loading lines={2} /> : team.people.length === 0
-        ? <p className="small muted">No AI representations yet: each needs an owner-approved HR mapping.</p>
+        ? <p className="small muted">No AI assistants yet: each needs an owner-approved HR mapping.</p>
         : <>
             <Segmented label="Department" value={dept} onChange={setDept}
                        options={DEPTS.map(([d]) => ({ value: d, label: d }))} />

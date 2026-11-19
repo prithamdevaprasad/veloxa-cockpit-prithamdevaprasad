@@ -303,6 +303,11 @@ def register(app, *, state, principal_of, now_fn, jira_factory=None) -> None:
         return run(authorization, lambda j, t, pr: {"users": j.assignable(t, key, query)}, "jira.read",
                    {"op": "assignable", "keys": [key]})
 
+    @app.get("/v1/integrations/jira/projects/{project}/assignable")
+    def project_assignable(project: str, query: str = "", authorization: str | None = Header(default=None)):
+        return run(authorization, lambda j, t, pr: {"users": j.assignable(t, "", query, project=project[:20])},
+                   "jira.read", {"op": "assignable", "project": project[:20]})
+
     @app.get("/v1/integrations/jira/search")
     def search(jql: str, limit: int = 20, authorization: str | None = Header(default=None)):
         return run(authorization, lambda j, t, pr: {"issues": j.search(t, jql[:2000], limit)}, "jira.read",

@@ -48,8 +48,11 @@ function Item({ x, groupSize }: { x: WorryItem; groupSize: number }) {
         <Button onClick={() => setExplain(!explain)} aria-expanded={explain}>{explain ? "Hide explanation" : "Explain concern"}</Button>
         <Button variant="ghost" disabled={!x.evidence.length} onClick={() => evidence.open(x.evidence[0], x.title)}>
           View evidence ({x.evidence.length})</Button>
-        <Button variant="ghost" onClick={() => ask.ask(`What do the records show about "${x.title}", and what is still unknown?`)}>
-          Ask about this</Button>
+        <Button variant="ghost" onClick={() => ask.ask(`Explain this concern: "${x.title}". Why does it matter, what `
+          + "evidence supports it, and what is still unknown?", { kind: "concern", subject: x.title }, true)}>
+          Discuss in chat</Button>
+        <Button variant="ghost" onClick={() => ask.task({ summary: x.follow_up || `Follow up: ${x.title}`,
+          description: `From the Veloxa concern "${x.title}".` })}>Create Jira task</Button>
       </div>
       {explain && <ExplanationView ex={ex} />}
       <details className="small assess">

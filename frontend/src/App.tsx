@@ -10,6 +10,7 @@ import { DepartmentsPage } from "./pages/Departments";
 import { EvidenceDataPage } from "./pages/EvidenceData";
 import { IntelligencePage } from "./pages/Intelligence";
 import { OverviewPage } from "./pages/Overview";
+import { RiskMapPage } from "./pages/RiskMap";
 import { ScenariosPage } from "./pages/Scenarios";
 import { SignInPage } from "./pages/SignIn";
 import { TimelinePage } from "./pages/Timeline";
@@ -25,8 +26,9 @@ const GROUPS = [
                                                          ["timeline", "Timeline"]] },
   { id: "ask", label: "Ask Veloxa", icon: "ask", pages: [["ask", "Ask Veloxa"]] },
   { id: "people", label: "People", icon: "agents", pages: [["people", "Directory"], ["departments", "Departments"]] },
-  { id: "aiteam", label: "AI team", icon: "ask", pages: [["agents", "AI representations"]] },
+  { id: "aiteam", label: "AI assistants", icon: "ask", pages: [["agents", "AI assistants"]] },
   { id: "intel", label: "Intelligence", icon: "intelligence", pages: [["intelligence", "Intelligence"],
+                                                                      ["map", "Risk map"],
                                                                       ["evidence", "Evidence & Data"],
                                                                       ["whatif", "What-if Analysis"]] },
 ] as const;
@@ -131,6 +133,7 @@ function Shell() {
           {route === "evidence" && <EvidenceDataPage />}
           {route === "intelligence" && <IntelligencePage />}
           {shown === "whatif" && <ScenariosPage />}
+          {route === "map" && <RiskMapPage />}
           {route === "timeline" && <TimelinePage synthetic={Boolean(me?.tenant.synthetic)} />}
           {shown === "admin" && <AdminPage onSignOut={signOut} />}
         </main>

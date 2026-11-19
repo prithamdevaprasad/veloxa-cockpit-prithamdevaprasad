@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { api, ApiError, get, request } from "../api/client";
 import { useApi } from "../api/useApi";
-import { Badge, Button, EmptyState, ErrorState, Loading, PageHead, Section } from "../ui";
+import { Icon } from "../ui/kit";
+import { Badge, Button, EmptyState, ErrorState, Loading, Section } from "../ui";
 
 
 interface Subject { name: string; kind: string; date: string | null; original_date: string | null; status: string | null }
@@ -31,36 +32,47 @@ export function ScenariosPage() {
     finally { setBusy(false); }
   }
   const list = subs.state === "ready" ? subs.data.subjects : [];
+  const examples = list.length ? [`Move ${list[0].name} by 2 weeks`, `Move ${list[0].name} by 1 month`,
+    list[1] ? `Move ${list[0].name} by 3 weeks and ${list[1].name} earlier by 5 days` : `Bring ${list[0].name} forward by 10 days`] : [];
+  const go = (t: string) => { setText(t); void run({ text: t }); };
   return (
     <>
-      <PageHead title="What-if Analysis" intro="Test what happens if one or more releases or commitments move. Veloxa
-        shows the baseline, your assumption, the work and dependencies affected, what it can calculate and what the
-        records cannot tell you. Nothing is saved to company records or Jira, and nothing is predicted." />
-      <Section title="Describe a scenario" subtitle="For example: move Orbit Core 3.0 by 3 weeks and Pulse 1.5 earlier by 5 days.">
+      <header className="page-hero">
+        <span className="hero-icon"><Icon name="whatif" size={26} /></span>
+        <div><h1>What-if Analysis</h1>
+          <p>Test what happens if a release or commitment moves. Veloxa shows today's date, the new date, the work
+            affected and what the records can't tell you. Nothing is saved to company records or Jira.</p></div>
+      </header>
+      <div className="feature-row">
+        <div className="feature"><Icon name="timeline" size={22} /><div><strong>Change a date</strong>
+          <span>{list[0] ? `e.g. move ${list[0].name} by 2 weeks` : "Move a release or commitment"}</span></div></div>
+        <div className="feature"><Icon name="departments" size={22} /><div><strong>See the impact</strong>
+          <span>On work, dependencies and timelines</span></div></div>
+        <div className="feature"><Icon name="alert" size={22} /><div><strong>Know the limits</strong>
+          <span>What Veloxa can and cannot tell you</span></div></div>
+      </div>
+      <section className="card scenario-input" aria-label="Describe a scenario">
+        <h2>Describe a scenario</h2>
         {subs.state === "loading" && <Loading lines={2} />}
         {subs.state === "error" && <ErrorState error={subs.error} onRetry={reload} />}
         {subs.state === "ready" && (list.length === 0
           ? <EmptyState title="Nothing to analyse">The admitted evidence names no release or commitment.</EmptyState>
           : <div className="stack">
-              <form className="stack" onSubmit={(e) => { e.preventDefault(); if (text.trim()) void run({ text }); }}>
-                <textarea className="input scenario-box" rows={3} value={text} onChange={(e) => setText(e.target.value)}
-                          aria-label="Scenario" placeholder={`Describe the change, e.g. "What if ${list[0].name} moves by 3 weeks?"`}
-                          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (text.trim()) void run({ text }); } }} />
-                <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-                  <span className="small muted">Enter runs the scenario. You can change several things at once.</span>
-                  <Button variant="primary" type="submit" disabled={!text.trim() || busy}>{busy ? "Analysing…" : "Run scenario"}</Button>
-                </div>
+              <form className="scenario-form" onSubmit={(e) => { e.preventDefault(); if (text.trim()) void run({ text }); }}>
+                <input className="input scenario-box" value={text} onChange={(e) => setText(e.target.value)}
+                       aria-label="Scenario" placeholder={`e.g. move ${list[0].name} by 2 weeks`} />
+                <Button variant="primary" type="submit" disabled={!text.trim() || busy}>{busy ? "Analysing…" : "Analyse"}</Button>
               </form>
-              <div className="small muted">Releases and commitments in the records (click to add a change):</div>
+              <div className="small muted">Releases and commitments in the records (click to adjust by days):</div>
               <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>{list.map((s) => (
                 <button key={s.name} className="chip" title={s.date ? `Due ${day(s.date)}` : "No recorded date"}
                         onClick={() => setRows((r) => r.some((x) => x.subject === s.name) || r.length >= 6 ? r
-                          : [...r, { subject: s.name, shift_days: 14 }])}>{s.name}</button>))}</div>
+                          : [...r, { subject: s.name, shift_days: 14 }])}>{s.name}{s.date ? ` · ${day(s.date)}` : ""}</button>))}</div>
               {rows.length > 0 && <div className="stack">
                 {rows.map((r, i) => (
                   <div key={r.subject} className="row" style={{ alignItems: "center" }}>
-                    <span style={{ minWidth: 180 }}>{r.subject}</span>
-                    <label className="small">Shift (days, minus = earlier){" "}
+                    <span style={{ minWidth: 180 }}><strong>{r.subject}</strong></span>
+                    <label className="small">Shift in days (minus = earlier){" "}
                       <input className="input" type="number" min={-730} max={730} value={r.shift_days} style={{ width: 110 }}
                              onChange={(e) => setRows(rows.map((x, j) => j === i ? { ...x, shift_days: Number(e.target.value) } : x))} /></label>
                     <button className="link small" onClick={() => setRows(rows.filter((_, j) => j !== i))}>Remove</button>
@@ -68,7 +80,23 @@ export function ScenariosPage() {
                 <div><Button variant="primary" disabled={busy} onClick={() => run({ changes: rows })}>Analyse these changes</Button></div>
               </div>}
             </div>)}
-      </Section>
+      </section>
+      {!out && !busy && examples.length > 0 && (
+        <div className="scenario-help">
+          <section className="card" aria-label="Try one">
+            <h3>Try one</h3>
+            <ul className="plain example-list">{examples.map((x) => (
+              <li key={x}><button onClick={() => go(x)}>{x}<span aria-hidden="true">›</span></button></li>))}</ul>
+          </section>
+          <section className="card soft" aria-label="What you get">
+            <h3>You'll get a clear comparison</h3>
+            <ul className="plain check-list">
+              {["Today's date and the date if it moves", "What you assumed", "Work and dependencies affected",
+                "What's blocking it", "What Veloxa can't tell you"].map((x) => (
+                <li key={x}><Icon name="check" size={16} /> {x}</li>))}
+            </ul>
+          </section>
+        </div>)}
       {error && <Section><ErrorState error={error} /></Section>}
       {out && (
         <section className="scenario-result" aria-label="Scenario result">

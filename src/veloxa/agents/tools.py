@@ -219,7 +219,7 @@ def _self_profile(ctx: ToolContext, _: NoArgs) -> dict:
     def day(d) -> str:
         return f"{d.day} {d.strftime('%B %Y')}"
 
-    facts = [("self.identity", f"I'm the AI representation of {name}, built from their HR record", [rid]),
+    facts = [("self.identity", f"I'm {name}'s AI assistant, built from their HR record", [rid]),
              ("self.title", f"My job title is {me['title']}", [rid]),
              ("self.department", f"I'm part of the {me['department']} department", [rid]),
              ("self.status", f"My HR record lists my employment status as {me['status']}, as at the export date",

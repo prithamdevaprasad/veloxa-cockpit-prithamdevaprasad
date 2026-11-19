@@ -9,6 +9,7 @@ import type { Answer, Claim, Evidence, JiraPreview } from "../api/types";
 import { useAsk } from "./Ask";
 import { useEvidence } from "./EvidenceDrawer";
 import { ExplanationView, useExplanation } from "./Explanation";
+import { JiraTaskCard } from "./JiraTask";
 import { BarChart } from "./kit";
 import { Badge, Button, Drawer } from "./index";
 
@@ -138,6 +139,7 @@ export function AnswerView({ answer }: { answer: Answer }) {
         <div className="brief-lead"><RichText text={answer.answer} /></div>
         {answer.action?.preview_id && (answer.action.operation === "internal_request"
           ? <RequestConfirm p={answer.action as unknown as InternalRequest} /> : <JiraConfirm p={answer.action} />)}
+        {diag?.intent === "jira_action" && answer.status === "clarify" && <TaskFormToggle />}
         {(answer.follow_ups?.length ?? 0) > 0 && <FollowUps items={answer.follow_ups!} />}
       </article>);
   }
@@ -352,7 +354,7 @@ function RequestConfirm({ p }: { p: InternalRequest }) {
 }
 
 /** A Jira write preview: every proposed value is shown; the write needs an explicit tick and a click. */
-function JiraConfirm({ p }: { p: JiraPreview }) {
+export function JiraConfirm({ p }: { p: JiraPreview }) {
   const [ok, setOk] = useState(false);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<{ key: string; url: string } | null>(null);
@@ -369,9 +371,9 @@ function JiraConfirm({ p }: { p: JiraPreview }) {
     <div className="callout warn stack small" aria-label="Jira change to confirm">
       <strong>{p.operation === "create" ? `Create in ${p.project} (${p.issue_type})` : `Update ${p.key}`}</strong>
       <dl className="meta">{Object.entries(p.fields).map(([k, v]) => (
-        <Fragment key={k}><dt>{k}</dt><dd>{typeof v === "object" && v
-          ? `${String((v as { current: unknown }).current ?? "none")} \u2192 ${String((v as { proposed: unknown }).proposed)}`
-          : String(v)}</dd></Fragment>))}</dl>
+        <Fragment key={k}><dt>{FIELD[k] ?? k}</dt><dd>{v && typeof v === "object" && "proposed" in (v as object)
+          ? `${show((v as { current: unknown }).current)} \u2192 ${show((v as { proposed: unknown }).proposed)}`
+          : show(v)}</dd></Fragment>))}</dl>
       {p.description && <><strong>Description</strong><p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{p.description}</p></>}
       {p.comment && <><strong>Comment</strong><p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{p.comment}</p></>}
       <label><input type="checkbox" checked={ok} onChange={(e) => setOk(e.target.checked)} /> I confirm this exact
@@ -380,6 +382,24 @@ function JiraConfirm({ p }: { p: JiraPreview }) {
       <div><Button variant="primary" disabled={!ok || busy} onClick={write}>Write to Jira</Button></div>
     </div>
   );
+}
+
+const FIELD: Record<string, string> = { summary: "Title", duedate: "Due date", assignee: "Assignee",
+  issuetype: "Type", project: "Project", description: "Description" };
+function show(v: unknown): string {
+  if (v === null || v === undefined || v === "") return "none";
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    return String(o.displayName ?? o.name ?? o.key ?? o.value ?? o.accountId ?? JSON.stringify(v));
+  }
+  return String(v);
+}
+
+/** A Jira request that still needs details: offer the form instead of more back-and-forth. */
+function TaskFormToggle() {
+  const [open, setOpen] = useState(false);
+  return open ? <JiraTaskCard onClose={() => setOpen(false)} />
+    : <div><Button variant="primary" onClick={() => setOpen(true)}>Fill in the task form instead</Button></div>;
 }
 
 function FollowUps({ items }: { items: string[] }) {

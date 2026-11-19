@@ -15,7 +15,7 @@ Lifecycle of one turn (`execute`), identical for every agent:
     applies the §14.2 hedge for `possible` and `role_plausible` knowledge (access is not reading);
  9. memory (working; episodic for participant evidence; reflective for model reflections, labelled inference),
     the execution record and the audit event are written in ONE transaction.
-Every turn is labelled as an AI representation, carries its read basis and runtime/config versions, and never acts.
+Every turn is labelled as an AI assistant, carries its read basis and runtime/config versions, and never acts.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ from .authorization import (
 from .memory import MemoryScope, MemoryStore
 from .model import FactsOnlyComposer, LLMClient, ModelOutputInvalid, ModelRequest, ModelUnavailable, parse_output
 
-LABEL = "AI representation of an employee role, built from records. It is not the employee and takes no action."
+LABEL = "AI assistant of an employee role, built from records. It is not the employee and takes no action."
 PROMPT_VERSION = "agent-turn/1"
 HEDGES = {"participant": "", "possible": "I'd have had access to this record (not that I read it): ",
           "role_plausible": "In my role I'd plausibly have been aware of this: ",
