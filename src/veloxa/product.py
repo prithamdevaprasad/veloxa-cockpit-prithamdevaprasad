@@ -23,6 +23,10 @@ from . import audit, tools
 from .db import tenant_tx
 
 PRONOUN = re.compile(r"\b(it|this|that|they|them|its|their|these|those)\b", re.I)
+# Follow-ups that refer back without a pronoun ("what would you recommend?", "how confident are you?").
+REFERS_BACK = re.compile(r"\b(evidence|recommend\w*|do first|next steps?|what should (i|we) do|"
+                         r"how confident|confidence|"
+                         r"what if we (wait|delay)|has (it|this) happened before|why)\b", re.I)
 
 
 class ProductError(Exception):
@@ -68,11 +72,27 @@ def get_thread(conn, tenant_id, owner: str, thread_id: str) -> dict | None:
                                 "answer": a["answer"]} for a in answers]}
 
 
-def contextual_question(question: str, context: dict) -> str:
-    """A follow-up that refers back ("why did it change?") is asked about the thread's subject. Deterministic and
-    visible: the question actually asked is stored and shown."""
-    subject = (context or {}).get("subject")
-    if subject and PRONOUN.search(question) and subject.lower() not in question.lower():
+LEAD_LABEL = re.compile(r"^(priority #\d+( \(close call\))?|needs more evidence|recorded [a-z ]+|"
+                        r"[a-z ]+ group):\s*", re.I)
+
+
+def subject_of_answer(answer: dict | None) -> str | None:
+    """The subject a follow-up most likely means: the first item of the previous answer (for a ranked list, the top
+    concern), without its label. None when the previous answer had no cited item."""
+    for c in (answer or {}).get("claims") or []:
+        text = LEAD_LABEL.sub("", str(c.get("text") or "")).strip().split(". ")[0].rstrip(".")
+        if text:
+            return text[:120]
+    return None
+
+
+def contextual_question(question: str, context: dict, fallback: str | None = None) -> str:
+    """A follow-up that refers back ("why did it change?") is asked about the thread's subject, or, when the thread
+    was not opened from one, about the first item of the previous answer. Deterministic and visible: the question
+    actually asked is stored and shown."""
+    subject = (context or {}).get("subject") or fallback
+    if subject and (PRONOUN.search(question) or REFERS_BACK.search(question)) \
+            and subject.lower() not in question.lower():
         return f"{question.rstrip('?')} (regarding {subject})?"
     return question
 
@@ -82,12 +102,17 @@ def ask_in_thread(conn, tenant_id, principal: tools.Principal, tz: str, thread_i
     t = get_thread(conn, tenant_id, principal.principal_id, thread_id)
     if t is None:
         raise ProductError("not_found", "no such thread")
-    asked = contextual_question(question, t["context"])
     with tenant_tx(conn, tenant_id, principal.principal_id):
         last = conn.execute("SELECT a.question, a.answer FROM runtime.thread_answer t JOIN runtime.answer a"
                             " ON a.tenant_id ="
                             " t.tenant_id AND a.answer_id = t.answer_id WHERE t.tenant_id = %s AND t.thread_id = %s"
                             " ORDER BY t.seq DESC LIMIT 1", (tenant_id, thread_id)).fetchone()
+    with tenant_tx(conn, tenant_id, principal.principal_id):
+        recent = conn.execute("SELECT a.answer FROM runtime.thread_answer t JOIN runtime.answer a ON a.tenant_id ="
+                              " t.tenant_id AND a.answer_id = t.answer_id WHERE t.tenant_id = %s AND t.thread_id = %s"
+                              " ORDER BY t.seq DESC LIMIT 5", (tenant_id, thread_id)).fetchall()
+    fallback = next((x for x in (subject_of_answer(r["answer"]) for r in recent) if x), None)
+    asked = contextual_question(question, t["context"], fallback)
     from . import assistant
 
     answer = assistant.respond(conn, tenant_id, principal, tz, asked, now, state=state or {},

@@ -75,10 +75,18 @@ EXEC_INTENTS: list[tuple[str, re.Pattern]] = [
     ("delivery", re.compile(r"\b(deadlines?|projects?|delivery|releases?)\b.{0,20}\b(at risk|on track|slipp\w*|"
                             r"blocked|blocking|delayed)\b|\bwhat is blocking delivery\b|\bwhich teams have delivery\b|"
                             r"\bdependencies need escalation\b|\bneed(s)? escalation\b", re.I)),
-    ("finance", re.compile(r"\bfinancial (position|health|situation|picture)\b|\bhow are (our )?finances\b|"
+    ("finance", re.compile(r"\bfinancial (position|health|situation|picture)\b|"
+                           r"\bfinancial (information|data) (is |are )?missing\b|\bmissing financial\b|"
+                           r"\bhow are (our )?finances\b|"
                            r"\bcommercial risks?\b", re.I)),
     ("priorities", re.compile(r"\b(focus on|prioriti[sz]e|immediate attention|needs? my attention|"
                               r"most important things?|five (most )?important|top (\d|three|five) things)\b", re.I)),
+    ("weak", re.compile(r"\b(weak|incomplete|thin|limited|least|insufficient) evidence\b|\bnot enough evidence\b",
+                        re.I)),
+    ("evidence", re.compile(r"\b(evidence|proof|sources?) (behind|for|supporting|of) (the |our )?(biggest|top|main|"
+                            r"first) (concern|risk|issue|worry)\b", re.I)),
+    ("ops", re.compile(r"\b(recurring|repeat(ed|ing)?|frequent)\b.{0,30}\b(issues?|incidents?|problems?|outages?)\b|"
+                       r"\boperational issues\b|\bincidents?\b.{0,20}\b(trend|most|recurring|keep)\b", re.I)),
     ("summary", re.compile(r"\b(executive summary|summary of the company|summari[sz]e (the company|where we are)|"
                            r"how is the company doing|where do we stand|state of the company|company overview)\b",
                            re.I)),
@@ -86,6 +94,17 @@ EXEC_INTENTS: list[tuple[str, re.Pattern]] = [
 EXECUTIVE = re.compile("|".join(f"(?:{rx.pattern})" for _, rx in EXEC_INTENTS), re.I)
 DEPENDS = re.compile(r"\b(what|which|who)\b.{0,30}\b(depends? on|relies? on|rides on|hangs on|is waiting on|"
                      r"is tied to|blocks|is blocking)\s+(?P<x>[A-Za-z0-9][\w .-]{1,40})", re.I)
+GENERIC_SUBJECT = {"delivery", "us", "work", "progress", "the team", "things", "the company", "growth"}
+
+
+def _is_dependency(q: str) -> bool:
+    m = DEPENDS.search(q)
+    return bool(m) and m.group("x").strip(" ?.\"'").lower() not in GENERIC_SUBJECT
+
+
+ADVICE = re.compile(r"\b(recommend\w*|do first|next steps?|what should (i|we) do|how confident|confidence in|"
+                    r"what evidence|evidence (supports|behind|for)|show (me )?the evidence)\b",
+                    re.I)
 HIRING = re.compile(r"\b(roles?|positions?|requisitions?|vacanc\w*|openings?|hires?|hiring)\b.{0,40}"
                     r"\b(on hold|paused|frozen|open|status|filled)\b|\bwhat (are we|is) hiring\b", re.I)
 OWNERS = re.compile(r"\b(who)\b.{0,40}\b(owns?|owners?|working on|assigned|responsible|holds?|has)\b.{0,40}"
@@ -223,12 +242,16 @@ class Router:
             out = self.oncall(q)
             if out is not None:
                 return out
-        if EXECUTIVE.search(q) and not DEPENDS.search(full) and not re.search(r"\bboard\b", full, re.I):
+        if EXECUTIVE.search(q) and not _is_dependency(full) and not re.search(r"\bboard\b", full, re.I):
             out = self.executive(q)
             if out is not None:
                 return out
-        if DEPENDS.search(q):
+        if _is_dependency(q):
             out = self.depends(q)
+            if out is not None:
+                return out
+        if ADVICE.search(q):
+            out = self.advice(q)
             if out is not None:
                 return out
         if HIRING.search(q):
@@ -567,6 +590,26 @@ class Router:
                                     (self.tenant_id,)).fetchall()
         return subs, len(fnd), [f["finding_id"] for f in fnd]
 
+    def _incident_lines(self, add, unknowns, recs):
+        """Incidents grouped by service (recurrence), with severity counts; each line cites its incident records."""
+        from collections import Counter, defaultdict
+
+        from .continuity import _claims
+
+        k = self.basis.batch_seq
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id, k):
+            inc = _claims(self.conn, self.tenant_id, k, "incident")
+        by = defaultdict(list)
+        for d in inc.values():
+            by[str(d.get("service") or "service not stated")].append(d)
+        recs |= self.records({r for d in inc.values() for r in d["_records"]})
+        for svc, ds in sorted(by.items(), key=lambda kv: -len(kv[1]))[:5]:
+            sev = Counter(str(d.get("severity") or "?") for d in ds)
+            add(f"{svc}: {len(ds)} incident{'s' if len(ds) != 1 else ''} ("
+                + ", ".join(f"{n} {s}" for s, n in sorted(sev.items())) + ")",
+                sorted({r for d in ds for r in d["_records"]}))
+        unknowns.append("Root causes are not recorded, so repeated incidents on a service show where to look, not why.")
+
     def executive(self, q):
         """A CEO briefing assembled ONLY from cited facts the system already holds: the latest board figures (with the
         previous quarter), the ranked concerns (close calls stated), concerns that need more evidence, commitment
@@ -654,7 +697,10 @@ class Router:
                  "finance": "The financial position as reported (not independently verified):",
                  "decisions": "What is waiting for a decision in Veloxa:",
                  "consequence": "What the records say about the biggest concern (they don't project outcomes):",
-                 "verify": "What to verify before deciding:"}
+                 "verify": "What to verify before deciding:",
+                 "weak": "Concerns whose evidence is incomplete:",
+                 "evidence": "The evidence behind the top concern:",
+                 "ops": "Recurring operational issues in the incident records:"}
         if intent == "summary":
             for f in (figures, concerns, warnings, thin):
                 f()
@@ -705,12 +751,67 @@ class Router:
                 for u in (x.get("unknowns") or [])[:1]:
                     add(f"{x['title']}: {u}", x["evidence"], "derived")
             thin()
+        elif intent == "weak":
+            thin()
+            for x in ranked:
+                if x.get("confidence") in ("low", "conflicting"):
+                    add(f"{x['title']} (sources {'conflict' if x['confidence'] == 'conflicting' else 'are weak'}).",
+                        x["evidence"], "derived")
+        elif intent == "evidence":
+            if ranked:
+                x = ranked[0]
+                for rid in x["evidence"][:6]:
+                    r = recs.get(rid)
+                    if r:
+                        add(f"{x['title']}: {(r.get('excerpt') or r.get('source_path') or rid)[:160]}", [rid])
+                unknowns += list(x.get("unknowns") or [])[:3]
+        elif intent == "ops":
+            self._incident_lines(add, unknowns, recs)
         if not lines:
             return None
         return _result(self.basis_json, "qualified", f"I read this as: a CEO briefing ({intent}).",
                        heads[intent] + "\n" + "\n".join(lines), claims,
                        [recs[i] for c in claims for i in c["evidence"]], list(dict.fromkeys(unknowns)),
                        ["What should I worry about?", "What is missing from the records?", "Why did Atlas GA move?"])
+
+    def advice(self, q):
+        """For a named concern: its recorded follow-up ("what would you recommend / do first") or its confidence and
+        why ("how confident"). The recommendation is the one recorded with the concern, never a new opinion."""
+        words = {t for t in re.findall(r"[a-z][a-z0-9-]{2,}", q.lower()) if t not in STOP}
+        norm = lambda s: s.lower().replace("-", "").replace(" ", "")  # noqa: E731
+        w = self.worry()
+        pool = w.get("ranked", []) + w.get("unrankable", [])
+        scored = sorted(((sum(norm(t) in norm(x["title"]) for t in words), i, x) for i, x in enumerate(pool)),
+                        key=lambda s: (-s[0], s[1]))
+        if not scored or scored[0][0] < 2:
+            return None
+        x = scored[0][2]
+        recs = w["recs"]
+        if re.search(r"\bevidence\b", q, re.I):
+            claims = [c for rid in x["evidence"][:8] if (r := recs.get(rid))
+                      and (c := self.claim(f"{x['title']}: {(r.get('excerpt') or r.get('source_path') or rid)[:180]}",
+                                           [rid], recs))]
+            if not claims:
+                return None
+            return _result(self.basis_json, "qualified", f"I read this as: the evidence behind “{x['title']}”.",
+                           f"{len(claims)} record{'s support' if len(claims) != 1 else ' supports'} “{x['title']}”:\n"
+                           + "\n".join(f"- {c['text'].split(': ', 1)[1]}" for c in claims), claims,
+                           [recs[i] for c in claims for i in c["evidence"]], list(x.get("unknowns") or [])[:3])
+        if re.search(r"\bconfiden", q, re.I):
+            label = {"high": "High", "moderate": "Moderate", "low": "Low", "conflicting": "Sources conflict"}.get(
+                str(x.get("confidence")), str(x.get("confidence")).capitalize())
+            c = self.claim(f"{x['title']}. Confidence: {label.lower()}; it describes the evidence (how many "
+                           "sources, whether they agree), not how likely the concern is.", x["evidence"], recs,
+                           "derived")
+            lead = f"Confidence in “{x['title']}”: {label}."
+        else:
+            rec = x.get("follow_up") or "No follow-up is recorded for this concern."
+            c = self.claim(f"{x['title']}. Recorded next step: {rec}", x["evidence"], recs, "derived")
+            lead = f"For “{x['title']}”, the recorded next step is: {rec}"
+        if c is None:
+            return None
+        return _result(self.basis_json, "qualified", f"I read this as: about the concern “{x['title']}”.", lead, [c],
+                       [recs[i] for i in c["evidence"]], list(x.get("unknowns") or [])[:3])
 
     def depends(self, q):
         """What hangs on a release or epic: the tracker work aimed at it (by its fix version or epic) and the

@@ -176,6 +176,18 @@ def main() -> None:  # noqa: C901, PLR0915
     results.append({"id": "MEM1", "category": "memory", "question": "Reopen the conversation", "pass": okh,
                     "verdict": f"{len(hist.get('turns', []))} turns restored after reload"})
 
+    # A briefing conversation: follow-ups without the subject named stay on the top concern.
+    bt = thread("Briefing")
+    turn(bt, "What is the biggest risk to the company?")
+    for cid, fq, want in (("MT4", "Why is this happening?", "release"), ("MT5", "What would you recommend?", "atlas"),
+                          ("MT6", "How confident are you in that conclusion?", "confidence"),
+                          ("MT7", "What evidence supports that?", "atlas")):
+        a = turn(bt, fq)
+        ok = classify(a) == "answer" and want in text_of(a).lower()
+        rec(cid, "multi-turn", f"[after 'biggest risk'] {fq}", ok,
+            "stayed on the top concern" if ok else "lost the subject or refused", a,
+            failure_criterion="refusing, or answering about a different subject")
+
     # Contextual chat (from a concern) keeps its source; a NEW conversation does not inherit it.
     ctx = thread("On-call concentration", {"kind": "concern", "subject": "Primary on-call held by one person"})
     a4 = turn(ctx, "Why does this matter?")
