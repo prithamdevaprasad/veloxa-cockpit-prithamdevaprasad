@@ -1,0 +1,14 @@
+{
+  // Hosted frontend (Cloudflare Workers with static assets). Deploy: npm run build && npx wrangler deploy
+  "name": "veloxa-demo",
+  "main": "cloudflare/worker.js",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/v1/*", "/health"]
+  },
+  "vars": { "API_ORIGIN": "https://veloxa-api-396273404479.asia-south1.run.app" },
+  "observability": { "enabled": false }
+}
