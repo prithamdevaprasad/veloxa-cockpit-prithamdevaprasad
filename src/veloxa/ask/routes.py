@@ -256,6 +256,9 @@ class Router:
             out = connectors.answer(self, full)         # names GitHub / Jira / e-mail: before the CEO briefing
             if out is not None:
                 return out
+        out = connectors.email_strong(self, full)       # names something only the principal's own mail discusses
+        if out is not None:
+            return out
         if EXECUTIVE.search(q) and not _is_dependency(full) and not re.search(r"\bboard\b", full, re.I):
             out = self.executive(q)
             if out is not None:
@@ -726,8 +729,16 @@ class Router:
             lines.append(f"- {subs} Data Room submission{'s' if subs != 1 else ''} waiting for review or "
                          f"authorisation, and {fnd} finding{'s' if fnd != 1 else ''} not yet investigated or resolved"
                          " (see What to worry about).")
-            unknowns.append("Veloxa only knows about decisions recorded in Veloxa; approvals handled elsewhere "
-                            "(email, meetings) are not visible unless those records are added.")
+            from . import connectors
+
+            asks = connectors.pending_asks(self)
+            if asks:
+                recs.update(self.records([rid for _, rid, _ in asks]))
+                lines.append("- Asked of you in your e-mail (newest first):")
+                for text, rid, _ in asks:
+                    add(text, [rid], "communication")
+            unknowns.append("Veloxa only knows about decisions recorded in Veloxa or asked of you in your connected "
+                            "e-mail; approvals handled elsewhere (meetings, chat) are not visible.")
 
         heads = {"summary": "Where the company stands, from the verified records:",
                  "priorities": "What needs you first, from the verified records:",

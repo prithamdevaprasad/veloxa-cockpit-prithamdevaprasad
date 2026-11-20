@@ -133,8 +133,14 @@ class _Paced(httpx.Client):
     def request(self, *a, **kw):
         import time
 
-        for _ in range(8):
-            r = super().request(*a, **kw)
+        for attempt in range(8):
+            try:
+                r = super().request(*a, **kw)
+            except httpx.TransportError:           # a dropped connection is retried, never recorded as a refusal
+                if attempt == 7:
+                    raise
+                time.sleep(3)
+                continue
             if r.status_code != 429:
                 return r
             time.sleep(float(r.headers.get("Retry-After") or 10))

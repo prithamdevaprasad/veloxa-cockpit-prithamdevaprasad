@@ -15,7 +15,6 @@ import ast
 import re
 from collections import Counter
 
-from .. import tools
 from ..db import tenant_tx
 
 GITHUB = re.compile(r"\b(github|git hub|repo|repos|repository|repositories|pull requests?|PRs?|commits|"
@@ -222,37 +221,191 @@ def jira(router, q: str):
 
 
 # ------------------------------------------------------------------ Gmail
-def email(router, q: str):
-    words = [w for w in re.findall(r"[A-Za-z0-9][\w.-]*", q.lower()) if w not in STOP and len(w) > 2]
-    if not words:
-        return None
-    res = tools.text_search(router.conn, router.basis, router.principal, query=" OR ".join(words), limit=12)
-    hits = [e for e in res.evidence if e.system == "gmail_oauth"][:5]
-    if not hits:
-        return None
-    recs = router.records([e.record_id for e in hits])
+MONTHS = {m: m[:3] for m in ("january", "february", "march", "april", "may", "june", "july", "august", "september",
+                              "october", "november", "december")}
+GENERIC_CAPS = {"I", "ARR", "CEO", "CFO", "CTO", "KPI", "OK", "AI", "HR", "What", "Which", "Who", "When", "Where",
+                "How",
+                "Why", "Is", "Are", "Do", "Does", "Did", "Can", "Should", "Show", "Tell", "Give", "List"}
+HEADER_LINE = re.compile(r"^(from|to|cc|bcc|date|subject|sent)\s*:", re.I)
+RECENT = re.compile(r"\b(now|latest|current(ly)?|today|recent(ly)?|still|so far)\b", re.I)
+FILLER = {"before", "after", "will", "would", "could", "should", "can", "may", "might", "must", "now", "then", "than",
+          "also", "just", "only", "still", "yet", "very", "more", "most", "much", "many", "some", "such", "each",
+          "every",
+          "other", "them", "they", "their", "your", "yours", "mine", "been", "being", "this", "that", "these", "those",
+          "into", "onto", "over", "under", "currently", "latest", "recent", "recently", "happen", "happened", "know",
+          "need", "needs", "want", "wants", "get", "got", "make", "made", "say", "says", "said", "put", "puts"}
+ABBREV = re.compile(r"\b(Rs|No|vs|e\.g|i\.e|approx|Mr|Ms|Dr|Inc|Ltd|Co|St|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|"
+                    r"Dec)\.", re.I)
+
+
+def _terms(q: str) -> list[str]:
+    out = []
+    for w in re.findall(r"[A-Za-z0-9][\w.-]*[A-Za-z0-9]|[A-Za-z0-9]", q.lower()):
+        if w in STOP or w in FILLER or (len(w) < 3 and not w.isdigit()):
+            continue
+        out.append(MONTHS.get(w, w))
+    return list(dict.fromkeys(out))
+
+
+def _distinctive(q: str) -> list[str]:
+    """Names, codes and dates in the question (Northwind, CloudCore, routing-api, p95, 17 November): what makes a
+    question about something specific rather than a general briefing."""
+    toks = re.findall(r"[A-Za-z0-9][\w.-]*", q)
+    out = [t.lower() for i, t in enumerate(toks) if i > 0 and t[0].isupper() and t not in GENERIC_CAPS]
+    out += [t.lower() for t in toks if "-" in t or (any(c.isdigit() for c in t) and any(c.isalpha() for c in t))]
+    out += [MONTHS[t.lower()] for t in toks if t.lower() in MONTHS]
+    return list(dict.fromkeys(out))
+
+
+def _hit(term: str, words: set[str], text: str) -> bool:
+    if term in words or (("-" in term or term.isdigit()) and term in text):
+        return True
+    if "-" in term and term.replace("-", " ") in text:
+        return True
+    stem = term[:max(4, len(term) - 2)] if len(term) >= 5 else term
+    return any(w.startswith(stem) for w in words) if len(stem) >= 3 else False
+
+
+def _messages(router) -> list[dict]:
+    """The principal's own messages: only those they sent or received (the same rule as search and the record view)."""
+    from ..chunking import gmail_parties
+
+    email = (router.principal.email or "").lower()
+    if not email:
+        return []
     k = router.basis.batch_seq
     with tenant_tx(router.conn, router.tenant_id, router.principal.principal_id, k):
-        meta = {r["record_id"]: r["payload"] for r in router.conn.execute(
+        rows = router.conn.execute(
             "SELECT DISTINCT ON (record_id) record_id, payload FROM ledger.visible_source_record WHERE tenant_id = %s"
-            " AND record_id = ANY(%s) ORDER BY record_id, version DESC", (router.tenant_id, list(recs))).fetchall()}
-    from .routes import _quote
+            " AND batch_seq <= %s AND system = 'gmail_oauth' ORDER BY record_id, version DESC LIMIT 2000",
+            (router.tenant_id, k)).fetchall()
+    return [r for r in rows if isinstance(r["payload"], dict) and email in gmail_parties(r["payload"])]
 
+
+def _sentences(body: str) -> list[str]:
+    """Readable units of a message: paragraphs re-joined across hard line wraps, list items kept as their own units,
+    split into sentences without breaking after abbreviations such as "Rs." or "Nov.". Header lines are dropped."""
+    units = []
+    for para in re.split(r"\n\s*\n", body.replace("\r", "")):
+        lines = [ln.strip() for ln in para.split("\n") if ln.strip() and not HEADER_LINE.match(ln.strip())]
+        items, cur = [], ""
+        for ln in lines:
+            if re.match(r"^([-*•]|\d+[.)])\s+", ln):
+                if cur:
+                    items.append(cur)
+                cur = re.sub(r"^([-*•]|\d+[.)])\s+", "", ln)
+            else:
+                cur = f"{cur} {ln}".strip()
+        if cur:
+            items.append(cur)
+        for it in items:
+            it = re.sub(r"\*\*|__", "", it)
+            protected = ABBREV.sub(lambda m: m.group(0).replace(".", "\u2024"), it)
+            for sent in re.split(r"(?<=[.!?])\s+(?=[A-Z0-9\"“(])", protected):
+                sent = sent.replace("\u2024", ".").strip()
+                if len(sent) > 12:
+                    units.append(sent)
+    return units
+
+
+def _rank(router, q: str, msgs: list[dict]):
+    terms, dist = _terms(q), _distinctive(q)
+    if not terms:
+        return [], terms, dist
+    scored = []
+    for r in msgs:
+        p = r["payload"]
+        text = f"{p.get('subject') or ''}\n{p.get('body') or p.get('snippet') or ''}".lower()
+        words = set(re.findall(r"[a-z0-9][\w.-]*[a-z0-9]|[a-z0-9]", text))
+        cov = sum(_hit(t, words, text) for t in terms) / len(terms)
+        dhit = sum(_hit(t, words, text) for t in dist)
+        when = int(p.get("internal_date") or 0)
+        scored.append((cov, dhit, when, r))
+    scored.sort(key=lambda x: (round(x[0], 2), x[1], x[2]), reverse=True)
+    return scored, terms, dist
+
+
+def email_strong(router, q: str):
+    """Answer from e-mail WITHOUT the word "email" when the question names something specific that the principal's
+    own messages discuss (most of the question's terms appear in one message, including a name, code or date)."""
+    dist = _distinctive(q)
+    if not dist:
+        return None
+    return email(router, q, strict=True)
+
+
+def email(router, q: str, strict: bool = False):
+    msgs = _messages(router)
+    if not msgs:
+        return None
+    scored, terms, dist = _rank(router, q, msgs)
+    if not scored:
+        return None
+    top = scored[0][0]
+    if strict and (top < 0.6 or scored[0][1] == 0):
+        return None
+    if not strict and top < 0.34:
+        return None
+    window = 0.21 if re.search(r",? and (what|when|who|how|which|why)\b", q, re.I) else 0.12
+    pick = [s for s in scored if s[0] >= top - window and (not dist or s[1] > 0 or not strict)][:6]
+    if RECENT.search(q):
+        pick.sort(key=lambda s: s[2], reverse=True)               # "now / latest": the newest message first
+    pick = pick[:3]
+    recs = router.records([s[3]["record_id"] for s in pick])
     claims = []
-    for e in hits:
-        if e.record_id not in recs:
+    for _, _, _, r in pick:
+        if r["record_id"] not in recs:
             continue
-        p = meta.get(e.record_id, {})
+        p = r["payload"]
+        sents = _sentences(p.get("body") or p.get("snippet") or "")
+        best = sorted(((sum(_hit(t, set(re.findall(r"[a-z0-9][\w.-]*[a-z0-9]|[a-z0-9]", s.lower())), s.lower())
+                            for t in terms) + (0.5 if re.search(r"\d", s) else 0), -i, s) for i, s in enumerate(sents)),
+                      reverse=True)
+        keep = 3 if not claims else 2
+        idx = sorted({sents.index(s) for sc, _, s in best[:keep] if sc >= 1})
+        for i in list(idx):                                   # "My decisions:" -> the decisions themselves
+            if sents[i].rstrip().endswith(":"):
+                idx += [j for j in range(i + 1, min(i + 4, len(sents)))]
+        chosen = [sents[i] for i in sorted(set(idx))][:5]
+        if not chosen:
+            continue
         sender = re.sub(r"\s*<[^>]+>", "", p.get("from") or "an unrecorded sender").strip()
-        c = router.claim(f"{sender} wrote on {_day(_iso(p.get('date')))} (“{p.get('subject') or 'no subject'}”): "
-                         f"{_quote(e.excerpt)}", [e.record_id], recs, kind="communication")
+        c = router.claim(f"{sender}, {_day(_iso(p.get('date')))} (“{p.get('subject') or 'no subject'}”): "
+                         + " ".join(chosen), [r["record_id"]], recs, kind="communication")
         if c:
             claims.append(c)
     if not claims:
         return None
-    return _answer(router, "What your e-mail says:", claims, recs,
+    return _answer(router, "From your e-mail" + (" (newest first)" if RECENT.search(q) else "") + ":", claims, recs,
                    ["E-mail is a communication, not a verified record: a message states what its sender said."],
                    "what your connected e-mail says about this")
+
+
+ASKS = re.compile(r"\b(need (your|a) (decision|call|approval|sign-?off)|needs? your (approval|decision|sign-?off)|"
+                  r"decision needed|waiting on you|for your approval|please (approve|confirm|decide)|can you confirm|"
+                  r"approve (by|before)|your call by|needs? to be approved)\b", re.I)
+
+
+def pending_asks(router, limit: int = 4) -> list[tuple[str, str, dict]]:
+    """Requests for a decision or approval in the principal's own mail, newest first: [(text, record_id, rec)].
+    Only messages the principal sent or received; each line cites its message."""
+    out = []
+    for r in sorted(_messages(router), key=lambda r: int(r["payload"].get("internal_date") or 0), reverse=True):
+        p = r["payload"]
+        units = _sentences(p.get("body") or "")
+        hits = [i for i, u in enumerate(units) if ASKS.search(u)]
+        if not hits and ASKS.search(p.get("subject") or ""):
+            hits = [0] if units else []
+        if hits:
+            i = hits[0]
+            text = units[i]
+            if text.rstrip().endswith(":"):                      # "Still waiting on you:" -> the items that follow
+                text = text.rstrip() + " " + "; ".join(units[i + 1:i + 4])
+            out.append((f"“{p.get('subject') or 'no subject'}” ({_day(_iso(p.get('date')))}): {text}",
+                        r["record_id"], p))
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _iso(d):

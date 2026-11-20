@@ -89,7 +89,26 @@ GMAIL_ROWS = [
      "date": "Mon, 16 Nov 2026 15:30:00 +0530", "labels": ["Veloxa-Test"], "snippet": "My recommendation",
      "body": "Casey,\n\nMy recommendation is the 1-year CloudCore option. The quote expires on "
              "4 December.\n\nJordan", "locator": "gmail:ceo@example.test/messages/m1",
-     "evidence_kind": "communication (not verified fact)"},
+     "evidence_kind": "communication (not verified fact)", "internal_date": "1000"},
+    {"source": "gmail", "message_id": "m2", "thread_id": "t2", "from": "Riley Lead <riley@example.test>",
+     "to": "Casey Example <ceo@example.test>", "cc": None, "subject": "Atlas weekly update",
+     "date": "Mon, 2 Nov 2026 09:15:00 +0530", "labels": ["Veloxa-Test"], "snippet": "Weekly update",
+     "body": "Casey,\n\nOpen risk: the routing-api latency regression is not fixed. The p95 is 840 ms against "
+             "our 500 ms target.\n\nRiley", "locator": "gmail:ceo@example.test/messages/m2",
+     "evidence_kind": "communication (not verified fact)", "internal_date": "2000"},
+    {"source": "gmail", "message_id": "m3", "thread_id": "t3", "from": "Riley Lead <riley@example.test>",
+     "to": "Casey Example <ceo@example.test>", "cc": None, "subject": "routing-api performance checkpoint",
+     "date": "Fri, 20 Nov 2026 11:00:00 +0530", "labels": ["Veloxa-Test"], "snippet": "Checkpoint",
+     "body": "Casey,\n\nThe routing-api p95 latency is now 610 ms, still above the 500 ms target. The caching change "
+             "lands on 24 November.\n\nRiley", "locator": "gmail:ceo@example.test/messages/m3",
+     "evidence_kind": "communication (not verified fact)", "internal_date": "3000"},
+    {"source": "gmail", "message_id": "m4", "thread_id": "t4", "from": "Kim Buyer <kim@northwind.example.test>",
+     "to": "Casey Example <ceo@example.test>", "cc": None, "subject": "Northwind after the outage",
+     "date": "Tue, 17 Nov 2026 13:10:00 +0530", "labels": ["Veloxa-Test"], "snippet": "Northwind",
+     "body": "Dear Casey,\n\nTo proceed with our renewal on 31 December, we need a 99.9% monthly uptime commitment "
+             "and a confirmed date for multi-depot routing. Can you confirm by 24 November?\n\nKim",
+     "locator": "gmail:ceo@example.test/messages/m4",
+     "evidence_kind": "communication (not verified fact)", "internal_date": "2500"},
 ]
 
 
@@ -176,14 +195,46 @@ def test_connected_sources_answer_in_sentences_and_mail_stays_with_its_parties(d
         assert "ATL-1" in a["answer"] and "ATL-2" not in a["answer"] and "Load test at 3x peak" in a["answer"]
         a = ask(c, "What did the email from Jordan say about the CloudCore renewal?")
         assert "1-year CloudCore option" in a["answer"], a["answer"]
-        assert "Jordan Sample wrote on 16 November 2026" in a["answer"]
-        assert [e["system"] for e in a["evidence"]] == ["gmail_oauth"]
+        assert "Jordan Sample, 16 November 2026" in a["answer"] and "⟦" not in a["answer"]
+        assert {e["system"] for e in a["evidence"]} == {"gmail_oauth"}
         rid = a["evidence"][0]["record_id"]
         from urllib.parse import quote
 
         assert c.get(f"/v1/evidence/{quote(rid, safe='')}", headers=H).status_code == 200
+        # No "email" in the question: something specific that only the mail discusses is still answered from it
+        a = ask(c, "What does Northwind need before it will renew?")
+        assert "99.9% monthly uptime" in a["answer"] and "multi-depot" in a["answer"], a["answer"]
+        a = ask(c, "What is the routing-api p95 latency now?")              # newest message first
+        assert a["answer"].index("610 ms") < a["answer"].find("840 ms") or "840" not in a["answer"], a["answer"]
+        a = ask(c, "Which decisions need my approval?")                    # asks in the CEO's own mail are listed
+        assert "Asked of you in your e-mail" in a["answer"] and "Northwind after the outage" in a["answer"], a["answer"]
+        a = ask(c, "What is the biggest risk to the company?")             # a general question stays a briefing
+        assert all(e.get("system") != "gmail_oauth" for e in a.get("evidence") or [])
     with _client(db, monkeypatch, ws, "person:other") as c:                 # not on the message
         a = ask(c, "What did the email from Jordan say about the CloudCore renewal?")
         assert "1-year CloudCore" not in a["answer"]
         assert all(e.get("system") != "gmail_oauth" for e in a.get("evidence") or [])
         assert c.get(f"/v1/evidence/{quote(rid, safe='')}", headers=H).status_code == 404
+        a = ask(c, "What does Northwind need before it will renew?")
+        assert "99.9%" not in a["answer"]
+        a = ask(c, "Which decisions need my approval?")
+        assert "Asked of you" not in a["answer"] and "Northwind" not in a["answer"]
+
+
+def test_email_quotes_whole_sentences_from_hard_wrapped_mail():
+    body = ("Casey,\n\nWe need a decision from you by Friday on whether we cut the\nmulti-depot feature. Northwind "
+            "(our second-largest account, Rs. several units a year) told me\nthis morning.\n\nMy decisions:\n\n"
+            "1. Multi-depot is **out of GA**. GA stays at 15 December 2026.\n2. The credit is approved.\n\nFrom: X")
+    units = connectors._sentences(body)
+    assert "Northwind (our second-largest account, Rs. several units a year) told me this morning." in units
+    assert "Multi-depot is out of GA." in units and "My decisions:" in units and not any("From:" in u for u in units)
+    assert connectors._terms("What does Northwind need before it will renew?") == ["northwind", "renew"]
+    assert connectors._hit("worst-case", {"worst", "case"}, "the worst case is small")
+
+
+def test_a_lead_in_ask_brings_the_items_that_follow(monkeypatch):
+    msg = {"record_id": "r1", "payload": {"subject": "Weekly summary", "date": "Fri, 20 Nov 2026 18:30:00 +0530",
+           "internal_date": "1", "body": "Hi,\n\nStill waiting on you:\n1. The renewal quote.\n2. The launch date.\n"}}
+    monkeypatch.setattr(connectors, "_messages", lambda router: [msg])
+    (text, rid, _), = connectors.pending_asks(object())
+    assert rid == "r1" and text.endswith("Still waiting on you: The renewal quote.; The launch date.")
