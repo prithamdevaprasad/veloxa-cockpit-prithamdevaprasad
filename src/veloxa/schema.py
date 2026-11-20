@@ -29,6 +29,11 @@ FEATURES: dict[str, tuple[str, str, tuple[str, ...]]] = {
         "cross-route duplicate detection for uploads and connectors",
         ("runtime.source_object",),
     ),
+    "single_approver": (
+        "0026_single_approver_exception",
+        "named one-person approval for a source type (otherwise the two-person rule applies everywhere)",
+        ("intake.single_approver_exception",),
+    ),
 }
 
 _CHECK = (
