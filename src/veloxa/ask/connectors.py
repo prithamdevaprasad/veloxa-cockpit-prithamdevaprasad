@@ -392,11 +392,16 @@ def pending_asks(router, limit: int = 4) -> list[tuple[str, str, dict]]:
     out = []
     for r in sorted(_messages(router), key=lambda r: int(r["payload"].get("internal_date") or 0), reverse=True):
         p = r["payload"]
-        hits = [u for u in _sentences(p.get("body") or "") if ASKS.search(u)]
+        units = _sentences(p.get("body") or "")
+        hits = [i for i, u in enumerate(units) if ASKS.search(u)]
         if not hits and ASKS.search(p.get("subject") or ""):
-            hits = _sentences(p.get("body") or "")[:1]
+            hits = [0] if units else []
         if hits:
-            out.append((f"“{p.get('subject') or 'no subject'}” ({_day(_iso(p.get('date')))}): {hits[0]}",
+            i = hits[0]
+            text = units[i]
+            if text.rstrip().endswith(":"):                      # "Still waiting on you:" -> the items that follow
+                text = text.rstrip() + " " + "; ".join(units[i + 1:i + 4])
+            out.append((f"“{p.get('subject') or 'no subject'}” ({_day(_iso(p.get('date')))}): {text}",
                         r["record_id"], p))
         if len(out) >= limit:
             break

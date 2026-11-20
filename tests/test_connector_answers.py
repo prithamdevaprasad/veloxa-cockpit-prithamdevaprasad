@@ -230,3 +230,11 @@ def test_email_quotes_whole_sentences_from_hard_wrapped_mail():
     assert "Multi-depot is out of GA." in units and "My decisions:" in units and not any("From:" in u for u in units)
     assert connectors._terms("What does Northwind need before it will renew?") == ["northwind", "renew"]
     assert connectors._hit("worst-case", {"worst", "case"}, "the worst case is small")
+
+
+def test_a_lead_in_ask_brings_the_items_that_follow(monkeypatch):
+    msg = {"record_id": "r1", "payload": {"subject": "Weekly summary", "date": "Fri, 20 Nov 2026 18:30:00 +0530",
+           "internal_date": "1", "body": "Hi,\n\nStill waiting on you:\n1. The renewal quote.\n2. The launch date.\n"}}
+    monkeypatch.setattr(connectors, "_messages", lambda router: [msg])
+    (text, rid, _), = connectors.pending_asks(object())
+    assert rid == "r1" and text.endswith("Still waiting on you: The renewal quote.; The launch date.")
