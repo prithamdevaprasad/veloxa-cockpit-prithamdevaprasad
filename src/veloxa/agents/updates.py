@@ -54,8 +54,8 @@ def build(ctx, focus: str = "updates") -> dict:
         out["gaps"] = ["nothing has been admitted at this knowledge point"]
         return out
     released = {k: v for k, v in ledger.sealed_releases(ctx.conn, ctx.tenant_id)}
-    admitted = lambda b: (f"admitted with the {_day(released[b])} release" if released.get(b)  # noqa: E731
-                          else "admitted")
+    admitted = lambda b: (f"recorded by {_day(released[b])}" if released.get(b)  # noqa: E731
+                          else "on record")
     k = ctx.basis.batch_seq
     with tenant_tx(ctx.conn, ctx.tenant_id, batch_seq=k):
         dept = None
