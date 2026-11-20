@@ -36,6 +36,13 @@ duplicates). Exactly one worker instance is used because the executor id is fixe
 
 DBOS Conductor (a paid DBOS service) is not needed.
 
+**One API instance for now.** Jira and Gmail sign-in keep their one-time OAuth state in the API's memory, so a
+callback must reach the instance that started it. The hosted staging API runs with `--max-instances=1`. Before
+scaling out, move that state into the database.
+
+**Pause and resume.** `bash deploy/veloxa-hosting.sh pause|resume|status <project>` stops and restarts the worker,
+the API and Cloud SQL without deleting data (paused cost: the database disk and backups, about US$0.17 a day).
+
 ## 3. Cloud SQL
 
 | Setting | Staging | Production |
