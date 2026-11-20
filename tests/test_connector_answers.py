@@ -214,3 +214,14 @@ def test_connected_sources_answer_in_sentences_and_mail_stays_with_its_parties(d
         assert c.get(f"/v1/evidence/{quote(rid, safe='')}", headers=H).status_code == 404
         a = ask(c, "What does Northwind need before it will renew?")
         assert "99.9%" not in a["answer"]
+
+
+def test_email_quotes_whole_sentences_from_hard_wrapped_mail():
+    body = ("Casey,\n\nWe need a decision from you by Friday on whether we cut the\nmulti-depot feature. Northwind "
+            "(our second-largest account, Rs. several units a year) told me\nthis morning.\n\nMy decisions:\n\n"
+            "1. Multi-depot is **out of GA**. GA stays at 15 December 2026.\n2. The credit is approved.\n\nFrom: X")
+    units = connectors._sentences(body)
+    assert "Northwind (our second-largest account, Rs. several units a year) told me this morning." in units
+    assert "Multi-depot is out of GA." in units and "My decisions:" in units and not any("From:" in u for u in units)
+    assert connectors._terms("What does Northwind need before it will renew?") == ["northwind", "renew"]
+    assert connectors._hit("worst-case", {"worst", "case"}, "the worst case is small")
