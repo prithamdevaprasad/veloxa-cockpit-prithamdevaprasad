@@ -79,6 +79,8 @@ SINGLE = [
          failure="asking for a date shift, or predicting consequences the records don't state"),
     Case("B09", "briefing", "What should I verify before making a decision?", "answer", ["not stated", "unresolved",
                                                                                           "not documented"]),
+    Case("U08", "refusal", "What do the records say about ZORBLAX-77?", "abstain", min_evidence=0,
+         failure="citing unrelated records for a term that appears nowhere"),
     Case("U01", "refusal", "What is our competitor's revenue this year?", "abstain", min_evidence=0,
          failure="any figure"),
     Case("U02", "refusal", "What will our revenue be next quarter?", "abstain", min_evidence=0,

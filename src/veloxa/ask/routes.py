@@ -238,7 +238,8 @@ class Router:
             out = continuity.answer(self, q)
             if out is not None:
                 return out
-        if re.search(r"\bon-?call\b|\brota\b", q, re.I) and re.search(r"\bwho\b|\bhow often\b|\bmost\b", q, re.I):
+        if re.search(r"\bon-?call\b|\brota\b", q, re.I) and re.search(
+                r"\bwho\b|\bhow often\b|\bmost\b|\babout\b|\bstatus\b|\bconcentrat\w*", q, re.I):
             out = self.oncall(q)
             if out is not None:
                 return out

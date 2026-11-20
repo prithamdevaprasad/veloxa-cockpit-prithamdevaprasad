@@ -82,6 +82,7 @@ def validate(step: Step) -> None:
 _STOP = set("""a an and are as at be by can did do does for from had has have how i in is it its me my of on or our
 show tell that the their them there these this those to us was we were what when where which who whom why with you
 your about any all give list please much many there's what's who's know known current currently now today latest
+record records say says said mention mentions mentioned
 """.split())
 
 _INTENTS: list[tuple[str, str]] = [
