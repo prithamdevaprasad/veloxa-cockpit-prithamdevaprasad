@@ -22,12 +22,21 @@ BEGIN
 END
 $$;
 
--- Enforce the attributes even if the roles already existed.
-ALTER ROLE veloxa_owner    NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
-ALTER ROLE veloxa_migrator LOGIN   NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
-ALTER ROLE veloxa_app      LOGIN   NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
-ALTER ROLE veloxa_ingest   LOGIN   NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
-ALTER ROLE veloxa_projection LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+-- Enforce the attributes even if the roles already existed, but only where one differs: managed PostgreSQL
+-- (Cloud SQL) refuses any ALTER ROLE that names SUPERUSER, even to keep it off. A role that somehow IS a superuser
+-- or bypasses RLS still gets the full ALTER, which then needs a real superuser: it fails closed, never silently.
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN SELECT rolname, rolname <> 'veloxa_owner' AS login FROM pg_roles
+           WHERE rolname IN ('veloxa_owner', 'veloxa_migrator', 'veloxa_app', 'veloxa_ingest', 'veloxa_projection')
+             AND (rolsuper OR rolbypassrls OR rolcreatedb OR rolcreaterole
+                  OR rolcanlogin <> (rolname <> 'veloxa_owner')) LOOP
+    EXECUTE format('ALTER ROLE %I %s NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE', r.rolname,
+                   CASE WHEN r.login THEN 'LOGIN' ELSE 'NOLOGIN' END);
+  END LOOP;
+END
+$$;
 
 GRANT veloxa_owner TO veloxa_migrator;
 
