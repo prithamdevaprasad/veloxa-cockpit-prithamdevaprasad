@@ -138,13 +138,17 @@ jobs:
       - name: Type-check and build
         working-directory: frontend
         run: npm run build
-      - name: Browser journeys (desktop, tablet, mobile)
+      - name: Browser journeys (desktop 1440x900 and 1920x1080)
         working-directory: frontend
         env:
           VELOXA_PYTHON: python
+          # The journeys sign in with the local demo fixture token. Its field only exists in a build made with
+          # VITE_DEV_TOKEN_UI=1, so the tests use their own build; the production build above stays without it.
+          VITE_DEV_TOKEN_UI: "1"
         run: |
+          npm run build
           npx playwright install --with-deps chromium
-          npx playwright test
+          npx playwright test --project=desktop --project=desktop-wide
 
   dependency-audit:
     runs-on: ubuntu-latest
