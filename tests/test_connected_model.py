@@ -95,13 +95,14 @@ def test_only_the_projection_role_integrates_and_tenants_stay_isolated(db, d1, t
 
 
 def test_a_parsed_source_is_not_an_admitted_source():
-    """D2 people sources parse with their contracts, yet stay unclassified and unauthorised: no admission."""
+    """Parsing never admits. A file needs a catalogue rule AND a source-specific authorisation (K-13, owner decision
+    18 Nov 2026 for D2/D3); an unknown file stays unclassified, and D4 is not authorised at all."""
     title, cols = ("Synthetic",), people_contracts.PULSE_COLUMNS
     parsed = people_contracts.pulse([title, (None,), cols, ("Jul-Sep 2099", "Syn", 5, 5, 3, None)])
     assert parsed.errors == [] and len(parsed.rows) == 1
     rules = catalogue.load_catalogue()
-    for path in ("data_room/hr/Hiring_Tracker.xlsx", "data_room/hr/Leave_Register.xlsx",
-                 "data_room/hr/Pulse_Survey.xlsx", "data_room/engineering/Synthetic_Tracker_Export.xlsx"):
-        with pytest.raises(catalogue.UnclassifiedSource):
-            catalogue.classify(rules, path)
-    assert set(load_authorisations()) == {"D1"}
+    with pytest.raises(catalogue.UnclassifiedSource):
+        catalogue.classify(rules, "data_room/engineering/Synthetic_Tracker_Export.xlsx")
+    auth = load_authorisations()
+    assert all(auth[p].sources for p in ("D2", "D3", "D4"))           # K-13: every later pack is per source
+    assert "data_room/hr/Pulse_Survey.xlsx" in auth["D2"].sources

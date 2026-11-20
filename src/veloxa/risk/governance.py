@@ -27,8 +27,8 @@ import psycopg
 from .. import audit
 from ..db import tenant_tx
 
-ENGINE_VERSION = "risk-v0.1-unweighted"
-WEIGHTED_RANKING_IMPLEMENTED = False
+ENGINE_VERSION = "risk-v1.0-d15-weighted"
+WEIGHTED_RANKING_IMPLEMENTED = True   # D-15 v1 (veloxa.risk.ranking)
 REQUIRED_CONTENT = ("weights", "anchors", "guardrail_tiers", "gate_thresholds")
 
 
@@ -67,28 +67,26 @@ def current_policy(conn: psycopg.Connection, tenant_id: uuid.UUID) -> PolicyStat
 
 
 def ranking_mode(policy: PolicyState) -> str:
-    """The mode a briefing is produced in. Only an approved policy AND an implemented weighted engine could change
-    it; neither condition alone does."""
-    if policy.status == "approved" and WEIGHTED_RANKING_IMPLEMENTED:
-        return "weighted"
+    """The BRIEFING's mode (Today view, top_three). It stays the unweighted partial order in every case: top_three
+    semantics are preserved (it is null). The D-15 weighted ranked list is a separate view (`/v1/worry`)."""
     return "unweighted_partial_order"
 
 
-def weighted_ranking(policy: PolicyState, risks: list) -> list:
-    """The only entry point for weighted ranking. Blocked while D-15 is pending, and not implemented in this
-    engine version even after approval (it requires the owner's explicit go-ahead)."""
-    if policy.status != "approved":
+def weighted_ranking(policy: PolicyState, items: list, content: dict | None = None) -> dict:
+    """The only entry point for weighted ranking. Blocked while D-15 is pending; otherwise ranks with the RECORDED
+    decision content (versioned, hashed, audited in policy.ranking_decision), never with request-supplied weights."""
+    if policy.status != "approved" or content is None:
         raise RankingBlocked("weighted ranking cannot run: D-15 (risk weights, anchors, guardrail tiers, gate "
                              "thresholds) is pending an owner decision")
-    raise RankingBlocked(f"weighted ranking is not implemented in {ENGINE_VERSION}; D-15 version {policy.version} "
-                         "is recorded, and implementing it needs the owner's explicit approval")
+    from . import ranking
+
+    return ranking.rank(items, content)
 
 
 def owner_decision_status(policy: PolicyState) -> str:
     if policy.status == "pending":
         return "D-15 pending"
-    return (f"D-15 approved (version {policy.version}); weighted ranking is not implemented in {ENGINE_VERSION}, "
-            "so the unweighted comparison is shown")
+    return f"D-15 approved (version {policy.version}); weighted ranking by {ENGINE_VERSION} (/v1/worry)"
 
 
 def load_decision_file(path: Path) -> tuple[dict, dict, str]:

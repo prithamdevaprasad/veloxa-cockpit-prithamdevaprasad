@@ -23,6 +23,7 @@ from decimal import Decimal
 import psycopg
 
 from .. import audit, ledger, tools
+from ..authz import evidence as evidence_authz
 from ..db import tenant_tx
 from ..temporal import Mode, ReadBasis, resolve_basis
 from . import conflicts, planner, policy, timeparse
@@ -105,9 +106,60 @@ def _basis_json(basis: ReadBasis) -> dict:
             "notes": list(basis.notes)}
 
 
+_SPLIT = re.compile(r"(?<=[?.!;])\s+|\s+(?:and|also|plus|but)\s+(?=(?:also\s+)?(?:what|how|when|where|why|which|who|is|"
+                    r"are|can|could|show|give|tell|list)\b)", re.I)
+_ASKS = re.compile(r"\?\s*$|^\s*(and\s+)?(what|how|when|where|why|which|who|is|are|was|were|do|does|did|can|could|"
+                   r"show|give|tell|list|summari[sz]e|explain)\b", re.I)
+_PERMISSION_CLAIM = re.compile(r"\b(says?|said)\b.{0,20}\b(fine|ok(ay)?|allowed|approved)\b|\b(approved|signed off)\b",
+                               re.I)
+
+
+def split_parts(question: str) -> list[str]:
+    """Independent questions in one message ("Rank who will quit, and what is the Atlas status?")."""
+    return [x.strip(" ,") for x in _SPLIT.split(question.strip()) if x and x.strip(" ,")]
+
+
 def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: tools.Principal, question: str,
            now: datetime, *, mode: str | None = None, as_of: str | None = None,
            as_known_at: str | None = None) -> dict:
+    """A message with several independent questions: refused parts are refused (each with its policy) and the
+    permitted parts are still answered. A relayed approval ("X says it's fine") is context, never a question and
+    never an authorisation."""
+    question = question.strip()
+    parts = split_parts(question)
+    if len(parts) > 1:
+        current = resolve_basis(tenant_id, ledger.sealed_releases(conn, tenant_id), Mode.CURRENT, None, tz, now)
+        people = _people(conn, current)
+        names = [p["full_name"] for p in people] + [p["emp_id"] for p in people]
+        from . import routes as _routes
+
+        refused, allowed = [], []
+        for part in parts:
+            r = policy.prescreen(part, names)
+            if r is None and _routes.pays_an_individual(part):
+                r = policy.Refusal(policy.POLICIES["POL-PAY-01"], "individual compensation")
+            if r:
+                refused.append((part, r))
+            elif _ASKS.search(part) and not _PERMISSION_CLAIM.search(part) and len(part.split()) >= 3:
+                allowed.append(part)
+        if refused and allowed:
+            out = _answer_one(conn, tenant_id, tz, principal, " ".join(allowed), now, mode=mode, as_of=as_of,
+                              as_known_at=as_known_at)
+            notes = list(dict.fromkeys(f"{r.policy.reason} ({r.policy.policy_id})" for _, r in refused))
+            out["answer"] = ("I can't help with part of this: " + " ".join(notes) + "\n\nOn the rest of your "
+                             "question: " + (out.get("answer") or ""))
+            out["partial_refusals"] = [{"part": part, "policy": r.policy.policy_id, "title": r.policy.title,
+                                        "alternative": r.policy.alternative} for part, r in refused]
+            out["interpretation"] = (f"I read this as {len(parts)} parts: {len(refused)} refused by policy and "
+                                     f"{len(allowed)} answered. " + (out.get("interpretation") or ""))
+            return out
+    return _answer_one(conn, tenant_id, tz, principal, question, now, mode=mode, as_of=as_of,
+                       as_known_at=as_known_at)
+
+
+def _answer_one(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: tools.Principal, question: str,
+                now: datetime, *, mode: str | None = None, as_of: str | None = None,
+                as_known_at: str | None = None) -> dict:
     question = question.strip()
     releases = ledger.sealed_releases(conn, tenant_id)
     current = resolve_basis(tenant_id, releases, Mode.CURRENT, None, tz, now)
@@ -115,7 +167,14 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
 
     # (2) refusal pre-screen: before anything is read for the question. Names come from the latest sealed export
     # and are used only to recognise that a question targets an individual.
-    refusal = policy.prescreen(question, [p["full_name"] for p in _people(conn, current)])
+    people = _people(conn, current)          # names AND employee IDs: either one identifies an individual
+    refusal = policy.prescreen(question, [p["full_name"] for p in people] + [p["emp_id"] for p in people])
+    from . import routes
+
+    if refusal is None and routes.pays_an_individual(question):      # named or not in the HR export
+        reading = "I read this as a request for one person's pay (POL-PAY-01: individual compensation)."
+        return _record(conn, tenant_id, principal, now, current, base,
+                       _refused(policy.POLICIES["POL-PAY-01"], current, reading))
     if refusal:
         reading = f"I read this as a request covered by {refusal.policy.policy_id} ({refusal.policy.title})."
         return _record(conn, tenant_id, principal, now, current, base, _refused(refusal.policy, current, reading))
@@ -146,18 +205,70 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
     except ValueError as e:      # e.g. VALID_AT over sources that record no valid time: unanswerable, not an error
         return _record(conn, tenant_id, principal, now, basis, base, _abstained(
             basis, f"I read this as a question at {basis.banner()}.", [str(e)]))
+    routed = routes.Router(conn, tenant_id, tz, principal, basis, _basis_json(basis), SOURCE_CLASS).route(
+        spec.remainder or question, original=question)
+    if routed is not None:
+        base["diagnostics"] = {"stage": "routed", "route": routed["interpretation"][:80]}
+        return _record(conn, tenant_id, principal, now, basis, base, routed)
     the_plan = planner.plan(spec.remainder, people, now.year, tz)
     interpretation = the_plan.interpretation + (f" Time: {spec.phrase!r} -> {basis.banner()}." if spec.phrase
                                                 else f" Time: {basis.banner()}.")
 
     # (6) execute declared operations (each runs under RLS at K with the principal's party filter)
     results: list[tools.ToolResult] = []
+    withheld_by_permission = 0
     for step in the_plan.steps:
         try:
-            results.append(tools.TOOLS[step.tool](conn, basis, principal, **step.args))
+            r = tools.TOOLS[step.tool](conn, basis, principal, **step.args)
         except Exception as e:  # an operation failure makes its claims unavailable, never the whole service
-            results.append(tools.ToolResult(step.tool, "unsupported", reason=f"operation failed ({type(e).__name__})"))
+            r = tools.ToolResult(step.tool, "unsupported", reason=f"operation failed ({type(e).__name__})")
+        if principal.access is not None:          # per-document ReBAC + ABAC on every tool result
+            r, n = evidence_authz.gate(r, principal.access)
+            withheld_by_permission += n
+        results.append(r)
+    # Bounded, deterministic fallback: when the intent tools found nothing for a question that NAMES a subject
+    # (a capitalised term such as a project or vendor), search admitted text once for it. Recorded in diagnostics.
+    fallback = None
+    first = question.split()[0] if question.split() else ""
+    named = [w for w in re.findall(r"\b[A-Z][A-Za-z0-9-]{2,}\b", question)
+             if w != first and w.lower() in set(the_plan.focus_terms)]
+    if (named and not any(x.facts or x.evidence for x in results)
+            and not any(st.tool == "text_search" for st in the_plan.steps)):
+        fallback = " OR ".join(dict.fromkeys(w.lower() for w in named))
+        r = tools.TOOLS["text_search"](conn, basis, principal, query=fallback)
+        if principal.access is not None:
+            r, n = evidence_authz.gate(r, principal.access)
+            withheld_by_permission += n
+        results.append(r)
+    base["diagnostics"] = {
+        "fallback_text_search": fallback,
+        "stage": "executed",
+        "plan": [{"tool": st.tool, "why": st.why} for st in the_plan.steps],
+        "tools": [{"tool": x.tool, "status": x.status, "facts": len(x.facts), "evidence": len(x.evidence)}
+                  for x in results],
+        "evidence_considered": sum(len(x.evidence) for x in results),
+        "withheld_by_permission": withheld_by_permission,
+        "access_mode": principal.access.mode if principal.access is not None else "tenant_wide",
+    }
 
+    searched = [st for st in the_plan.steps if st.tool == "text_search"]
+    if (searched and len(searched) == len(the_plan.steps)) or fallback:
+        terms = {t.strip().lower() for st in searched for t in st.args.get("query", "").split(" OR ")} | (
+            {t.lower() for t in fallback.split(" OR ")} if fallback else set())
+        specific = {t for t in terms if t and t not in _GENERIC} or terms
+        need = max(2 if len(specific) >= 2 else 1, -(-len(specific) // 2))     # >= half of the specific terms
+        for r in results:
+            if r.tool == "text_search" and r.evidence:
+                def hits(e):                       # highlighted words are stemmed forms: count them, not exact terms
+                    found = {m.lower() for m in re.findall(r"\u27e6([^\u27e7]+)\u27e7", e.excerpt)} - _GENERIC
+                    return found, any(re.fullmatch(r"[a-z]+-[a-z]?\d+", w) for w in found)   # e.g. NIM-E1, D-07
+
+                keep = [e for e in r.evidence if e.system != "challenge_brief"      # the brief is not company evidence
+                        and (hits(e)[1] or len(hits(e)[0]) >= need)]
+                r.evidence = keep
+                if not keep:
+                    r.status, r.gaps = "no_data", ["no admitted passage matches enough of the question to answer it"]
+        base["diagnostics"]["relevance_threshold"] = f">= {need} of {len(specific)} specific query terms per passage"
     withheld = [r for r in results if r.status == "withheld"]
     if withheld and len(withheld) == len(results):
         return _record(conn, tenant_id, principal, now, basis, base,
@@ -216,6 +327,15 @@ def answer(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, principal: t
     qualifiers = list(dict.fromkeys([q for c in kept for e in c.evidence if e in facts
                                      for q in facts[e]["qualifiers"]] + [FACTS_ONLY]))
     found = conflicts.for_question(conn, basis, tz, question)        # H-11: never one figure when sources disagree
+    if found and principal.access is not None and principal.access.mode == "rebac":
+        # A disagreement is shown only if EVERY side is readable: one side alone would mislead.
+        ids = sorted({c["record_id"] for d in found for c in d["claims"]})
+        ok = {e.record_id for e in tools._evidence(conn, basis, ids) if principal.access.allows(e.system, e.data_class)}
+        hidden = [d for d in found if not {c["record_id"] for c in d["claims"]} <= ok]
+        found = [d for d in found if d not in hidden]
+        if hidden:
+            unknowns.append(f"{len(hidden)} source disagreement(s) involve records outside your authorised sources; "
+                            "they are not shown")
     status = _status(False, headline, qualifiers, conflict=bool(found))
     shown = [c.text for c in kept[:3]]
     text = ". ".join(s.rstrip(".") for s in shown) + "."
@@ -280,6 +400,11 @@ def _refused(p: policy.Policy, basis: ReadBasis, interpretation: str) -> dict:
     return out
 
 
+_GENERIC = {"version", "engineering", "company", "update", "updates", "status", "team", "teams", "people", "morning",
+            "today", "week", "month", "year", "one", "two", "three", "data", "report", "record", "records", "thing",
+            "things", "work", "news", "latest", "new", "time", "board", "call", "said", "say", "know", "mean",
+            "means", "veloxa", "information", "details", "question", "please", "tell", "show", "give", "says", "saying",
+            "still", "unknown", "known", "anything", "something", "about", "what", "which"}
 _FORECAST_WORDS = re.compile(r"\b(forecast\w*|project(?:ed|ion)s?|predict\w*)\b", re.I)
 _QUANTITY = re.compile(r"^\s*(what(?:'s| is| was| will)?\b|how (?:much|many)\b)", re.I)
 _FUTURE = re.compile(r"\b(will\b|going to\b|next (?:year|quarter|month|fy)\b|expected to\b|by (?:the )?end of next)",
@@ -300,7 +425,7 @@ _FORECAST = _Forecast()
 
 def _abstained(basis: ReadBasis, interpretation: str, unknowns: list[str]) -> dict:
     out = _empty(basis, "abstained", "D", interpretation)
-    out["answer"] = "I don't know: no usable evidence answers this at this knowledge point."
+    out["answer"] = "I couldn't find a verified company record for that information."
     out["grade"]["reasons"] = ["no claim survived verification"]
     out["unknowns"] = list(dict.fromkeys(unknowns))
     return out
@@ -311,7 +436,27 @@ def _record(conn: psycopg.Connection, tenant_id: uuid.UUID, principal: tools.Pri
     """(11) Record the answer, its citations and audit events in ONE transaction. Audit details hold structure
     and counts only, never question text or values."""
     answer_id = base["answer_id"]
-    result = {**result, "audit_id": answer_id, "pipeline_version": base["pipeline_version"]}
+    from . import confidence
+
+    result = confidence.assess(dict(result))                      # deterministic, never a model
+    result["follow_ups"] = result.get("follow_ups") or confidence.follow_ups(result)   # routes may set their own
+    from .. import schema
+
+    specialists_ok = schema.available(conn, "company_intelligence")   # optional enrichment; never fails the answer
+    with tenant_tx(conn, tenant_id):
+        agents = [] if not specialists_ok else [dict(r) for r in conn.execute(
+            "SELECT DISTINCT ON (p.agent_id) p.agent_id, p.display_name, c.category FROM runtime.agent_person p"
+            " JOIN runtime.agent_config c ON c.tenant_id = p.tenant_id AND c.agent_id = p.agent_id"
+            " AND c.config_version = p.version ORDER BY p.agent_id, p.version DESC").fetchall()]
+    result["specialists"] = confidence.specialists(result, agents) if result["status"] != "refused" else []
+    diag = dict(base.get("diagnostics") or {"stage": "prescreen" if result.get("refusal") else "basis"})
+    if not specialists_ok:
+        diag["specialists"] = "unavailable: the database is missing migration 0021_company_intelligence"
+    if result["status"] == "abstained":
+        diag["abstention_reason"] = (result.get("unknowns") or ["no admitted evidence answers this question"])[0]
+    if result.get("verification"):
+        diag["citation_verification"] = result["verification"].get("deterministic")
+    result = {**result, "audit_id": answer_id, "pipeline_version": base["pipeline_version"], "diagnostics": diag}
     cited = sorted({e["record_id"] for e in result["evidence"]})
     policy_id = result["refusal"]["policy"] if result["refusal"] else None
     with tenant_tx(conn, tenant_id, principal.principal_id, basis.batch_seq):

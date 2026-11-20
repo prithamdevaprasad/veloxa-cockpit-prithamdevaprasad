@@ -967,3 +967,176 @@ T6a asks that the cockpit say what to worry about when it opens, without a quest
 ### Verification actually run
 
 - `pytest`: 407 passed. `ruff check .`: passed. Public and private scans: CLEAN, with D2 allowed only after its release.
+
+## 17–18 Nov 2026: Sprints 6–10 on branch `feat/veloxa-sprints-7-10` (local, not pushed or merged)
+
+### Task given to AI
+
+The owner asked for the following, local-first, with no push, merge or deployment and no change to the real database:
+- complete the feasible Sprint 5–10 work;
+- inspect every release-pack file;
+- review the architecture;
+- prepare an owner decision register;
+- harden the platform;
+- write a tested local operating README.
+
+### What AI produced
+
+- **Sprint 6:** the shared agent runtime (agents are configuration; five-tier memory; idempotent turns); migration 0013.
+- **Sprint 7:** the React + Vite + TypeScript cockpit, with Playwright journeys. Today, Ask, conflicts, agents with session history and cancellation, scenarios, timeline, departments and access.
+- **Sprint 8:**
+  - the risk lifecycle across knowledge points;
+  - deterministic scenarios (no probability);
+  - an evidence dependency graph with early warnings, built from visible evidence only and never ranked.
+- **Sprint 10:**
+  - DBOS durable workflows (owner-approved `dbos==3.5.0`) with approval-gated retention, which is a dry run by default (migration 0014);
+  - the governed model client, DENY_ALL by default with hard budgets (0015);
+  - telemetry;
+  - verified backups and restore drills;
+  - gateway controls;
+  - C02 JWKS rotation, not wired to any IdP;
+  - C06 ingestion isolation;
+  - execution isolation in the database (0016);
+  - SAST and dependency audit;
+  - CI jobs, a load probe and operations designs (`docs/operations/`).
+- **Docs:** `README.md` rewritten as an operating manual; every command was run. `LOCAL_DEVELOPMENT.md` added.
+
+### Where AI was wrong, and what changed
+
+| # | AI error or weakness | Who caught it | Correction |
+|---|---|---|---|
+| E66 | The individual-pay pre-screen recognised people by name or role but not by employee ID. "What is the salary of <ID>?" returned an unrelated profile answer instead of a refusal. No pay was disclosed: the database denies payroll to the API role | AI, while testing the README end to end | Employee IDs are passed to the pre-screen in Ask and agents; regression tests added |
+| E67 | `load-env.ps1`, when dot-sourced, left the last loaded value in a session variable | AI, README testing | The loader runs in its own scope; tested that no variable holds a value |
+| E68 | The Vite servers bound `localhost`, which is IPv6-only on Windows, so `127.0.0.1:5173` was refused | AI, README testing | Both servers bind `127.0.0.1` |
+| E69 | Process-isolated parsing broke on Windows `spawn` for entry points without a main guard (`python -m veloxa`, a test helper) | Full test run | Main guards added |
+| E70 | The demo connected with hard-coded role passwords while bootstrap applied any configured ones | AI review | The demo uses the same values bootstrap sets |
+| E71 | A heredoc edit swallowed a backslash continuation, and a pipe once hid a failing test run | AI | Edits go through scripts or the edit tool; exit codes are always checked before output is filtered |
+
+### Verification actually run
+
+- **pytest:** full suite passing, exit 0 (final counts are in the final report).
+- **Browser and gold:** Playwright 30/30 (desktop, tablet, mobile); gold 30/30 on admitted D1.
+- **Lint and scans:** ruff clean; confidentiality scans clean on every commit and over the whole branch history.
+- **Dependency audit:** Python clean. npm was clean on 17 Nov; on 18 Nov a newly published advisory with no patched release (picomatch, via Vite; development time only) makes it fail. It is recorded in `docs/DEPENDENCIES.md` and not suppressed.
+- **Migrations 0013–0016:** tested on disposable PostgreSQL 18 only, including the upgrade of a restored copy of the real database.
+- **Real database:** unchanged at 0012; fingerprint before and after identical.
+
+### Confirmations
+
+- Nothing was pushed, merged or deployed. The real database is unchanged.
+- Payroll release stays off. D-15 is not recorded, and `top_three` stays null.
+- No later pack was admitted. No real identity was approved.
+- `ARCHITECTURE.md` is unchanged.
+- Every operational value (retention, budgets, limits, provider) is a proposal in the owner's register, not a policy.
+
+## 18–19 Nov 2026: company intelligence, explanations, reliability and sign-in (branch `feat/veloxa-sprints-7-10`)
+
+### Task given to AI
+
+- Per-source admission of D2 and D3 (K-13), claim-level knowledge and a Conflict Registry, the 14 agents mapped to HR
+  records by exact employee ID or e-mail only, D-15 v1 weighted ranking under the owner's delegation (hackathon scope),
+  findings, a mocked Jira connector, and a Gemini wording experiment restricted to synthetic data.
+- A light enterprise redesign of the cockpit; an application-wide reliability audit of HTTP 500s; plain-English
+  explanations of verified results (Ask, What-if, worries, conflicts, abstentions, the brief); and a real sign-in
+  (OIDC code flow with PKCE, server-side sessions, a local demo entry).
+
+### What AI produced
+
+- `knowledge.py`, `risk/ranking.py`, `findings.py`, `connectors.py`, `explain.py`, `schema.py`, `login.py`,
+  `api_auth.py`, migration 0021, and the tests `test_knowledge`, `test_ranking`, `test_k13_sources`, `test_explain`,
+  `test_schema_drift`, `test_login`, plus 8 acceptance cases (40 in total) and Playwright journeys (26 x 3 viewports).
+
+### Where AI was wrong, and what changed
+
+| # | AI error or weakness | Who caught it | Correction |
+|---|---|---|---|
+| E72 | A pipe to `tail` hid a failing test run, and a commit was pushed with one failing test | AI, on the next run | Every push is now conditioned on the real exit code and the scan gate |
+| E73 | A masking script meant to show `.env` key names printed a value | AI, immediately | The owner was told to rotate the key; scripts now print key names only |
+| E74 | The CSV parser read integers as text, so a contract check failed; duplicate record IDs came from rows without a locator | Tests | `integer_text` contract and row locators; the dry run now checks uniqueness |
+| E75 | Conflict detection grouped different quarters together and produced false conflicts | AI review of the registry | Period-aware grouping |
+| E76 | The Demo Lab database was one migration behind the code, so six pages and every Ask question failed with an anonymous HTTP 500, and the lab servers never logged the tracebacks | Owner, from screenshots | A schema capability check answers 503 naming the migration; Ask no longer fails on an optional lookup; lab servers log errors with request IDs |
+| E77 | An optional enrichment (which specialists to consult) ran inside the answer transaction and turned a valid answer into a 500 | Reliability audit | It is skipped, and recorded in diagnostics, when its tables are absent |
+| E78 | The first wording guard rejected faithful rewordings ("Apr" to "April", an ISO date written out) and missed dropped numbers | Live synthetic runs | Dates compared as calendar days; every number of an item must be kept |
+| E79 | An abstention's explanation reached the model with no facts: the governed client correctly redacted text of unknown class | Tracing the server path | Explanations citing no record are labelled `internal`; the redaction rule was not weakened |
+| E80 | Explain endpoints called the model twice per request | Latency investigation | One call per explanation |
+| E81 | A sign-in test appeared to pass a login-CSRF case because the test client sent two cookies | AI | The test clears the cookie jar first, as a browser would |
+| E82 | The sign-out link widened the phone top bar by 12 px | Playwright layout journey | On phones sign-out lives in Admin > Account |
+
+### Verification actually run
+
+- **pytest** (full suite), **acceptance** 40/40, **Playwright** 78/78, frontend build, ruff, public scan, private
+  safety scan and dependency audit. Final counts are in the commit message and the final report.
+- **Live:** every page's API calls against the running Demo Lab and company lab; the demo sign-in through the
+  preview with a cookie jar; Gemini wording on synthetic Demo Lab data only.
+
+### Confirmations
+
+- The real database stays at migration 0012; `veloxa_demolab` was not migrated (a new `veloxa_demolab_v2` was built).
+- D4 is not admitted before its release. No identity mapping was invented: unmatched Jira initials and rota names
+  stay unknown.
+- No company data, transcript or HR record was sent to Gemini; the supplied company is refused by name.
+- No OAuth client ID or secret was invented; single sign-on stays hidden until an administrator configures it.
+
+## 19 Nov 2026 (before the D4 release): owner decisions, access model, interview quality, D2/D3 publication
+
+### Task given to AI
+
+Owner decisions 1-3 (hackathon bootstrap, self-profile for all 14 agents, submission branch); an explicit, audited,
+revocable company-wide read in place of an HR-title grant; a quality review of interviews with all 14 agents; browser
+QA on the real D1-D3 data; publication of the 32 owner-reviewed D2/D3 items.
+
+### Where AI was wrong, and what changed
+
+| # | AI error or weakness | Who caught it | Correction |
+|---|---|---|---|
+| E83 | The bootstrap AI wrote granted company-wide read from the HR title "CEO" | Owner review | Grants only from an owner file or the `veloxa access` command: verified principal, approver, decision, purpose, audit, revocation |
+| E84 | A first self-profile routing change could never work (the published configs lacked the tool) and was reverted | AI, while testing | Implemented after the owner approved the capability |
+| E85 | The new tool queried tenant tables outside a tenant transaction (FORCE RLS refused it), then broke the strict tool-output schema | Acceptance A6 | Tenant-scoped reads; the field declared in the schema rather than loosening it |
+| E86 | The agent runtime ignored the documented explicit company_reader relation, so agents denied what the cockpit allowed | Acceptance A6 | The same rule as `authz/evidence.py`; ABAC still decides |
+| E87 | Interview replies dumped the whole profile for questions no record answers, attached unrelated sources, and crashed (HTTP 500) when pruning left stale memory IDs | Live 14-agent interview QA | Honest abstention, relevant facts only, pruning covers memory; regression tests and acceptance A8 |
+| E88 | A test "proved" payroll was refused with an undeclared class name, so it passed for the wrong reason | AI review | The test now uses the real protected classes |
+| E89 | The owner's draft wording for C-08 said the incident export identifies "the employee SRE"; it records first names only | Checking every conclusion against the records | Wording adjusted to the record and marked as adjusted |
+| E90 | Published text kept two internal Jira identifiers | Safety scan | Replaced by descriptions |
+| E91 | The dashboard asked for a chart column the real incident export does not have (422), and every real person's avatar read "KH" | Browser QA on real data | Charts chosen by actual columns; initials from names |
+
+### Verification actually run
+
+pytest (full suite), acceptance 43/43 (JSON inspected per case), Playwright 78/78, browser QA at 1440 px and phone
+width on the company lab (no overflow, no 5xx), live interviews with all 14 agents (15 checks each), safety and
+public scans, dependency audit, and the fresh-clone one-command start with the real release packs.
+
+### Confirmations
+
+- D4 was not opened, hashed or admitted; it remains refused until 10:00 IST on 19 Nov 2026.
+- The real `veloxa` database stays at migration 0012; `veloxa_demolab` was not touched.
+- No company data reached Gemini; private review files and transcripts stay in `private/`.
+
+## 19 Nov 2026 (after the D4 release, 10:00 IST): D4 admission, publication and voice-note responses
+
+### Task given to AI
+
+Complete the D4 release: confirm the release time on the real clock, authorise and admit D4 source by source under
+the owner's K-13 decision, check point-in-time behaviour on the real data, publish the D4 items held in
+TRANSCRIPT_NOTES and ASSUMPTIONS, and publish the T6c and T6d responses.
+
+### Where AI was wrong, and what changed
+
+- The pre-release T6c draft said the pulse survey was not admitted; it was admitted with D2. Corrected.
+- The pre-release T6d draft said the engineering sources were not admitted; they were admitted with D3. The facts
+  were re-checked against the admitted records and the wording updated.
+- Three tests asserted that D4 was not authorised, which was true only before the release. Updated.
+- No owner conclusions were given for the D4 items, so the AI left every owner-conclusion field blank and kept
+  A-020 as a draft rather than writing conclusions on the owner's behalf.
+
+### Verification actually run
+
+Release time checked on the system clock (10:06 IST) before D4 was opened; dry run, then admission to the company
+lab (2 files, 2 records, sealed as K=4); every new evidence reference resolved against the original file; T6c
+verbatim, its message half and an "HR approved it" variant refused at pre-screen; T6d cited at K=4 and not when
+asked as known at 09:59 IST; full pytest (762 passed); real-data suites; safety and public scans.
+
+### Confirmations
+
+- The real `veloxa` database was not modified; admission went to the isolated company lab only.
+- ARCHITECTURE.md is unchanged; its D4 held items were not restored (standing owner instruction).
+- No names, identifiers, figures or quotations are published; the reference map stays private.

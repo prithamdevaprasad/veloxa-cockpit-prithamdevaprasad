@@ -1,9 +1,11 @@
 name: ci
 
+# Verification only: no job in this workflow deploys, publishes or releases anything.
 on:
   push:
-    branches: [main]
+    branches: [main, "feat/**"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -42,6 +44,20 @@ jobs:
           python-version: "3.12"
       - name: Install
         run: pip install --constraint requirements.lock -e ".[dev]"
+      - name: PostgreSQL 18 client tools (PGDG signed apt repository; the runner's default pg_dump is older)
+        run: |
+          sudo apt-get install -y --no-install-recommends postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
+      - name: PostgreSQL utility version check (client must be >= server major)
+        env:
+          VELOXA_PG_TOOLS: /usr/lib/postgresql/18/bin
+        run: |
+          /usr/lib/postgresql/18/bin/pg_dump --version
+          /usr/lib/postgresql/18/bin/pg_restore --version
+          psql_server="$(python -c "import psycopg; print(psycopg.connect('$VELOXA_TEST_ADMIN_DSN').info.server_version // 10000)")"
+          echo "server major: $psql_server"
+          python -c "from veloxa.ops.backup import PgTools; print('client major:', PgTools.from_env().require_major($psql_server))"
       - name: Public safety scan (any finding fails the job)
         run: python scripts/public_scan.py
       - name: Safety-scan gate failure path (a planted finding must fail the scan, even through a pipe)
@@ -55,6 +71,9 @@ jobs:
       - name: Lint
         run: ruff check .
       - name: Tests (synthetic data only; real challenge data never exists in CI)
+        env:
+          VELOXA_PG_TOOLS: /usr/lib/postgresql/18/bin
+          VELOXA_REQUIRE_PG_TOOLS: "1"     # backup tests must run; missing or old tools are an error, never a skip
         run: pytest -m "not realdata"
 
   fresh-clone-compose:
@@ -86,3 +105,56 @@ jobs:
         env:
           VELOXA_DATA_PATH: ${{ runner.temp }}/packs
         run: docker compose down --volumes
+
+  frontend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: veloxa_admin
+          POSTGRES_PASSWORD: ci-admin
+          POSTGRES_DB: veloxa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U veloxa_admin -d veloxa"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    env:
+      VELOXA_TEST_ADMIN_DSN: postgresql://veloxa_admin:ci-admin@localhost:5432/veloxa
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install the backend (the browser tests run the real API on a disposable synthetic database)
+        run: pip install --constraint requirements.lock -e ".[dev]"
+      - name: Install the frontend (lockfile only)
+        working-directory: frontend
+        run: npm ci
+      - name: Type-check and build
+        working-directory: frontend
+        run: npm run build
+      - name: Browser journeys (desktop, tablet, mobile)
+        working-directory: frontend
+        env:
+          VELOXA_PYTHON: python
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright test
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Known-vulnerability audit of the Python pins and the frontend lockfile (any finding fails)
+        run: python scripts/dependency_audit.py

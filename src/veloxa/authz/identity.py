@@ -54,6 +54,8 @@ class KeySource:
     audience: str
     algorithms: frozenset[str]
     verify: Callable[[str, bytes, bytes], bool]   # (alg, signing input, signature) -> valid
+    # Optional: a verifier that needs the JOSE header (e.g. `kid` for JWKS rotation, authz/jwks.py). Takes precedence.
+    verify_header: Callable[[dict, bytes, bytes], bool] | None = None
 
 
 def hs256_keys(issuer: str, audience: str, secret: bytes) -> KeySource:
@@ -80,7 +82,9 @@ def validate(conn: psycopg.Connection, token: str | None, tenant_id: uuid.UUID, 
     return result
 
 
-def _validate(conn, token, tenant_id, keys, now) -> Identity | Rejected:
+def verify_signed_claims(token: str | None, keys: KeySource, now: datetime) -> dict | Rejected:
+    """The provider-neutral part of validation: compact JWS, allowed algorithm, signature, issuer, audience,
+    expiry, not-before and issued-at (bounded skew). Returns the verified claims, or a rejection reason."""
     if not token or token.count(".") != 2:
         return Rejected("malformed")
     head_b64, body_b64, sig_b64 = token.split(".")
@@ -91,7 +95,10 @@ def _validate(conn, token, tenant_id, keys, now) -> Identity | Rejected:
     alg = header.get("alg") if isinstance(header, dict) else None
     if not isinstance(claims, dict) or alg in (None, "none") or alg not in keys.algorithms:
         return Rejected("algorithm_not_allowed")
-    if not keys.verify(alg, f"{head_b64}.{body_b64}".encode(), sig):
+    signing_input = f"{head_b64}.{body_b64}".encode()
+    ok = (keys.verify_header(header, signing_input, sig) if keys.verify_header is not None
+          else keys.verify(alg, signing_input, sig))
+    if not ok:
         return Rejected("bad_signature")
     if claims.get("iss") != keys.issuer:
         return Rejected("wrong_issuer")
@@ -107,6 +114,14 @@ def _validate(conn, token, tenant_id, keys, now) -> Identity | Rejected:
         return Rejected("expired")
     if (nbf and now + MAX_SKEW < nbf) or (iat and now + MAX_SKEW < iat):
         return Rejected("not_yet_valid")
+    return claims | {"_exp": exp}
+
+
+def _validate(conn, token, tenant_id, keys, now) -> Identity | Rejected:
+    claims = verify_signed_claims(token, keys, now)
+    if isinstance(claims, Rejected):
+        return claims
+    exp = claims["_exp"]
     if claims.get("tenant") != str(tenant_id):
         return Rejected("wrong_tenant")
     sub, jti = claims.get("sub"), claims.get("jti")

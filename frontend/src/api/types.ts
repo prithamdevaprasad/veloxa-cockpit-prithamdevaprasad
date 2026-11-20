@@ -1,0 +1,263 @@
+// Types of the backend's §19 JSON contracts, as the API returns them. The frontend never adds fields of its own.
+
+export interface ReadBasis {
+  batch_seq: number;
+  mode: string;
+  as_of: string | null;
+  banner?: string;
+  notes?: string[];
+}
+
+export interface Evidence {
+  record_id: string;
+  kind: string;
+  system: string;
+  source_class?: string;
+  data_class: string;
+  batch_seq: number;
+  source_path?: string;
+  locator?: Record<string, unknown>;
+  excerpt: string;
+  knowledge_basis?: string;
+}
+
+export interface Claim {
+  confidence?: { level: string; label: string; reason: string };
+  text: string;
+  kind?: string;
+  evidence: string[];
+  verification?: string;
+  grade?: string;
+}
+
+export interface Disagreement {
+  subject: string;
+  metric_match: string;
+  definition: string;
+  period: string;
+  claims: { record_id: string; value: string; unit: string; period: string | null; source: string }[];
+}
+
+export interface Refusal {
+  policy: string;
+  title?: string;
+  reason: string;
+  alternative?: string;
+}
+
+export type AnswerStatus = "answered" | "qualified" | "conflict" | "abstained" | "refused" | "action_preview" | "clarify";
+/** A Jira write preview from Ask: shown for explicit confirmation; nothing is written before that. */
+export interface JiraPreview {
+  preview_id: string; operation: "create" | "update" | "internal_request" | "scenario"; project?: string; issue_type?: string; key?: string;
+  url?: string; fields: Record<string, unknown>; description?: string | null; comment?: string | null;
+}
+
+export interface Answer {
+  status: AnswerStatus;
+  interpretation: string;
+  answer: string;
+  grade: { value: "A" | "B" | "C" | "D"; label: string; reasons: string[] };
+  qualifiers: string[];
+  claims: Claim[];
+  disagreements: Disagreement[];
+  unknowns: string[];
+  refusal: Refusal | null;
+  read_basis: ReadBasis;
+  evidence: Evidence[];
+  audit_id: string;
+  pipeline_version: string;
+  confidence?: { level: "high" | "moderate" | "low" | "unknown" | "conflicting"; label: string; reason: string;
+                 method?: string };
+  follow_ups?: string[];
+  action?: JiraPreview | null;
+  partial_refusals?: { part: string; policy: string; title: string; alternative?: string }[];
+  specialists?: { agent_id: string; name: string | null; department: string; reason: string }[];
+}
+
+export interface TodayItem {
+  business_object: string;
+  source: string;
+  title: string;
+  why_shown: string;
+  evidence: string[];
+  unknowns: string[];
+  time_context: Record<string, string>;
+}
+
+export interface Today {
+  today: {
+    items: TodayItem[];
+    ranked: boolean;
+    rule: string;
+    candidate_count: number;
+    candidates?: string[];
+    explanation: string;
+    not_shown_because_unmeasurable: string[];
+  };
+  top_three: null;
+  ranking_mode: string;
+  owner_decision_status: string;
+  read_basis: ReadBasis;
+  snapshot_id: string;
+  full_briefing: string;
+}
+
+export interface ConflictSide {
+  record_id: string;
+  value: string;
+  unit: string;
+  period: string | null;
+  source: string;
+  provenance: { version: number; batch_seq: number; source_path: string } | null;
+  time: {
+    recorded_day: string | null;
+    recorded_basis: string;
+    valid_from: string | null;
+    valid_to: string | null;
+    valid_basis: string;
+    extracted_at: string;
+  } | null;
+}
+
+export interface Conflict {
+  conflict_id: string;
+  subject: string;
+  metric_match: string;
+  definition: string;
+  period: string;
+  status: "open";
+  claims: ConflictSide[];
+}
+
+export interface ConflictRegister {
+  register_version: string;
+  read_basis: ReadBasis;
+  conflicts: Conflict[];
+  unknowns: string[];
+}
+
+export interface PackState {
+  pack: string;
+  release_at: string;
+  released: boolean;
+  admitted: boolean;
+  status: string;
+  record_count: number | null;
+}
+
+export interface Releases {
+  now: string;
+  packs: PackState[];
+}
+
+export interface AgentSummary {
+  agent_id: string;
+  category: "engineering" | "finance" | "people_ops" | "marketing";
+  activation: "blocked" | "synthetic_test" | "active";
+  config_version: number;
+  assigned: boolean;
+  tools: string[];
+}
+
+export interface AgentRegistry {
+  runtime_version: string;
+  agents: AgentSummary[];
+}
+
+export interface AgentSession {
+  session_id: string;
+  agent_id: string;
+  config_version: number;
+  batch_seq: number;
+  label: string;
+}
+
+export interface AgentTurn {
+  status: "answered" | "qualified" | "abstained" | "refused" | "unavailable" | "failed";
+  label: string;
+  execution_id: string;
+  agent_id: string;
+  config_version: number;
+  runtime_version: string;
+  read_basis: ReadBasis;
+  claims: { text: string; fact_id: string; evidence: string[]; knowledge_basis: string }[];
+  evidence: Evidence[];
+  tools: { tool: string; decision: string; reason: string; status: string | null }[];
+  unknowns: string[];
+  excluded: Record<string, number>;
+  refusal: Refusal | null;
+  escalation: { to: string; how: string } | null;
+  reply?: string;                       // plain-language reply built only from the verified claims and the session
+  conversational?: string | null;       // answered from the conversation itself (memory, evidence, simpler, ...)
+  persona?: string | null;              // set when the reply contains an invented persona detail
+  replayed: boolean;
+}
+
+export interface MemoryItem {
+  memory_id: string;
+  tier: "working" | "episodic" | "semantic" | "interview" | "reflective";
+  label: string;
+  content: Record<string, unknown>;
+  knowledge_basis: string | null;
+  source_records: string[];
+  batch_seq: number;
+  created_at: string;
+}
+
+export interface Memories {
+  agent_id: string;
+  batch_seq: number;
+  withheld: number;
+  items: MemoryItem[];
+}
+
+export interface RiskHistory {
+  lifecycle_version: string;
+  knowledge_points: number[];
+  ranked: false;
+  items: {
+    item_id: string;
+    kind: "watchlist_risk" | "evidence_signal";
+    title: string;
+    business_object: string;
+    evidence: string[];
+    unknowns: string[];
+    events: { batch_seq: number; event: "opened" | "changed" | "resolved" | "reopened"; fields?: string[]; reason?: string }[];
+  }[];
+}
+
+export interface ScenarioStatement { statement: string; calculation?: string; evidence?: string[]; stated_date?: string | null }
+export interface Scenario {
+  scenario: string;
+  business_object: string;
+  read_basis: ReadBasis;
+  observed: ScenarioStatement[];
+  derived: ScenarioStatement[];
+  assumptions: string[];
+  unknowns: string[];
+  probability: null;
+  ranked: false;
+}
+export interface ScenarioSubjects { read_basis: { batch_seq: number; banner: string }; commitments: string[] }
+
+export interface TimelineResult {
+  read_basis: { batch_seq: number; banner: string };
+  status: string;
+  events: { display: string; kind: string; evidence: string[] }[];
+  evidence: Evidence[];
+  gaps: string[];
+}
+export interface SessionSummary { session_id: string; config_version: number; batch_seq: number; opened_at: string; turns: number }
+export interface SessionList { agent_id: string; offset: number; limit: number; has_more: boolean; sessions: SessionSummary[] }
+export interface SessionDetail { session_id: string; agent_id: string; config_version: number; batch_seq: number; opened_at: string; turns: (AgentTurn & { message?: string })[] }
+
+export interface GraphNode { id: string; type: "commitment" | "record"; label?: string; kind?: string; system?: string;
+  data_class?: string; batch_seq?: number; source_path?: string }
+export interface GraphEdge { from: string; to: string; relation: "stated_in" | "conflict"; signal_type?: string;
+  status?: string; stated_date?: string | null; subject?: string }
+export interface GraphWarning { kind: string; commitment: string; statement: string; evidence: string[] }
+export interface DependencyGraph {
+  graph_version: string; nodes: GraphNode[]; edges: GraphEdge[]; warnings: GraphWarning[]; ranked: false;
+  probability: null; notes: string[]; unknowns: string[];
+  read_basis: { batch_seq: number; mode: string; as_of: string | null; banner: string };
+}

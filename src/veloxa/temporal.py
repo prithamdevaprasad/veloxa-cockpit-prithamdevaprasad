@@ -45,14 +45,14 @@ class ReadBasis:
 
     def banner(self) -> str:
         if self.mode == Mode.CURRENT:
-            return f"Answering with current knowledge (batch K={self.batch_seq})"
+            return f"Using records up to release {self.batch_seq} (current)"
         if self.nothing_admitted:
             return f"Nothing had been admitted as of {self.as_of}"
         if self.mode == Mode.KNOWN_AT:
-            return f"Answering as known at {self.as_of} (batch K={self.batch_seq})"
+            return f"As known at {self.as_of} (records up to release {self.batch_seq})"
         if self.mode == Mode.RECORDED_BY:
-            return f"Answering from what had been recorded by {self.as_of}, as admitted by batch K={self.batch_seq}"
-        return f"Answering what was true on {self.as_of}, by best current knowledge (batch K={self.batch_seq})"
+            return f"What had been recorded by {self.as_of} (records up to release {self.batch_seq})"
+        return f"What was true on {self.as_of}, by current knowledge (records up to release {self.batch_seq})"
 
 
 def end_of_day(d: date, tz: str) -> datetime:

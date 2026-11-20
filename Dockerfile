@@ -20,4 +20,4 @@ RUN useradd --create-home --uid 10001 veloxa
 USER veloxa
 
 EXPOSE 8000
-CMD ["veloxa", "serve"]
+CMD ["veloxa", "serve", "--host", "0.0.0.0"]

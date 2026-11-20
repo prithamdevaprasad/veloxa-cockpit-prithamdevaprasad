@@ -42,6 +42,9 @@ class DbSettings:
     database: str
 
     def dsn(self, user: str, password: str, database: str | None = None) -> str:
+        if self.host.startswith("/"):        # a Unix socket directory (e.g. Cloud Run's /cloudsql/<instance>)
+            return (f"postgresql://{quote(user)}:{quote(password, safe='')}@/{database or self.database}"
+                    f"?host={quote(self.host, safe='')}&port={self.port}")
         return (
             f"postgresql://{quote(user)}:{quote(password, safe='')}@{self.host}:{self.port}/"
             f"{database or self.database}"

@@ -92,3 +92,111 @@ kind = "transcript"
 system = "meeting_summaries"
 data_class = "confidential"
 records = "document"
+
+# ---- D2 / D3 sources (owner decision 18 Nov 2026, K-13: approved source by source; see
+# config/admission_authorisations.toml). Contracts mirror the validated parsers (ingest/people_contracts.py and
+# the D3 engineering contracts). Nothing here interprets a value or resolves an identity (C12 decides links).
+
+[[rule]]
+pattern = "data_room/hr/Hiring_Tracker.xlsx"
+kind = "export"
+system = "hiring_tracker"
+# Requisitions name hiring managers and recruiter notes may mention candidates: the whole file is `personal`
+# (the stricter of the proposed classes, because a column cannot be classed on its own).
+data_class = "personal"
+records = "rows"
+key_columns = ["Req ID"]
+[rule.contract]
+required_columns = ["Req ID", "Role", "Team", "Hiring Manager", "Opened", "Status", "Status Date", "In pipeline", "Notes"]
+optional = ["Notes"]
+unique = ["Req ID"]
+iso_dates = ["Opened", "Status Date"]
+integers = ["In pipeline"]
+
+[[rule]]
+pattern = "data_room/hr/Leave_Register.xlsx"
+kind = "export"
+system = "leave_register"
+# Leave type is protected (ARCHITECTURE.md §16.6): never availability, never shown to agents (K-03).
+data_class = "sensitive_personal"
+records = "rows"
+[rule.contract]
+required_columns = ["Employee", "Leave Type", "From", "To", "Days", "Approved By"]
+iso_dates = ["From", "To"]
+numbers = ["Days"]
+
+[[rule]]
+pattern = "data_room/hr/Pulse_Survey.xlsx"
+kind = "export"
+system = "pulse_survey"
+# Team-level scores only as published; the source suppresses comment text ("Not shown").
+data_class = "confidential"
+records = "rows"
+[rule.contract]
+required_columns = ["Quarter", "Team", "Team size", "Responses", "Engagement (1-5)", "Comments"]
+integers = ["Team size", "Responses"]
+numbers = ["Engagement (1-5)"]
+not_greater = [["Responses", "Team size"]]
+
+[[rule]]
+pattern = "data_room/email/Email_Printouts.pdf"
+kind = "document"
+system = "email_printouts"
+# Printed copies of the EML messages: duplicate evidence, never independent corroboration.
+data_class = "private_comms"
+records = "document"
+
+[[rule]]
+pattern = "data_room/engineering/git_log.csv"
+kind = "export"
+system = "git"
+# Allocation evidence only: never productivity, never after-hours analysis (§16.6, POL-PROD-01).
+data_class = "internal"
+records = "rows"
+key_columns = ["sha"]
+[rule.contract]
+required_columns = ["sha", "author_email", "committed_at", "repo", "message", "files_changed"]
+unique = ["sha"]
+integer_text = ["files_changed"]
+
+[[rule]]
+pattern = "data_room/engineering/Incidents_*.xlsx"
+kind = "export"
+system = "incident_log"
+data_class = "internal"
+records = "rows"
+key_columns = ["ID"]
+[rule.contract]
+required_columns = ["ID", "Severity", "Opened", "Resolved", "Service", "Responder"]
+optional = ["Resolved"]
+unique = ["ID"]
+
+[[rule]]
+pattern = "data_room/engineering/Jira_Export_*.xlsx"
+kind = "export"
+system = "jira"
+# Issues and Versions sheets; the Epics sheet has no header row and its second column is uninterpreted (K-09),
+# so it is not extracted. Assignee and Changed By are SOURCE identifiers.
+data_class = "internal"
+records = "rows"
+key_columns = ["Key"]
+[rule.contract]
+sheet = "Issues"
+required_columns = ["Key", "Type", "Summary", "Epic Link", "Assignee", "Story Points", "Status", "Created", "Resolved", "Fix Version"]
+optional = ["Epic Link", "Assignee", "Story Points", "Resolved", "Fix Version"]
+unique = ["Key"]
+iso_dates = ["Created", "Resolved"]
+numbers = ["Story Points"]
+
+[[rule]]
+pattern = "data_room/engineering/OnCall_Rota.xlsx"
+kind = "export"
+system = "oncall_rota"
+data_class = "internal"
+records = "rows"
+key_columns = ["Week of"]
+[rule.contract]
+required_columns = ["Week of", "Primary", "Secondary"]
+optional = ["Secondary"]
+unique = ["Week of"]
+iso_dates = ["Week of"]

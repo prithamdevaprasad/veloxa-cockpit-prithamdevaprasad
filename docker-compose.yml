@@ -58,9 +58,34 @@ services:
         target: /data
         read_only: true
 
+  # Hackathon one-command start (owner decision 1, 19 Nov 2026): `docker compose --profile hackathon up ...`.
+  # Runs after init; admits only released AND authorised packs (see `veloxa hackathon-bootstrap`).
+  bootstrap:
+    image: veloxa-cockpit:local
+    profiles: ["hackathon"]
+    command: ["veloxa", "hackathon-bootstrap"]
+    restart: "no"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    environment:
+      <<: *db-location
+      VELOXA_DB_ADMIN_USER: veloxa_admin
+      VELOXA_DB_ADMIN_PASSWORD: ${VELOXA_DB_ADMIN_PASSWORD:-local-dev-admin}
+      VELOXA_MIGRATOR_PASSWORD: ${VELOXA_MIGRATOR_PASSWORD:-local-dev-migrator}
+      VELOXA_INGEST_PASSWORD: ${VELOXA_INGEST_PASSWORD:-local-dev-ingest}
+      VELOXA_PROJECTION_PASSWORD: ${VELOXA_PROJECTION_PASSWORD:-local-dev-projection}
+      VELOXA_APP_PASSWORD: ${VELOXA_APP_PASSWORD:-local-dev-app}
+      VELOXA_DATA_PATH: /data
+    volumes:
+      - type: bind
+        source: ${VELOXA_DATA_PATH:?Set VELOXA_DATA_PATH to the extracted release-pack folder (it contains Day1_Mon_16Nov)}
+        target: /data
+        read_only: true
+
   api:
     image: veloxa-cockpit:local
-    command: ["veloxa", "serve"]
+    command: ["veloxa", "serve", "--host", "0.0.0.0"]
     depends_on:
       db:
         condition: service_healthy

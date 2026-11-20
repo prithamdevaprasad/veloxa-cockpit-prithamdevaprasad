@@ -26,6 +26,14 @@ class Rule:
     records: str
     row_class: dict | None = None
     contract: Contract | None = None
+    # Approved business key (tenant catalogue rules, 0018): a row's record identity is these column values, so a
+    # corrected export with inserted or deleted rows still supersedes the right record. Empty = the locator.
+    key_columns: tuple[str, ...] = ()
+
+    def record_key(self, locator_key: str, payload: dict) -> str:
+        if self.key_columns and all(payload.get(c) not in (None, "") for c in self.key_columns):
+            return "key:" + "|".join(f"{c}={payload[c]}" for c in self.key_columns)
+        return locator_key
 
     def class_for_row(self, payload: dict) -> str:
         if self.row_class:
@@ -45,7 +53,8 @@ def load_catalogue(path: Path | None = None) -> list[Rule]:
     rules = []
     for raw in tomllib.loads(path.read_text(encoding="utf-8"))["rule"]:
         rule = Rule(raw["pattern"], raw["kind"], raw["system"], raw["data_class"], raw["records"],
-                    raw.get("row_class"), Contract.from_toml(raw.get("contract")))
+                    raw.get("row_class"), Contract.from_toml(raw.get("contract")),
+                    tuple(raw.get("key_columns", ())))
         if rule.contract and rule.records != "rows":
             raise ValueError(f"a contract is only defined for row exports ({rule.pattern!r})")
         if rule.data_class not in DATA_CLASSES or rule.records not in RECORD_MODES:

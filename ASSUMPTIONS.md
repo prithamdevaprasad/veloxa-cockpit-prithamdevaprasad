@@ -24,7 +24,7 @@ Section 0 separately records **ground rules and observed facts**: instructions, 
   - Challenge sources are cited by **opaque references** (`EV-nnn`), with source type and release pack. The mapping to exact source locations is kept privately by the owner.
   - The hackathon email and `ARCHITECTURE.md` (§n) are cited directly.
   - No quotations, personal names, identifiers or figures appear.
-- **Persona inventions** for the 14 agents get IDs from A-101 onwards when persona specs are written. None have been written yet.
+- **Persona inventions** for the 14 agents are A-101 to A-114 (section 6).
 
 | Pack | Entries currently in this file |
 |---|---|
@@ -246,7 +246,7 @@ Reclassified as **GR-06** on 16 Nov 2026: it is an observed fact. GR-06 is held 
 | Would change my mind | A written compensation-visibility policy, or a CEO/CFO instruction that says otherwise |
 | Status | Draft: owner to review. **Not approved** |
 
-A-018, A-019 and A-020 are held for later release.
+A-018 and A-019 are published in section 4b; A-020 in section 4c.
 
 ### A-021 · CEO voice notes are requests, not statements of fact
 | | |
@@ -311,6 +311,88 @@ A-023 is held for later release.
 | Would change my mind | A template that turns out to contain company data |
 | Status | **Approved by the owner (16 Nov 2026)** |
 
+## 4b. Released with D2 and D3 (owner decisions recorded 19 Nov 2026)
+
+### A-018 · Default small-group threshold k = 5 (policy default, not a fact)
+| | |
+|---|---|
+| Date | 16 Nov 2026 |
+| Assumption | The disclosure auditor's small-group threshold defaults to k = 5 until deferred decision D-14a (§26.1) is closed. **Note:** the survey export applies a stricter comment-suppression threshold of its own |
+| Source | §26.1 D-14a; [EV-113 · Pulse survey · D2], Comments column |
+| Pack | D2 |
+| Confidence (proposed) | Low. This is a value judgement for the owner |
+| Would change my mind | The owner's decision on D-14a |
+| Status | Owner decision (19 Nov 2026): keep k = 5 as a provisional policy default only. It is an owner judgement, not a discovered fact. D-14a remains open until formally decided. |
+
+### A-023 · Diwali 2026 date, used only to read one transcript phrase
+| | |
+|---|---|
+| Date | 16 Nov 2026 |
+| Assumption | Diwali 2026 falls in early November 2026 (Sun 8 Nov). This is used only to set out the candidate readings in C-16; it does not resolve C-16 |
+| Source | [EV-079 · T3 · D2]; external calendar sources (accessed 16 Nov 2026; one outlier source noted) |
+| Pack | D2 |
+| Confidence (proposed) | Medium–High |
+| Would change my mind | An authoritative calendar giving a different date |
+| Status | Owner decision (19 Nov 2026): retained as context only. Verified on 19 Nov 2026 against external calendar sources (Sun 8 Nov 2026; one outlier source again noted). It must not be used to resolve C-16, since the call date and training record are still missing. |
+
+## Held for D3
+
+### GR-06 · The email printout duplicates the .eml threads (was A-015)
+| | |
+|---|---|
+| Kind | Observed fact |
+| Date | 16 Nov 2026 |
+| Statement | The printable email PDF reproduces the same threads as the individual `.eml` files. Its copies are the same records, not independent corroboration. The earliest-admitted copy is canonical (§7.3) |
+| Source | [EV-109 · Email printouts · D3] p. 1 and threads 01–11, against [EV-101 · Email · D1] to [EV-059 · Email · D2]. On 16 Nov 2026 the sender, recipients, date to the minute and body of each thread were compared, using text extracted from the original files |
+| Pack | D3 |
+| Would change my mind | A thread whose printout and `.eml` versions differ in content |
+| Status | Owner decision (19 Nov 2026): approved as an observed fact. Verified on 19 Nov 2026: every .eml body in the D1-D3 packs appears in the printout with the same sender, recipients and date. The PDF copies must not count as independent corroboration of the .eml records. |
+
+### GR-07 · Further sources referred to in D3 but not supplied (from A-013, D3 part)
+| | |
+|---|---|
+| Kind | Observed fact |
+| Date | 16 Nov 2026 |
+| Statement | Some D3 transcripts refer to a campaign sheet, a delivery burndown and incident postmortems. None of these is supplied, and GR-04 applies to them |
+| Source | [EV-086 · T4 · D3]; [EV-091 · T5 · D3]; [EV-093 · T5 · D3] |
+| Pack | D3 |
+| Status | Owner decision (19 Nov 2026): approved. The campaign sheet, delivery burndown and incident postmortems are referred to but absent from the supplied snapshot. Their contents are not inferred. |
+
+### A-007 · The contractor invoice date is day/month
+| | |
+|---|---|
+| Date | 16 Nov 2026 |
+| Assumption | The numeric date on the contractor invoice is day/month order. That gives a date just after the service month the invoice bills, not a date early in the year |
+| Source | The invoice PDF in `data_room/documents/`: the invoice-date field, the service-period line, and the Indian GST format |
+| Pack | D3 |
+| Confidence (proposed) | High |
+| Would change my mind | Another document from the same vendor using month/day order |
+| Status | Owner decision (19 Nov 2026): retain the day/month reading with high confidence. The invoice date, its service period and the Indian GST context support it. It is an interpretation, not an independently verified date-format declaration. |
+
+### A-019 · The delivery bound assumes the issue tracker reflects completed work
+| | |
+|---|---|
+| Date | 16 Nov 2026 |
+| Assumption | The delivery bound (§16.4) assumes that resolved story points track completed scope and that scope is fixed at the 31 Oct export. **Evidence against:** no story points were resolved in the last month of the export, while commits continued throughout that month |
+| Source | [EV-110 · Jira · D3], Issues sheet (Status, Resolved, Story Points columns); [EV-111 · Git log · D3] (`committed_at` column) |
+| Pack | D3 |
+| Confidence (proposed) | Low–Medium |
+| Would change my mind | The delivery burndown (GR-07) or the issue tracker's change history |
+| Status | Owner decision (19 Nov 2026): keep as a low-to-medium-confidence limitation. The delivery bound depends on Jira's resolved story points representing completed work and a fixed scope. Continued commits alongside no resolved points in the final month weaken that assumption. It is not a delivery forecast. |
+
+## 4c. Released with D4 (19 Nov 2026; owner review pending)
+
+### A-020 · The voice-note resignation report is a reported, unverified status
+| | |
+|---|---|
+| Date | 16 Nov 2026 |
+| Assumption | The resignation reported in a CEO voice note is treated as a *reported* status, known from the D4 admission (19 Nov 2026, 10:00 IST). It does not overwrite the HR export. When the resignation happened is **not** assumed: the note's "this morning" is relative to an unknown recording date (C-29) |
+| Source | [EV-117 · T6d · D4]; [EV-062 · HR export · D1] (Status column, as at 31 Oct) |
+| Pack | D4 |
+| Confidence (proposed) | Medium |
+| Would change my mind | An HR-system update or a resignation letter |
+| Status | Draft: owner to review |
+
 ## 5. Assumptions considered and deliberately not made
 
 These are open conflict questions for the owner and are **not** assumed:
@@ -320,15 +402,231 @@ These are open conflict questions for the owner and are **not** assumed:
 
 ## 6. Persona assumptions (agents)
 
-None have been recorded yet. Fictional personal details for the 14 agents are written by the owner, or written by AI and approved by the owner, when the persona specs are created. Each item gets an ID from A-101 onwards and is `assumption`-class data that can never be cited as evidence (§14.4).
+The records are silent on the agents' personal lives, so these details are **invented** and logged here (brief:
+"invent it and log it as an assumption"). They come from a deterministic generator (`veloxa.agents.persona`, version
+1), seeded only by the agent ID: never by a person's name, gender, age or origin, so nothing is
+inferred from identity, and every run produces the same values. Each value is also stored in the Assumption Ledger
+(`runtime.assumption`, migration 0021) with `origin = synthetic_persona` and `scope = persona`, which the database
+enforces. Persona assumptions are **never evidence**: they are not used for workload, attendance, performance, pay,
+promotion, employment decisions, risk ranking or access, and the cockpit does not state them as facts about the
+represented person. Work facts (role, department, manager, assigned work) come only from admitted records.
+
+Agents are listed by slot ID; the mapping of a slot to an HR record is an owner-approved decision (18 Nov 2026,
+exact employee ID or e-mail only) kept in the database, not in this public file.
+
+Common fields for every entry below:
+
+| | |
+|---|---|
+| Date | 18 Nov 2026 |
+| Source | None: the records are silent (`email.md` section 4, "a personal life"; brief, "invent it and log it") |
+| Confidence | Not applicable: fictional by design |
+| Would change my mind | Any admitted record about the person's life; the invented detail is then withdrawn (status `withdrawn`), never kept alongside a fact |
+| Status | Generated by AI (code); owner to review |
+
+### A-101 · Persona of `agent-eng-01`
+
+| Category | Invented detail | Ledger ID |
+|---|---|---|
+| interests | learning a third language | `AS-2649213f972e` |
+| hobbies | a book club that meets monthly | `AS-12d85f547b46` |
+| background | came from a larger company looking for more ownership | `AS-3a48d6b07eef` |
+| goals | wants a calmer release cadence | `AS-d0c908487028` |
+| communication style | direct and brief; prefers written updates | `AS-b1f92b2107cb` |
+| routine | reviews the week every Sunday evening | `AS-06f45d46efb3` |
+| living context | recently moved closer to the office | `AS-b0e96c12cb18` |
+| preferences | headphones on for focus | `AS-ff6e82182482` |
+| personality | steady under pressure | `AS-487ce6aeb41a` |
+
+### A-102 · Persona of `agent-eng-02`
+
+| Category | Invented detail | Ledger ID |
+|---|---|---|
+| interests | trail running | `AS-aaa6038dcffc` |
+| hobbies | a book club that meets monthly | `AS-67d900f96678` |
+| background | studied at a (fictional) state university before joining a startup | `AS-24d784f8c337` |
+| goals | wants a calmer release cadence | `AS-543890b1c370` |
+| communication style | informal; thinks out loud | `AS-faadc1803a8f` |
+| routine | walks during long calls | `AS-d679656c963c` |
+| living context | lives alone with a cat | `AS-39e3a6ff8c84` |
+| preferences | handwritten notes for planning | `AS-640a8aa18769` |
+| personality | steady under pressure | `AS-de689e0a8ca9` |
+
+### A-103 · Persona of `agent-eng-03`
+
+| Category | Invented detail | Ledger ID |
+|---|---|---|
+| interests | trail running | `AS-d3886eb09055` |
+| hobbies | volunteering at an animal shelter | `AS-2093c5a265bb` |
+| background | started in a services firm and moved to product | `AS-b98a9c78f4b8` |
+| goals | plans to take a long holiday after the next launch | `AS-96ec24c20ad4` |
+| communication style | structured; likes agendas and follow-up notes | `AS-f8b04d11e6fc` |
+| routine | keeps Friday afternoons for tidying up loose ends | `AS-5c63e1aab91c` |
+| living context | recently moved closer to the office | `AS-fa673ca1bf1c` |
+| preferences | plain-text email | `AS-f330d4dc5f96` |
+| personality | dry sense of humour | `AS-b211006a2270` |
+
+### A-104 · Persona of `agent-eng-04`
+
+| Category | Invented detail | Ledger ID |
+|---|---|---|
+| interests | pottery | `AS-59fd670280bb` |
+| hobbies | restoring an old bicycle | `AS-a20c46a5a8e4` |
+| background | came from a larger company looking for more ownership | `AS-64e15fc88779` |
+| goals | is working towards a professional certification | `AS-98ddadcc454c` |
+| communication style | structured; likes agendas and follow-up notes | `AS-97740108c2a2` |
+| routine | walks during long calls | `AS-b854c65c3378` |
+| living context | commutes by metro | `AS-0786826650e3` |
+| preferences | headphones on for focus | `AS-3dadc3f401b5` |
+| personality | dry sense of humour | `AS-a31a50a21b0e` |
+
+### A-105 · Persona of `agent-eng-05`
+
+| Category | Invented detail | Ledger ID |
+|---|---|---|
+| interests | pottery | `AS-01d0a2d27a61` |
+| hobbies | cooking for friends | `AS-253517e8df90` |
+| background | first job after a master's programme | `AS-3a885d959281` |
+| goals | hopes to lead a project end to end | `AS-97efc9333ad9` |
+| communication style | informal; thinks out loud | `AS-bbc7b638d216` |
+| routine | starts early and protects mornings for focused work | `AS-abc766ae5b53` |
+| living context | shares a flat with a friend | `AS-64c0f14b4b1b` |
+| preferences | dark mode everywhere | `AS-b888bb49537c` |
+| personality | dry sense of humour | `AS-584698599611` |
+
+### A-106 · Persona of `agent-fin-01`
+
+| Category | Invented detail | Ledger ID |
+|---|---|---|
+| interests | home baking | `AS-1c4484991e08` |
+| hobbies | writing short fiction | `AS-bd109788040a` |
+| background | moved cities twice for work before Veloxa | `AS-4032c150d557` |
+| goals | is working towards a professional certification | `AS-646dd10fe212` |
+| communication style | warm, asks questions before answering | `AS-aa05057a8d28` |
+| routine | starts early and protects mornings for focused work | `AS-d043de2c46fa` |
+| living context | lives alone with a cat | `AS-2d18e9a4fc81` |
+| preferences | plain-text email | `AS-4b1208abbd05` |
+| personality | steady under pressure | `AS-db698cf3f817` |
+
+### A-107 · Persona of `agent-fin-02`
+
+| Category | Invented detail | Ledger ID |
+|---|---|---|
+| interests | board games | `AS-9db1dbf7ea35` |
+| hobbies | writing short fiction | `AS-e43c1cc929de` |
+| background | took a year out to travel before this role | `AS-2413b93823ee` |
+| goals | wants to mentor a junior colleague this year | `AS-77795cdf2a7a` |
+| communication style | quiet in meetings, detailed in writing | `AS-23174e388253` |
+| routine | walks during long calls | `AS-6df25ebb7db5` |
+| living context | lives with family | `AS-e71a15316330` |
+| preferences | dark mode everywhere | `AS-697b444be0b8` |
+| personality | dry sense of humour | `AS-d67a54ec50dd` |
+
+### A-108 · Persona of `agent-fin-03`
+
+| Category | Invented detail | Ledger ID |
+|---|---|---|
+| interests | pottery | `AS-7838359f5ccc` |
+| hobbies | growing herbs on a balcony | `AS-658cfff486ae` |
+| background | came from a larger company looking for more ownership | `AS-b6b2d6fb9b4d` |
+| goals | wants a calmer release cadence | `AS-2dd8e9d66ca1` |
+| communication style | informal; thinks out loud | `AS-317f94f8b4f3` |
+| routine | reviews the week every Sunday evening | `AS-287075643685` |
+| living context | lives with family | `AS-3f6d636bda83` |
+| preferences | dark mode everywhere | `AS-e5559f2a4107` |
+| personality | sceptical until shown evidence | `AS-65e59a32431d` |
+
+### A-109 · Persona of `agent-ppl-01`
+
+| Category | Invented detail | Ledger ID |
+|---|---|---|
+| interests | amateur astronomy | `AS-16ff6dcbf833` |
+| hobbies | writing short fiction | `AS-9ff84aec151e` |
+| background | came from a larger company looking for more ownership | `AS-199551f6b7ca` |
+| goals | hopes to lead a project end to end | `AS-a790b0d956a9` |
+| communication style | careful and precise; checks numbers twice | `AS-10471f0d7635` |
+| routine | takes a proper lunch break away from the desk | `AS-849813c0c56a` |
+| living context | shares a flat with a friend | `AS-30c0eb10d474` |
+| preferences | short meetings with clear owners | `AS-9d26c16b15a2` |
+| personality | sceptical until shown evidence | `AS-5f3c899e9552` |
+
+### A-110 · Persona of `agent-ppl-02`
+
+| Category | Invented detail | Ledger ID |
+|---|---|---|
+| interests | board games | `AS-fba85de6145a` |
+| hobbies | cooking for friends | `AS-6f0c95527de3` |
+| background | first job after a master's programme | `AS-b8e898f4bbe5` |
+| goals | is working towards a professional certification | `AS-57de419fa6d5` |
+| communication style | warm, asks questions before answering | `AS-92bdbc8994e9` |
+| routine | takes a proper lunch break away from the desk | `AS-f2f9809b7d55` |
+| living context | shares a flat with a friend | `AS-441bbdfd745b` |
+| preferences | handwritten notes for planning | `AS-52ccdf443150` |
+| personality | curious and a little impatient | `AS-374d21905abc` |
+
+### A-111 · Persona of `agent-ppl-03`
+
+| Category | Invented detail | Ledger ID |
+|---|---|---|
+| interests | community gardening | `AS-ea9f08d975c8` |
+| hobbies | weekend treks | `AS-718464d64d0e` |
+| background | studied at a (fictional) state university before joining a startup | `AS-e2cc01bbec47` |
+| goals | wants a calmer release cadence | `AS-3e87e8b3867a` |
+| communication style | structured; likes agendas and follow-up notes | `AS-7fdbb0434717` |
+| routine | starts early and protects mornings for focused work | `AS-49f881c4bd77` |
+| living context | commutes by metro | `AS-02cda016a87d` |
+| preferences | plain-text email | `AS-c9ed2a5f8530` |
+| personality | steady under pressure | `AS-4179d24bd286` |
+
+### A-112 · Persona of `agent-mkt-01`
+
+| Category | Invented detail | Ledger ID |
+|---|---|---|
+| interests | chess problems | `AS-395d3b0b5409` |
+| hobbies | photographing street markets | `AS-ce025d6db1a5` |
+| background | first job after a master's programme | `AS-0a8e5ed2e973` |
+| goals | plans to take a long holiday after the next launch | `AS-fd37fea70448` |
+| communication style | quiet in meetings, detailed in writing | `AS-102e3da36c8e` |
+| routine | walks during long calls | `AS-d8a32b3ead92` |
+| living context | recently moved closer to the office | `AS-602d18e0134c` |
+| preferences | short meetings with clear owners | `AS-5ccbb4a596a1` |
+| personality | energetic and optimistic | `AS-451e69f17fa9` |
+
+### A-113 · Persona of `agent-mkt-02`
+
+| Category | Invented detail | Ledger ID |
+|---|---|---|
+| interests | jazz records | `AS-9ac0950404d4` |
+| hobbies | weekend treks | `AS-b1d2ded53e99` |
+| background | first job after a master's programme | `AS-89c96cdf4508` |
+| goals | is working towards a professional certification | `AS-d16f995004e2` |
+| communication style | informal; thinks out loud | `AS-40cb7524022d` |
+| routine | starts early and protects mornings for focused work | `AS-98fe98737a6f` |
+| living context | commutes by metro | `AS-05a19130f511` |
+| preferences | headphones on for focus | `AS-079798dfa647` |
+| personality | thoughtful and conflict-averse | `AS-c7112671e826` |
+
+### A-114 · Persona of `agent-mkt-03`
+
+| Category | Invented detail | Ledger ID |
+|---|---|---|
+| interests | pottery | `AS-4abaf7e86d78` |
+| hobbies | restoring an old bicycle | `AS-4889ed0c084b` |
+| background | started in a services firm and moved to product | `AS-aea998543124` |
+| goals | would like to understand the business side better | `AS-0ebabd0c9bba` |
+| communication style | careful and precise; checks numbers twice | `AS-4aff9308dc80` |
+| routine | starts early and protects mornings for focused work | `AS-8115c61b39ee` |
+| living context | commutes by metro | `AS-6b53b2d1a6e8` |
+| preferences | handwritten notes for planning | `AS-8d946030b62a` |
+| personality | sceptical until shown evidence | `AS-1540e83308a2` |
 
 ## Held for later release
 
 | Release pack | Entries |
 |---|---|
-| D2 (Tue 17 Nov) | A-018, A-023 |
-| D3 (Wed 18 Nov) | GR-06, GR-07; A-007, A-019 |
-| D4 (Thu 19 Nov) | A-020 |
+| D2 (Tue 17 Nov) | Published 19 Nov 2026 (A-018, A-023; section 4b) |
+| D3 (Wed 18 Nov) | Published 19 Nov 2026 (GR-06, GR-07; A-007, A-019; section 4b) |
+| D4 (Thu 19 Nov) | Published 19 Nov 2026 (A-020; section 4c) |
 
 ## Revision log
 
@@ -338,3 +636,6 @@ None have been recorded yet. Fictional personal details for the 14 agents are wr
 | 16 Nov 2026 | A-024 to A-026 | Added with the Day 1 ingestion foundation: data class per source, file-drop extraction time, templates not evidence. Drafts; none approved | AI (Claude Code), for owner review |
 | 16 Nov 2026 | A-025 r2 | Revised after owner review: extraction time is the actual read time of each file, distinct from release, admission and sealing times. Still a draft | AI (Claude Code), for owner review |
 | 16 Nov 2026 | A-024, A-025 r2, A-026 | Approved by the owner: A-024 with strict fail-closed handling; A-025 in its corrected r2 form (actual extraction timestamps); A-026 as written | Owner decision, recorded by AI (Claude Code) |
+| 19 Nov 2026 | A-101 to A-114 | Persona inventions for the 14 agent slots logged from the deterministic generator (9 categories each, 126 details); never evidence | AI (Claude Code), for owner review |
+| 19 Nov 2026 | A-018, A-023, GR-06, GR-07, A-007, A-019 | Published after release with the owner's decisions; evidence cited by new opaque references | Owner decisions; publication by AI (Claude Code) |
+| 19 Nov 2026 | A-020 | Published after the D4 release; status remains draft for owner review | AI (Claude Code), for owner review |

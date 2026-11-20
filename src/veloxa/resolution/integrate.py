@@ -53,4 +53,9 @@ def sync_batch(conn: psycopg.Connection, tenant_id: uuid.UUID, batch_seq: int) -
             counts["unmatched_email_identities"] += 1
         c12.propose(conn, tenant_id, ident, found)
         counts["candidates"] += len(found)
+    from .. import schema
+    from . import jira_identity
+
+    if schema.available(conn, "company_intelligence"):       # issue claims (migration 0021)
+        counts.update(jira_identity.register_from_claims(conn, tenant_id, batch_seq, population))
     return counts

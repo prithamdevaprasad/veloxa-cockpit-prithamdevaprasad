@@ -286,7 +286,24 @@ def test_there_is_no_export_agent_or_cache_path_to_bypass_the_gate(db, monkeypat
     from conftest import api_client
 
     routes = {getattr(r, "path", "") for r in api_client(db, monkeypatch).app.routes}
-    assert not [r for r in routes if any(w in r for w in ("export", "agent", "payroll", "metric"))]
+    assert not [r for r in routes if any(w in r for w in ("export", "payroll", "metric"))]
+    # Sprint 6 added an agent channel. It is allowed only because it provably cannot carry protected pay: no agent
+    # tool reaches payroll, interview policy and agent memory exclude the protected classes, and an undeclared
+    # payroll tool is denied by the agent-tool PDP (C19 on the interviewer's ledger is not wired for agents).
+    from veloxa.agents import authorization as agent_authz
+    from veloxa.agents import registry as agent_registry
+    from veloxa.agents import tools as agent_tools
+
+    protected = {"sensitive_personal", "payroll_aggregate"}
+    assert not [t for t in agent_tools.REGISTRY if "pay" in t]
+    assert all(not (s.data_classes & protected) for s in agent_tools.REGISTRY.values())
+    assert not (agent_authz.INTERVIEW_ALLOWED_CLASSES & protected)
+    cfg = agent_registry.AgentConfig("syn-fin-x1", "finance", ("finance_ledger",), ("finance.ledger_spend",),
+                                     activation="synthetic_test")
+    req = agent_authz.ToolRequest(uuid.uuid4(), cfg, None, "person:T001", "payroll.total", "interview")
+    assert not agent_authz.InProcessAgentToolPDP().decide(req).allowed
+    migration = (Path(tools.__file__).resolve().parent / "migrations" / "0013_agent_runtime.sql").read_text("utf-8")
+    assert "NOT (data_classes && ARRAY['sensitive_personal', 'payroll_aggregate']" in migration
     src = Path(tools.__file__).resolve().parent
     assert not [p.name for p in src.rglob("*.py") if "lru_cache" in p.read_text(encoding="utf-8")
                 or "functools.cache" in p.read_text(encoding="utf-8")]               # no protected caching exists

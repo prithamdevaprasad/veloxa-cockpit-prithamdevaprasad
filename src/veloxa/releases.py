@@ -108,6 +108,19 @@ class Authorisation:
     approved_by: str
     approved_on: object
     decision_record: str
+    sources: tuple[str, ...] = ()      # K-13: source-specific approval (globs relative to the pack folder)
+
+    def check_sources(self, relpaths: list[str]) -> None:
+        """K-13: a non-baseline pack is authorised source by source, never pack-wide. Every file must match an
+        approved source pattern, or the whole pack is refused before anything is admitted (fail closed)."""
+        if self.baseline:
+            return
+        from fnmatch import fnmatchcase
+
+        missing = [r for r in relpaths if not any(fnmatchcase(r, g) for g in self.sources)]
+        if missing:
+            raise AdmissionRefused("source_not_authorised", f"pack {self.pack_id}: {len(missing)} file(s) have no "
+                                   f"source-specific authorisation (K-13), e.g. {missing[0]}")
 
 
 def load_authorisations(path: Path | None = None) -> dict[str, Authorisation]:
@@ -120,8 +133,12 @@ def load_authorisations(path: Path | None = None) -> dict[str, Authorisation]:
         for k in ("id", "approved_by", "approved_on", "decision_record"):
             if not str(raw.get(k, "")).strip():
                 raise ValueError(f"admission authorisation {raw!r}: {k} is required (owner decision)")
+        sources = tuple(str(x) for x in raw.get("sources", ()))
+        if not raw.get("baseline", False) and not sources:
+            raise ValueError(f"admission authorisation {raw['id']!r}: a non-baseline pack must list its approved "
+                             "sources (K-13: source-specific, never pack-wide)")
         out[raw["id"]] = Authorisation(raw["id"], bool(raw.get("baseline", False)), raw["approved_by"],
-                                       raw["approved_on"], raw["decision_record"])
+                                       raw["approved_on"], raw["decision_record"], sources)
     return out
 
 

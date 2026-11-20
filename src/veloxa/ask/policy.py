@@ -30,8 +30,7 @@ class Refusal:
 POLICIES = {
     p.policy_id: p for p in (
         Policy("POL-PAY-01", "Individual compensation",
-               "Individual pay is protected. Pay values are released only as audited aggregates, and the disclosure "
-               "auditor that clears them is not available yet.",
+               "I can't provide individual salary information because payroll records are restricted.",
                "Ask about ledger spend excluding payroll lines, or headcount by department."),
         Policy("POL-PEOPLE-01", "Ranking or predicting individuals",
                "Veloxa does not rank or predict individuals' attrition, performance or sentiment.",
@@ -103,8 +102,9 @@ def _names_in(text: str, people: list[str]) -> bool:
 
 
 def prescreen(question: str, people: list[str]) -> Refusal | None:
-    """Return the first matching refusal, or None. `people` are full names from the HR export at the latest
-    sealed batch (used only to recognise that a question targets an individual; nothing is disclosed)."""
+    """Return the first matching refusal, or None. `people` are the full names AND employee IDs from the HR
+    export at the latest sealed batch (used only to recognise that a question targets an individual; nothing is
+    disclosed). Either form names one person, so "what is the salary of <employee ID>" is refused like a name."""
     q = question.strip()
     names = _names_in(q, people)
     if _has(_ACTION, q):
@@ -116,10 +116,11 @@ def prescreen(question: str, people: list[str]) -> Refusal | None:
     if (_has(_ATTRITION, q) and _has(_PREDICT, q)) or (_has(_JUDGEMENT, q) and (names or _has(_WHO, q)
                                                                                   or _has(_PREDICT, q))):
         return Refusal(POLICIES["POL-PEOPLE-01"], "individual attrition, performance or sentiment")
-    if _has(_COMMS, q) and (_has(_MONITOR, q) or (_has(_READ, q) and (names or _has(r"'s\b|\b(his|her|their)\b",
-                                                                                     q)))):
+    if _has(_COMMS, q) and (_has(_MONITOR, q) or (_has(_READ, q) and (names or _has(
+            r"'s\b|\w+s'(\s|$)|\b(his|her|their|the (team|staff|employees|engineers|people)'?s?)\b", q)))):
         return Refusal(POLICIES["POL-COMMS-01"], "reading someone's communications")
-    if _has(_WHY, q) and _has(_SENSITIVE, q) and (names or _has(r"\b(he|she|they|his|her|their|someone|employee)\b",
-                                                                 q)):
+    if _has(_WHY, q) and _has(_SENSITIVE, q) and (names or _has(
+            r"\b(he|she|they|his|her|their|someone|anyone|employees?|people|staff|engineers?|colleagues?|"
+            r"team members?)\b", q)):
         return Refusal(POLICIES["POL-SENS-01"], "reason for a personal record")
     return None

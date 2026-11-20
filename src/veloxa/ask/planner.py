@@ -82,19 +82,27 @@ def validate(step: Step) -> None:
 _STOP = set("""a an and are as at be by can did do does for from had has have how i in is it its me my of on or our
 show tell that the their them there these this those to us was we were what when where which who whom why with you
 your about any all give list please much many there's what's who's know known current currently now today latest
+record records say says said mention mentions mentioned
 """.split())
 
 _INTENTS: list[tuple[str, str]] = [
     ("payroll_total", r"\b(payroll|salar(y|ies)|wage bill|people cost|staff cost)\b"),
-    ("headcount", r"\b(headcount|head count|how many (people|employees|staff|persons)|number of (people|employees|"
-                  r"staff)|team sizes?|staff count)\b"),
-    ("finance_totals", r"\b(spend|spent|spending|expenses?|expenditure|costs?|ledger|vendors?|suppliers?|"
-                       r"cost cent(re|er)s?|general ledger|gl)\b"),
+    ("headcount", r"\b(headcount|head count|how many (people|employees|staff|persons|heads|members)|number of "
+                  r"(people|employees|staff|heads)|team sizes?|staff (count|numbers?|size)|size of the (team|company|"
+                  r"organi[sz]ation|workforce)|how (big|large) is the (team|company|organi[sz]ation|workforce)|"
+                  r"workforce size|employee count|people do we (have|employ)|employ(ees)? do we have|"
+                  r"(largest|biggest|smallest) (department|team)s?|which (department|team) is (the )?(largest|"
+                  r"biggest|smallest))\b"),
+    ("finance_totals", r"\b(spend|spent|spending|expenses?|expenditure|outgoings|outflows?|costs?|ledger|vendors?|"
+                       r"suppliers?|payees?|paying (our )?(vendors|suppliers)|paid to|cost cent(re|er)s?|"
+                       r"general ledger|gl)\b"),
     ("board_statements", r"\b(board|investors?|reported|key numbers|revenue|arr|mrr|runway|customers?|"
                          r"burn rate|cash)\b"),
     ("conflicts", r"\b(conflicts?|disagree\w*|contradict\w*|inconsisten\w*|discrepanc\w*|sources? differ)\b"),
-    ("timeline", r"\b(timeline|what happened|events?|when did|history|chronolog\w*|joined|joins|exits?)\b"),
-    ("person", r"\b(who is|who's|reports? to|manager of|title of|role of|position of|works? (as|in))\b"),
+    ("timeline", r"\b(timeline|what happened|events?|when did|history|chronolog\w*|joined|joins|exits?|"
+                 r"key dates|sequence of events|what (has )?changed)\b"),
+    ("person", r"\b(who is|who's|reports? to|manager of|title of|role of|position of|works? (as|in)|"
+               r"line manager|boss of|job title)\b"),
 ]
 
 
@@ -129,6 +137,15 @@ def focus_terms(text: str) -> list[str]:
     return [w for w in re.findall(r"[a-z][a-z0-9-]{2,}", text.lower()) if w not in _STOP]
 
 
+IDENTIFIER = re.compile(r"\b[A-Z][A-Z0-9]{1,}-[A-Z0-9]{1,6}\b")
+FOREIGN = re.compile(r"\b(competitors?'?s?|rivals?'?s?|other compan(y|ies)|another company|industry (average|"
+                     r"benchmark)s?|market leader|peers?'?s?)\b", re.I)
+EVENT = re.compile(r"^\s*(did|has|have|had|was|were|is|are)\b.{0,80}\b(approv\w*|decid\w*|agree\w*|sign\w*|"
+                   r"open\w*|launch\w*|announc\w*|hire[ds]?|fire[ds]?|acquir\w*|merg\w*|vot\w*|reject\w*)\b", re.I)
+FIGURE_ASK = re.compile(r"\b(how (much|many)|what (is|was|are|were) (our|the)\b.{0,30}\b(figure|number|amount|"
+                        r"total|value)|how big)\b", re.I)
+
+
 def plan(question: str, people: list[dict], default_year: int, tz: str) -> Plan:
     q = question.strip()
     mentions = _mentions(q, people)
@@ -136,11 +153,18 @@ def plan(question: str, people: list[dict], default_year: int, tz: str) -> Plan:
     for tool, rx in _INTENTS:
         if not re.search(rx, q, re.IGNORECASE):
             continue
+        # Our reported figures answer questions ABOUT OUR FIGURES only: never a question about another
+        # organisation ("competitor's revenue"), and never a yes/no question about an event ("did the board approve
+        # a London office?"), which a list of figures would appear to answer while saying nothing about it.
+        if tool in ("board_statements", "finance_totals", "headcount") and (FOREIGN.search(q) or (
+                EVENT.search(q) and not FIGURE_ASK.search(q))):
+            continue
         if tool == "headcount":
             named_dept = any(p.get("department") and re.search(rf"\b{re.escape(p['department'])}\b", q, re.I)
                              for p in people)
-            by = "department" if named_dept or re.search(r"\b(by|per|each|across) (department|team|function)s?\b",
-                                                         q, re.I) else None
+            big = re.search(r"\b(largest|biggest|smallest)\b", q, re.I)
+            per_dept = re.search(r"\b(by|per|each|across) (department|team|function)s?\b", q, re.I)
+            by = "department" if named_dept or big or per_dept else None
             steps.append(Step("headcount", {"by": by} if by else {}, "headcount question"))
         elif tool == "finance_totals":
             dims = [d for d, rx2 in (("vendor", r"\b(by|per|each) (vendor|supplier|payee)s?\b"),
@@ -170,6 +194,22 @@ def plan(question: str, people: list[dict], default_year: int, tz: str) -> Plan:
     terms = focus_terms(q)
     if not steps and terms:
         steps.append(Step("text_search", {"query": " OR ".join(dict.fromkeys(terms[:8]))}, "free-text question"))
+    else:
+        # A record identifier (LIN-001, CMP-04, NIM-E1) or, with the generic timeline intent, a named subject
+        # ("What happened to Quartz 2.0?") is looked up directly as well: the intent alone would answer a
+        # different question.
+        used = {str(v) for s in steps for a in s.args.values() for v in (a.values() if isinstance(a, dict) else [a])}
+        ids = [i for i in IDENTIFIER.findall(q) if i not in used]          # not an identifier already a filter
+        named = [w for w in re.findall(r"\b[A-Z][a-zA-Z0-9]{2,}(?:\s+\d+(?:\.\d+)?)?\b", q)[1:]
+                 if not any(w.lower().startswith(m.lower()) for m in mentions)]
+        generic_timeline = any(s.tool == "timeline" and not s.args for s in steps)
+        subject = ids or (named if generic_timeline else [])
+        if subject and not any(s.tool == "text_search" for s in steps):
+            if generic_timeline and not mentions:
+                # "What happened in LIN-001?" is about that record, not the company's whole dated history.
+                steps = [s for s in steps if not (s.tool == "timeline" and not s.args)]
+            steps.append(Step("text_search", {"query": " OR ".join(dict.fromkeys(subject))[:200]},
+                              "a named record or subject"))
     steps = steps[:MAX_STEPS]
     for s in steps:
         validate(s)
@@ -195,4 +235,5 @@ def _describe(s: Step) -> str:
         return "dated events" + (f" between {a['start']} and {a['end']}" if a else "")
     if s.tool == "conflicts":
         return "owner-reviewed conflicts between sources"
-    return f"a text search for {a.get('query', '')!r}"
+    words = [w for w in str(a.get("query", "")).split(" OR ") if w][:4]
+    return "passages that mention " + (", ".join(words) if words else "your question")

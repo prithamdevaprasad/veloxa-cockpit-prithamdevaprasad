@@ -84,8 +84,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         requested = [p.id for p in schedule.released(now)] if args.pack == "released" else [args.pack]
         for pack_id in requested:
             try:
-                require_authorised(pack_id, authorised)
-                results.append(admit_pack(conn, tenant_id, schedule, pack_id, root, now))
+                auth = require_authorised(pack_id, authorised)
+                results.append(admit_pack(conn, tenant_id, schedule, pack_id, root, now, authorisation=auth))
             except Exception as exc:  # nothing partial is ever committed
                 failure = AdmissionFailure(pack_id, exc)
                 break
@@ -113,6 +113,181 @@ def cmd_project(args: argparse.Namespace) -> int:
         print(f"projections built for batch {k}: {rows} rows")
     if not built:
         print("projections: up to date")
+    return 0
+
+
+def cmd_workflow_pack(args: argparse.Namespace) -> int:
+    """Run the durable pack pipeline (admit, project, identity sync) for one pack through DBOS (C26). Needs the
+    ingest and projection credentials and VELOXA_WORKFLOW_DATABASE_URL. Idempotent per --key."""
+    from .workflows.catalogue import CATALOGUE
+    from .workflows.runner import DBOSActivityRunner
+
+    schedule = load_schedule()
+    tenant_id = config.tenant_uuid(schedule.tenant_slug)
+    runner = DBOSActivityRunner(CATALOGUE)
+    runner.launch()
+    try:
+        h = runner.start("veloxa.pack_pipeline.v1", {"tenant_id": str(tenant_id), "pack_id": args.pack},
+                         args.key or f"pack-{args.pack}-{tenant_id}")
+        out = runner.result(h.workflow_id)
+        print(f"workflow {h.workflow_id}: batch {out['batch_seq']}, projected rows {out['projected_rows']}")
+    finally:
+        runner.shutdown()
+    return 0
+
+
+def cmd_workflow_status(args: argparse.Namespace) -> int:
+    """Show a workflow's status (ids and status only; never inputs or outputs)."""
+    from dbos import DBOSClient
+
+    from .workflows.runner import system_database_url
+
+    client = DBOSClient(system_database_url=system_database_url())
+    try:
+        found = client.list_workflows(workflow_ids=[args.workflow_id], load_input=False, load_output=False)
+    finally:
+        client.destroy()
+    if not found:
+        print("no such workflow")
+        return 1
+    s = found[0]
+    print(f"{s.workflow_id}: {s.status} (workflow {s.name}, version {s.app_version})")
+    return 0
+
+
+def cmd_workflow_retention(args: argparse.Namespace) -> int:
+    """C26: report which DBOS workflow records retention WOULD remove; delete only with --apply AND an approved
+    owner decision. Prints ids and counts only, never inputs or outputs."""
+    from dbos import DBOSClient
+
+    from .workflows import retention
+    from .workflows.runner import system_database_url
+
+    client = DBOSClient(system_database_url=system_database_url())
+    try:
+        p = retention.plan(client)
+        state = "APPROVED" if p.approved else "NOT APPROVED (proposed periods; dry run only)"
+        print(f"retention: success {p.success_days} days, error {p.error_days} days; {state}")
+        print(f"would remove {len(p.remove)}; legal hold {len(p.held)}; active or pending kept {p.kept_active}")
+        for wid in p.remove:
+            print(f"  remove {wid}")
+        if not args.apply:
+            return 0
+        try:
+            print(f"removed {retention.apply(client, p)}")
+        except retention.RetentionNotApproved as e:
+            print(str(e))
+            return 2
+        return 0
+    finally:
+        client.destroy()
+
+
+def cmd_tenant(args: argparse.Namespace) -> int:
+    """Operator-only tenant administration (privileged credentials). Never available through the API."""
+    from . import tenancy
+
+    with connect(_admin_dsn()) as conn:
+        try:
+            if args.tenant_command == "create":
+                tid = tenancy.create_tenant(conn, args.slug, args.tz, args.name or args.slug, synthetic=args.synthetic)
+                print(f"tenant {args.slug} created ({tid}); admission: submission; evidence access: rebac")
+            elif args.tenant_command == "show":
+                s = tenancy.settings(conn, tenancy.tenant_by_slug(conn, args.slug))
+                print(f"{s.slug}: {s.display_name}; tz {s.time_zone}; synthetic {s.synthetic}; admission "
+                      f"{s.admission_mode}; evidence access {s.evidence_access}; status {s.status}; v{s.version}")
+            elif args.tenant_command == "add-issuer":
+                v = tenancy.add_issuer(conn, tenancy.tenant_by_slug(conn, args.slug), args.issuer, args.audience,
+                                       args.jwks_url, tuple(args.alg))
+                print(f"issuer {args.issuer} recorded (version {v})")
+            elif args.tenant_command == "invite-admin":
+                pid, token = tenancy.operator_invite_admin(conn, tenancy.tenant_by_slug(conn, args.slug), args.email,
+                                                           args.name)
+                print(f"first-administrator invitation for {pid}. One-time token (shown once, give it to the "
+                      "invitee over a trusted channel):")
+                print(token)
+            elif args.tenant_command == "bootstrap-synthetic-admin":
+                tenancy.bootstrap_synthetic_admin(conn, tenancy.tenant_by_slug(conn, args.slug), args.principal,
+                                                  args.name)
+                print(f"synthetic administrator {args.principal} active")
+        except tenancy.TenancyError as e:
+            print(f"ERROR: {e}")
+            return 2
+    return 0
+
+
+def cmd_intake_work(args: argparse.Namespace) -> int:
+    """The data-room system worker (ingest and projection roles): validate uploads, admit authorised submissions."""
+    import time as _t
+
+    from . import intake
+    from .storage import LocalContentStore
+
+    store = LocalContentStore.from_env()
+    if store is None:
+        print("ERROR: VELOXA_ORIGINALS_DIR (the immutable original store) is required")
+        return 2
+    while True:
+        with connect(_dsn("ingest")) as ing, connect(_dsn("projection")) as prj:
+            done = intake.work_once(ing, prj, store)
+        print(f"intake: validated {done['validated']}, admitted {done['admitted']}, failed {done['failed']}")
+        if args.once:
+            return 0 if not done["failed"] else 1
+        _t.sleep(args.interval)
+
+
+def cmd_backup(args: argparse.Namespace) -> int:
+    """C31: a verified logical backup of the configured database (read-only on the source)."""
+    from pathlib import Path
+
+    from .ops import backup as ops
+
+    try:
+        tools = ops.PgTools.from_env()
+    except ops.ClientToolsMismatch as e:
+        print(f"ERROR: {e}")
+        return 2
+    if tools is None:
+        print("PostgreSQL client tools (>= 18) not found: set VELOXA_PG_TOOLS (a bin directory or docker:<container>)")
+        return 2
+    m = ops.backup(tools, _admin_dsn(), config.db_settings().database, Path(args.out))
+    print(f"backup {m['file']}: {m['bytes']} bytes, sha256 {m['sha256'][:16]}..., audit chains valid "
+          f"{m['fingerprint']['audit_chains_valid']}")
+    return 0
+
+
+def cmd_restore_drill(args: argparse.Namespace) -> int:
+    """C31: restore a backup into a NEW disposable database, compare fingerprints, drop the copy."""
+    import json
+    from pathlib import Path
+
+    from .ops import backup as ops
+
+    try:
+        tools = ops.PgTools.from_env()
+    except ops.ClientToolsMismatch as e:
+        print(f"ERROR: {e}")
+        return 2
+    if tools is None:
+        print("PostgreSQL client tools (>= 18) not found: set VELOXA_PG_TOOLS")
+        return 2
+    dump = Path(args.dump)
+    manifest = json.loads(dump.with_name(dump.name.replace(".dump", ".manifest.json")).read_text(encoding="utf-8"))
+    r = ops.restore_drill(tools, _admin_dsn(), dump, manifest)
+    print(f"restore drill: {'PASSED' if r['ok'] else 'FAILED'} in {r['seconds']:.1f}s"
+          + ("" if r["ok"] else f" ({'; '.join(r['differences'])})"))
+    return 0 if r["ok"] else 1
+
+
+def cmd_agents_seed(_: argparse.Namespace) -> int:
+    """Publish the 14 proposed agent slots, unassigned and blocked (configuration role). Idempotent."""
+    from .agents import registry
+
+    schedule = load_schedule()
+    tenant_id = config.tenant_uuid(schedule.tenant_slug)
+    with connect(_dsn("projection")) as conn:
+        created = registry.seed_slots(conn, tenant_id)
+    print(f"agent slots published: {len(created)} (all unassigned and blocked)")
     return 0
 
 
@@ -256,6 +431,113 @@ def cmd_init(args: argparse.Namespace) -> int:
     return cmd_selfcheck(argparse.Namespace(role="ingest"))
 
 
+def cmd_hackathon_bootstrap(args: argparse.Namespace) -> int:
+    """Hackathon one-command start (owner decision 1, 19 Nov 2026). A SEPARATE command: `init` is unchanged and
+    still never admits a later pack.
+
+    In release order, each pack is admitted only if it is RELEASED (release time <= now) AND AUTHORISED source by
+    source (config/admission_authorisations.toml; K-13 `check_sources` runs inside `admit_pack`). An unreleased pack
+    is refused before any of its files is opened, and nothing after it is admitted (batches are sequential). An
+    unauthorised or failing pack is refused and recorded as an audit event; nothing partial is committed. Then:
+    projections, the 14 agents grounded in the HR export (owner-approved mapping by exact employee ID), explicit
+    access grants from the owner's file (never from an HR title), and the self-check.
+    Re-running it is safe: admitted packs are skipped."""
+    _wait_for_db()
+    cmd_migrate(args)
+    root = _data_root()
+    if root is None:
+        return EXIT_DATA_MISSING
+    schedule = load_schedule()
+    tenant_id = config.tenant_uuid(schedule.tenant_slug)
+    now = current_time()
+    authorised = load_authorisations()
+    rc = EXIT_OK
+    with connect(_dsn("ingest")) as conn:
+        sealed = {b["pack_id"] for b in ledger.batches(conn, tenant_id) if b["sealed"]}
+        for pack in sorted(schedule.packs, key=lambda x: x.batch_seq):
+            if pack.id in sealed:
+                print(f"{pack.id}: already admitted")
+                continue
+            if pack.release_at > now:
+                print(f"{pack.id}: refused, not released until {pack.release_at.isoformat()}; no file was opened. "
+                      "Later packs wait for it.")
+                break
+            try:
+                auth = require_authorised(pack.id, authorised)
+                r = admit_pack(conn, tenant_id, schedule, pack.id, root, now, authorisation=auth)
+            except Exception as exc:  # recorded; nothing partial is ever committed
+                failure = AdmissionFailure(pack.id, exc)
+                record_failure(conn, tenant_id, failure)
+                print(f"{pack.id}: refused ({failure.reason}): {exc}. Nothing from it was admitted; later packs wait.",
+                      file=sys.stderr)
+                rc = EXIT_ADMISSION_FAILED
+                break
+            print(f"{r.pack_id}: {r.status} as batch {r.batch_seq}: {r.file_count} files, {r.record_count} records")
+    cmd_project(argparse.Namespace(rebuild=False))
+    with connect(_admin_dsn()) as a:
+        k = ledger.sealed_watermark(a, tenant_id)
+        if k:
+            from . import knowledge
+            from .agents import people, registry
+
+            registry.seed_slots(a, tenant_id)
+            print("knowledge claims:", knowledge.backfill(a, tenant_id)[-1:] or "up to date")
+            print("agents grounded:", len(people.ground(a, tenant_id, k)) or "already grounded")
+            _apply_access_grants(a, tenant_id)
+    sc = cmd_selfcheck(argparse.Namespace(role="ingest"))
+    return rc or sc
+
+
+def _apply_access_grants(conn, tenant_id) -> None:
+    """Explicit company-wide read grants from an OWNER-PROVIDED file outside the repository (VELOXA_ACCESS_GRANTS;
+    TOML `[[company_reader]]` with principal, approved_by, decision, purposes). An HR title never grants access;
+    with no file, nothing is granted and the evidence model denies by default."""
+    import os
+    import tomllib
+    from pathlib import Path
+
+    from . import access_grants
+
+    path = os.environ.get("VELOXA_ACCESS_GRANTS", "").strip()
+    if not path:
+        print("company-wide read: no VELOXA_ACCESS_GRANTS file; nothing granted (default deny)")
+        return
+    entries = tomllib.loads(Path(path).read_text(encoding="utf-8")).get("company_reader", [])
+    for e in entries:
+        try:
+            access_grants.grant_company_reader(conn, tenant_id, e["principal"], approved_by=e["approved_by"],
+                                               decision_ref=e["decision"], purposes=list(e["purposes"]))
+            print("company-wide read: granted from the owner authorisation file (audited)")
+        except (access_grants.GrantRefused, KeyError) as exc:
+            print(f"company-wide read: refused ({exc})", file=sys.stderr)
+
+
+def cmd_access(args: argparse.Namespace) -> int:
+    """Explicit company-wide read: grant (verified principal, approver, decision, purpose; audited), revoke, list."""
+    import uuid as _uuid
+
+    from . import access_grants
+
+    tenant_id = config.tenant_uuid(load_schedule().tenant_slug)
+    with connect(_admin_dsn()) as conn:
+        try:
+            if args.access_cmd == "grant-company-reader":
+                tid = access_grants.grant_company_reader(conn, tenant_id, args.principal, approved_by=args.approved_by,
+                                                         decision_ref=args.decision,
+                                                         purposes=args.purposes.split(","))
+                print(f"granted: tuple {tid}")
+            elif args.access_cmd == "revoke":
+                access_grants.revoke(conn, tenant_id, _uuid.UUID(args.tuple), by=args.by, reason=args.reason)
+                print("revoked")
+            else:
+                for g in access_grants.live_grants(conn, tenant_id):
+                    print(f"{g['tuple_id']}  {g['created_at']:%Y-%m-%d}  {g['source']}")
+        except access_grants.GrantRefused as e:
+            print(f"refused: {e}", file=sys.stderr)
+            return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="veloxa", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -270,11 +552,71 @@ def main(argv: list[str] | None = None) -> int:
     p_prj = sub.add_parser("project", help="build projections for sealed batches")
     p_prj.add_argument("--rebuild", action="store_true", help="drop and rebuild all projections from the ledger")
     p_prj.set_defaults(func=cmd_project)
+    p_wf = sub.add_parser("workflow-pack", help="C26: run the durable pack pipeline for one pack (DBOS)")
+    p_wf.add_argument("--pack", required=True)
+    p_wf.add_argument("--key", default=None, help="idempotency key (default: pack and tenant)")
+    p_wf.set_defaults(func=cmd_workflow_pack)
+    p_ws = sub.add_parser("workflow-status", help="C26: show a workflow's status")
+    p_ws.add_argument("workflow_id")
+    p_ws.set_defaults(func=cmd_workflow_status)
+    p_wr = sub.add_parser("workflow-retention", help="C26: dry-run DBOS record retention (deletes only if approved)")
+    p_wr.add_argument("--apply", action="store_true", help="delete; refused unless the owner decision is configured")
+    p_wr.set_defaults(func=cmd_workflow_retention)
+    p_ten = sub.add_parser("tenant", help="operator: tenants, issuers and first administrators (privileged)")
+    ten = p_ten.add_subparsers(dest="tenant_command", required=True)
+    t1 = ten.add_parser("create")
+    t1.add_argument("--slug", required=True)
+    t1.add_argument("--tz", required=True)
+    t1.add_argument("--name")
+    t1.add_argument("--synthetic", action="store_true", help="a synthetic (demo/test) tenant")
+    ten.add_parser("show").add_argument("--slug", required=True)
+    t3 = ten.add_parser("add-issuer", help="the tenant's own OIDC issuer (no secrets)")
+    t3.add_argument("--slug", required=True)
+    t3.add_argument("--issuer", required=True)
+    t3.add_argument("--audience", required=True)
+    t3.add_argument("--jwks-url", required=True)
+    t3.add_argument("--alg", nargs="+", default=["RS256"], choices=["RS256", "ES256"])
+    t4 = ten.add_parser("invite-admin")
+    t4.add_argument("--slug", required=True)
+    t4.add_argument("--email", required=True)
+    t4.add_argument("--name", required=True)
+    t5 = ten.add_parser("bootstrap-synthetic-admin", help="SYNTHETIC tenants only: an admin without an IdP")
+    t5.add_argument("--slug", required=True)
+    t5.add_argument("--principal", required=True)
+    t5.add_argument("--name", required=True)
+    p_ten.set_defaults(func=cmd_tenant)
+    p_in = sub.add_parser("intake-work", help="data-room worker: validate uploads, admit authorised submissions")
+    p_in.add_argument("--once", action="store_true")
+    p_in.add_argument("--interval", type=float, default=10.0)
+    p_in.set_defaults(func=cmd_intake_work)
+    p_bk = sub.add_parser("backup", help="C31: verified logical backup of the configured database (privileged)")
+    p_bk.add_argument("--out", required=True)
+    p_bk.set_defaults(func=cmd_backup)
+    p_rd = sub.add_parser("restore-drill", help="C31: restore a backup into a disposable database and compare")
+    p_rd.add_argument("--dump", required=True)
+    p_rd.set_defaults(func=cmd_restore_drill)
+    sub.add_parser("agents-seed", help="publish the 14 proposed agent slots (unassigned, blocked)"
+                   ).set_defaults(func=cmd_agents_seed)
     sub.add_parser("identity-sync", help="C12: register identities and candidates from sealed batches (counts only)"
                    ).set_defaults(func=cmd_identity_sync)
     p_sc = sub.add_parser("selfcheck", help="run startup self-checks for a role")
     p_sc.add_argument("--role", choices=("app", "ingest"), default="app")
     p_sc.set_defaults(func=cmd_selfcheck)
+    p_acc = sub.add_parser("access", help="explicit company-wide read grants: grant, revoke, list (operator)")
+    acc = p_acc.add_subparsers(dest="access_cmd", required=True)
+    g = acc.add_parser("grant-company-reader")
+    g.add_argument("--principal", required=True, help="person:<employee ID> (verified against the HR export)")
+    g.add_argument("--approved-by", required=True)
+    g.add_argument("--decision", required=True, help="decision record reference")
+    g.add_argument("--purposes", default="interview,cockpit")
+    r = acc.add_parser("revoke")
+    r.add_argument("--tuple", required=True)
+    r.add_argument("--by", required=True)
+    r.add_argument("--reason", required=True)
+    acc.add_parser("list")
+    p_acc.set_defaults(func=cmd_access)
+    sub.add_parser("hackathon-bootstrap", help="hackathon one-command start: admit released AND authorised packs "
+                   "in order, project, ground agents, self-check").set_defaults(func=cmd_hackathon_bootstrap)
     p_init = sub.add_parser("init", help="privileged one-shot: migrate; bootstrap a fresh database only")
     p_init.set_defaults(func=cmd_init)
     p_pol = sub.add_parser("policy", help="owner decisions (privileged)")
@@ -283,7 +625,8 @@ def main(argv: list[str] | None = None) -> int:
     p_d15.add_argument("--file", required=True)
     p_d15.set_defaults(func=cmd_policy_record_d15)
     p_srv = sub.add_parser("serve", help="run the API (application role only)")
-    p_srv.add_argument("--host", default="0.0.0.0")
+    p_srv.add_argument("--host", default="127.0.0.1",
+                       help="bind address (default loopback; containers pass 0.0.0.0 explicitly)")
     p_srv.add_argument("--port", type=int, default=8000)
     p_srv.set_defaults(func=cmd_serve)
     args = parser.parse_args(argv)

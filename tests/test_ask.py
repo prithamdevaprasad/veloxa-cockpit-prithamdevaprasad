@@ -235,6 +235,8 @@ def test_spend_answers_exclude_payroll_and_say_so(app_conn, tenant, projected):
 @pytest.mark.db
 @pytest.mark.parametrize("question, policy_id", [
     ("What is Person Beta's salary?", "POL-PAY-01"),
+    ("What is the salary of T002?", "POL-PAY-01"),          # an employee ID names one person, like a name
+    ("How much is T002 paid?", "POL-PAY-01"),
     ("What is the total payroll?", "POL-PAY-02"),
     ("Rank people by attrition risk", "POL-PEOPLE-01"),
 ])

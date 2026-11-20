@@ -23,11 +23,13 @@ class Contract:
     iso_dates: tuple[str, ...] = ()            # 'YYYY-MM-DD' text; empty allowed only if listed in optional
     month_labels: tuple[str, ...] = ()         # 'Mon-YYYY' text
     integers: tuple[str, ...] = ()
+    integer_text: tuple[str, ...] = ()         # CSV: integer written as text ('-?digits'), kept as written
     numbers: tuple[str, ...] = ()
     optional: tuple[str, ...] = ()             # columns whose cells may be empty
     identities: tuple[tuple[str, str, str], ...] = ()   # (a, b, c): a - b == c (arithmetic identity)
     not_greater: tuple[tuple[str, str], ...] = ()       # (a, b): a <= b
     min_rows: int = 1
+    sheet: str | None = None                   # validate only this worksheet (multi-sheet exports)
     extra: dict = field(default_factory=dict)
 
     @staticmethod
@@ -40,11 +42,13 @@ class Contract:
             iso_dates=tuple(raw.get("iso_dates", ())),
             month_labels=tuple(raw.get("month_labels", ())),
             integers=tuple(raw.get("integers", ())),
+            integer_text=tuple(raw.get("integer_text", ())),
             numbers=tuple(raw.get("numbers", ())),
             optional=tuple(raw.get("optional", ())),
             identities=tuple(tuple(x) for x in raw.get("identities", ())),
             not_greater=tuple(tuple(x) for x in raw.get("not_greater", ())),
             min_rows=int(raw.get("min_rows", 1)),
+            sheet=raw.get("sheet"),
         )
 
 
@@ -59,6 +63,8 @@ def validate_rows(relpath: str, contract: Contract, rows: list[tuple[dict, dict]
         where = f"{relpath} row {locator['row']}" if locator else relpath
         raise AdmissionRefused("contract_violation", f"{where}, column {column!r}: {problem}")
 
+    if contract.sheet is not None:
+        rows = [r for r in rows if (r[0] or {}).get("sheet") == contract.sheet]
     if len(rows) < contract.min_rows:
         fail(None, "*", f"expected at least {contract.min_rows} data rows")
     if rows:
@@ -84,6 +90,10 @@ def validate_rows(relpath: str, contract: Contract, rows: list[tuple[dict, dict]
             v = row.get(col)
             if not _empty(v) and not (isinstance(v, str) and _MONTH.match(v)):
                 fail(loc, col, "not a month label (Mon-YYYY)")
+        for col in contract.integer_text:
+            v = row.get(col)
+            if not _empty(v) and not re.fullmatch(r"-?\d+", str(v).strip()):
+                fail(loc, col, "not an integer (as text)")
         for col in contract.integers:
             v = row.get(col)
             if not _empty(v) and not (isinstance(v, int) and not isinstance(v, bool)):

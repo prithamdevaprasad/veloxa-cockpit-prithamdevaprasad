@@ -121,14 +121,22 @@ def test_values_cannot_hide_numbers_in_missing_states_or_skip_criteria():
 # ---------------------------------------------------------------------------------------------------------------
 
 
-def test_weighted_ranking_is_blocked_while_d15_is_pending_and_not_implemented_after_approval():
+def test_weighted_ranking_is_blocked_while_d15_is_pending_and_uses_only_recorded_content_after_approval():
+    from pathlib import Path
+
+    from veloxa.risk import ranking
+
     assert governance.ranking_mode(governance.PENDING) == "unweighted_partial_order"
     with pytest.raises(governance.RankingBlocked, match="pending an owner decision"):
         governance.weighted_ranking(governance.PENDING, [])
     approved = governance.PolicyState("approved", 1, "0" * 64, "owner", date(2026, 11, 17), "DECISIONS.md D-15")
-    assert governance.ranking_mode(approved) == "unweighted_partial_order"   # never switches silently
-    with pytest.raises(governance.RankingBlocked, match="not implemented"):
+    assert governance.ranking_mode(approved) == "unweighted_partial_order"   # the briefing's top_three stays null
+    with pytest.raises(governance.RankingBlocked):                           # no recorded content: never ranks
         governance.weighted_ranking(approved, [])
+    content = ranking.load_policy(Path(__file__).parent / "fixtures" / "d15_test_policy.toml")
+    assert governance.weighted_ranking(approved, [], content) == {
+        "policy": {"weights": content["weights"], "method": content["method"], "probabilities": "disabled"},
+        "ranked": [], "unrankable": []}
 
 
 def _decision_file(tmp_path, **overrides):
