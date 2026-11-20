@@ -256,6 +256,9 @@ class Router:
             out = connectors.answer(self, full)         # names GitHub / Jira / e-mail: before the CEO briefing
             if out is not None:
                 return out
+        out = connectors.email_strong(self, full)       # names something only the principal's own mail discusses
+        if out is not None:
+            return out
         if EXECUTIVE.search(q) and not _is_dependency(full) and not re.search(r"\bboard\b", full, re.I):
             out = self.executive(q)
             if out is not None:

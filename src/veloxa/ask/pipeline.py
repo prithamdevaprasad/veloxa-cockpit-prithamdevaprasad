@@ -194,6 +194,15 @@ def _answer_one(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, princip
     # current fact into the future (H-16: forecasts without a basis abstain). Answering with today's figure would be
     # a different question presented as an answer.
     if _FORECAST.search(question):
+        # "What does X need before it will renew?" asks what someone SAID, not for a forecast: a message that states
+        # it can be quoted (nothing is extrapolated). Anything else about the future still abstains.
+        from . import connectors
+
+        said = connectors.email_strong(routes.Router(conn, tenant_id, tz, principal, basis, _basis_json(basis),
+                                                     SOURCE_CLASS), question)
+        if said is not None:
+            base["diagnostics"] = {"stage": "routed", "route": said["interpretation"][:80]}
+            return _record(conn, tenant_id, principal, now, basis, base, said)
         return _record(conn, tenant_id, principal, now, basis, base, _abstained(
             basis, "I read this as a question about a future value.",
             ["no forecast or plan in the admitted evidence supports a future value; current figures are not "
