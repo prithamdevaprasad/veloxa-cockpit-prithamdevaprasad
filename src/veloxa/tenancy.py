@@ -290,10 +290,21 @@ def accept_invitation(conn, token: str, issuer: str, subject: str) -> tuple[uuid
 
 
 def member(conn, tenant_id: uuid.UUID, principal_id: str) -> dict | None:
-    """The principal's directory record and status, or None."""
+    """The principal's directory record and status, or None. A member created before their invitation (for example a
+    bootstrapped administrator) has no stored e-mail; their address is then the one on the invitation they ACCEPTED
+    with a verified sign-in, so private communications addressed to them become visible to them (and to no one
+    else). An unaccepted or revoked invitation never supplies an address."""
     with tenant_tx(conn, tenant_id, principal_id):
-        return conn.execute("SELECT * FROM directory.principal_status WHERE tenant_id = %s AND principal_id = %s",
-                            (tenant_id, principal_id)).fetchone()
+        m = conn.execute("SELECT * FROM directory.principal_status WHERE tenant_id = %s AND principal_id = %s",
+                         (tenant_id, principal_id)).fetchone()
+        if m is not None and not m.get("email"):
+            inv = conn.execute(
+                "SELECT i.email FROM directory.invitation i JOIN directory.invitation_event e USING (tenant_id,"
+                " invitation_id) WHERE i.tenant_id = %s AND i.principal_id = %s AND e.event = 'accepted'"
+                " ORDER BY e.at DESC LIMIT 1", (tenant_id, principal_id)).fetchone()
+            if inv:
+                m = {**m, "email": inv["email"]}
+        return m
 
 
 def relations(conn, tenant_id: uuid.UUID, principal_id: str) -> list[dict]:

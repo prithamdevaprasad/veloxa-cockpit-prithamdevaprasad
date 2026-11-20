@@ -160,3 +160,18 @@ def test_the_operator_cli_creates_and_shows_a_tenant(db, monkeypatch, capsys):
     assert main(["tenant", "create", "--slug", slug, "--tz", "UTC"]) == 2           # duplicate refused
     assert main(["tenant", "invite-admin", "--slug", slug, "--email", "a@example.test", "--name", "A"]) == 0
     assert "One-time token" in capsys.readouterr().out
+
+
+def test_a_member_without_an_email_takes_it_from_their_accepted_invitation_only(admin, app, ws):
+    """A bootstrapped member (no stored e-mail) later invited to sign in: their address comes from the invitation
+    once it is ACCEPTED through a trusted sign-in, never before, so mail addressed to them becomes visible to them."""
+    tenancy.add_issuer(admin, ws, f"{ISS}/{ws}", "veloxa", f"{ISS}/{ws}/jwks")
+    tenancy.add_synthetic_member(admin, ws, "person:boss", "Boss")
+    assert tenancy.member(app, ws, "person:boss")["email"] is None
+    token = "boss-invitation-token-for-tests-only-0123456789"
+    tenancy._guarded(app, ws, "person:syn-admin", "SELECT directory.admin_invite(%s,%s,%s,%s,%s,%s::jsonb) AS id",
+                     ("person:boss", "Boss", "Boss@Example.test", tenancy.token_hash(token), timedelta(days=1), "[]"),
+                     "workspace.invited", {"principal": "person:boss", "roles": []})
+    assert tenancy.member(app, ws, "person:boss")["email"] is None          # invited, not accepted: no address
+    tenancy.accept_invitation(app, token, f"{ISS}/{ws}", "sub-boss")
+    assert tenancy.member(app, ws, "person:boss")["email"] == "boss@example.test"
