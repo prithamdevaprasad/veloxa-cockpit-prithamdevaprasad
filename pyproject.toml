@@ -17,6 +17,8 @@ dependencies = [
   "pdfplumber>=0.11,<0.12",
   "dbos>=3.5,<3.6",            # C26 durable workflows (ARCHITECTURE.md §17.2), MIT; owner-approved 17 Nov 2026
   "psycopg-pool>=3.2,<3.3",    # optional API connection pool (VELOXA_DB_POOL_MAX)
+  "httpx>=0.27,<1",            # connectors (Jira, Gmail, GitHub) call their APIs over HTTPS
+  "cryptography>=43",          # GitHub App JWT, encrypted token storage
 ]
 
 [project.optional-dependencies]
