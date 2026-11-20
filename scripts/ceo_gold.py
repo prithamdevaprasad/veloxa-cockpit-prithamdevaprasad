@@ -126,6 +126,21 @@ def judge(c: Case, a: dict) -> tuple[bool, str]:
     return True, f"answered with {ev} citation(s)"
 
 
+class _Paced(httpx.Client):
+    """Waits and retries when the server's per-user rate limit answers 429, so a test never records a throttled
+    request as a refusal."""
+
+    def request(self, *a, **kw):
+        import time
+
+        for _ in range(8):
+            r = super().request(*a, **kw)
+            if r.status_code != 429:
+                return r
+            time.sleep(float(r.headers.get("Retry-After") or 10))
+        return r
+
+
 def main() -> None:  # noqa: C901, PLR0915
     ap = argparse.ArgumentParser()
     ap.add_argument("--api", required=True)
@@ -134,7 +149,7 @@ def main() -> None:  # noqa: C901, PLR0915
     ap.add_argument("--md")
     o = ap.parse_args()
     h = {"Authorization": f"Bearer {o.token}", "X-Veloxa-Request": "1"}
-    c = httpx.Client(base_url=o.api, headers=h, timeout=180)
+    c = _Paced(base_url=o.api, headers=h, timeout=180)
     results = []
 
     def rec(cid, cat, q, ok, why, a, **extra):
