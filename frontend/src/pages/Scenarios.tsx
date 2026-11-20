@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { api, ApiError, get, request } from "../api/client";
 import { useApi } from "../api/useApi";
-import { Icon } from "../ui/kit";
-import { Badge, Button, EmptyState, ErrorState, Loading, Section } from "../ui";
+import { Badge, Button, EmptyState, ErrorState, Loading, PageHead, Section } from "../ui";
 
 
 interface Subject { name: string; kind: string; date: string | null; original_date: string | null; status: string | null }
@@ -37,22 +36,10 @@ export function ScenariosPage() {
   const go = (t: string) => { setText(t); void run({ text: t }); };
   return (
     <>
-      <header className="page-hero">
-        <span className="hero-icon"><Icon name="whatif" size={26} /></span>
-        <div><h1>What-if Analysis</h1>
-          <p>Test what happens if a release or commitment moves. Veloxa shows today's date, the new date, the work
-            affected and what the records can't tell you. Nothing is saved to company records or Jira.</p></div>
-      </header>
-      <div className="feature-row">
-        <div className="feature"><Icon name="timeline" size={22} /><div><strong>Change a date</strong>
-          <span>{list[0] ? `e.g. move ${list[0].name} by 2 weeks` : "Move a release or commitment"}</span></div></div>
-        <div className="feature"><Icon name="departments" size={22} /><div><strong>See the impact</strong>
-          <span>On work, dependencies and timelines</span></div></div>
-        <div className="feature"><Icon name="alert" size={22} /><div><strong>Know the limits</strong>
-          <span>What Veloxa can and cannot tell you</span></div></div>
-      </div>
+      <PageHead title="What-if analysis" intro="See what happens if a release or commitment moves: the new date, the
+        work affected, and what the records can't tell you. Nothing is saved to company records or Jira." />
       <section className="card scenario-input" aria-label="Describe a scenario">
-        <h2>Describe a scenario</h2>
+        <h2>Describe a change</h2>
         {subs.state === "loading" && <Loading lines={2} />}
         {subs.state === "error" && <ErrorState error={subs.error} onRetry={reload} />}
         {subs.state === "ready" && (list.length === 0
@@ -82,21 +69,11 @@ export function ScenariosPage() {
             </div>)}
       </section>
       {!out && !busy && examples.length > 0 && (
-        <div className="scenario-help">
-          <section className="card" aria-label="Try one">
-            <h3>Try one</h3>
-            <ul className="plain example-list">{examples.map((x) => (
-              <li key={x}><button onClick={() => go(x)}>{x}<span aria-hidden="true">›</span></button></li>))}</ul>
-          </section>
-          <section className="card soft" aria-label="What you get">
-            <h3>You'll get a clear comparison</h3>
-            <ul className="plain check-list">
-              {["Today's date and the date if it moves", "What you assumed", "Work and dependencies affected",
-                "What's blocking it", "What Veloxa can't tell you"].map((x) => (
-                <li key={x}><Icon name="check" size={16} /> {x}</li>))}
-            </ul>
-          </section>
-        </div>)}
+        <section className="card" aria-label="Try one">
+          <h3>Try one</h3>
+          <div className="follow-ups">{examples.map((x) => (
+            <button key={x} className="chip" onClick={() => go(x)}>{x}</button>))}</div>
+        </section>)}
       {error && <Section><ErrorState error={error} /></Section>}
       {out && (
         <section className="scenario-result" aria-label="Scenario result">

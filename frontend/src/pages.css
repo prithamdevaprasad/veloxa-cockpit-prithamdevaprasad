@@ -230,3 +230,17 @@
 .ov .status-tag.ranked { font-variant-numeric: tabular-nums; white-space: nowrap; }
 @media (max-width: 1200px) { .ov-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .ov-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.map-answer { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px;
+  max-height: 40vh; overflow: auto; }
+.map-answer-text { white-space: pre-line; margin: 0; }
+.map-answer .chip .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+
+/* Priority colours: a subtle warning scale on the rank marker only (red, orange, amber). The rest stays neutral, and
+   the colour never carries meaning on its own: the number and "close call" are always written out. */
+.status-tag.ranked.r1, .ws-rank.r1 { color: #b42318; background: #fef3f2; border-color: #fecdca; }
+.status-tag.ranked.r2, .ws-rank.r2 { color: #b54708; background: #fff6ed; border-color: #fddcab; }
+.status-tag.ranked.r3, .ws-rank.r3 { color: #93370d; background: #fffaeb; border-color: #fedf89; }
+.ws-row.active:has(.ws-rank.r1) { border-left-color: #f04438; }
+.ws-row.active:has(.ws-rank.r2) { border-left-color: #f79009; }
+.ws-row.active:has(.ws-rank.r3) { border-left-color: #fdb022; }

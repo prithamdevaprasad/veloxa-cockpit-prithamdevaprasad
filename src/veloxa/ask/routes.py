@@ -58,6 +58,8 @@ BLOCKED = re.compile(r"\b(which|what|how many|list)\b.{0,30}\b(issues?|tasks?|ti
                      r"\b(blocked|blocking|stuck)\b|\bblocked (issues?|tasks?|work)\b", re.I)
 BOARD_ABOUT = re.compile(r"\bboard\b.{0,40}\b(say|said|says|report\w*|mention\w*|state\w*)\b.{0,12}\babout\s+"
                          r"(?P<topic>[A-Za-z0-9][\w .-]{1,40}?)(\s+in\s+(?P<when>\w+))?\s*\??$", re.I)
+DEPENDS = re.compile(r"\b(what|which|who)\b.{0,30}\b(depends? on|relies? on|rides on|hangs on|is waiting on|"
+                     r"is tied to|blocks|is blocking)\s+(?P<x>[A-Za-z0-9][\w .-]{1,40})", re.I)
 HIRING = re.compile(r"\b(roles?|positions?|requisitions?|vacanc\w*|openings?|hires?|hiring)\b.{0,40}"
                     r"\b(on hold|paused|frozen|open|status|filled)\b|\bwhat (are we|is) hiring\b", re.I)
 OWNERS = re.compile(r"\b(who)\b.{0,40}\b(owns?|owners?|working on|assigned|responsible|holds?|has)\b.{0,40}"
@@ -192,6 +194,10 @@ class Router:
                 return out
         if re.search(r"\bon-?call\b|\brota\b", q, re.I) and re.search(r"\bwho\b|\bhow often\b|\bmost\b", q, re.I):
             out = self.oncall(q)
+            if out is not None:
+                return out
+        if DEPENDS.search(q):
+            out = self.depends(q)
             if out is not None:
                 return out
         if HIRING.search(q):
@@ -492,6 +498,38 @@ class Router:
                        [recs[i] for c in claims for i in c["evidence"]],
                        ["Tracker records are as of their last sync or export; later changes in Jira are not shown "
                         "until the next sync is reviewed and admitted."])
+
+    def depends(self, q):
+        """What hangs on a release or epic: the tracker work aimed at it (by its fix version or epic) and the
+        recorded concerns about it. Only links the records state; nothing inferred."""
+        from .continuity import _claims
+
+        name = DEPENDS.search(q).group("x").strip(" ?.\"'")
+        x = name.lower()
+        if len(x) < 3:
+            return None
+        k = self.basis.batch_seq
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id, k):
+            issues = _claims(self.conn, self.tenant_id, k, "issue")
+        done = re.compile(r"done|closed|resolved|cancel", re.I)
+        hit = [(s.split(":", 1)[1], d) for s, d in sorted(issues.items())
+               if x in str(d.get("fix_version", "")).lower() or x in str(d.get("epic", "")).lower()]
+        if not hit:
+            return None
+        open_ = [(key, d) for key, d in hit if not done.search(str(d.get("status_at_export") or ""))]
+        recs = self.records({r for _, d in open_[:10] for r in d["_records"]})
+        claims = [c for key, d in open_[:10] if (c := self.claim(
+            f"{key} {d.get('summary') or ''} ({d.get('status_at_export') or 'status not stated'}).",
+            sorted(d["_records"]), recs))]
+        if not claims:
+            return None
+        lead = (f"{len(hit)} tracker issue{'s' if len(hit) != 1 else ''} are aimed at {name}; "
+                f"{len(open_)} still open. The open ones:")
+        return _result(self.basis_json, "answered", f"I read this as: what work depends on {name}.",
+                       lead + "\n" + "\n".join(f"- {c['text']}" for c in claims), claims,
+                       [recs[i] for c in claims for i in c["evidence"]],
+                       ["Only links the tracker records state (fix version or epic) are counted; other dependencies "
+                        "may exist but are not recorded."], [f"Why did {name} move?"])
 
     def commitments(self, q):
         """Recorded commitments and what is unresolved about each (moved without a new date, no date, one source)."""

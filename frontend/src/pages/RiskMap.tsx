@@ -2,7 +2,7 @@
 // room uploads) pooled into one graph of the links the records state. A force layout on canvas: zoom and pan, drag
 // nodes, search to fly to a node, click to see its links, and ask Veloxa about any node with that context kept.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { get } from "../api/client";
+import { api, get } from "../api/client";
 import { useApi } from "../api/useApi";
 import { useAsk } from "../ui/Ask";
 import { Icon } from "../ui/kit";
@@ -51,6 +51,8 @@ function MapView({ data }: { data: MapOut }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const [askOpen, setAskOpen] = useState(false);
+  const [mapAnswer, setMapAnswer] = useState<{ q: string; text: string; found: string[]; busy: boolean;
+    ctx?: string; status?: string } | null>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set(["record"].filter(() => data.nodes.length > 260)));
   const [query, setQuery] = useState("");
   const [question, setQuestion] = useState("");
@@ -229,14 +231,30 @@ function MapView({ data }: { data: MapOut }) {
   const selLinks = sel ? (links.get(sel.id) ?? []) : [];
   const counts = Object.fromEntries(Object.keys(KINDS).map((k) => [k, data.nodes.filter((n) => n.kind === k).length]));
 
-  function askAbout(q: string) {
+  /** Answer map questions IN the map: the reply sits in the panel, the map flies to the first thing it names, and
+   * every named item becomes a link. "Open in chat" continues it as a full conversation. */
+  async function askAbout(q: string) {
     if (!q.trim()) return;
-    ask.ask(sel ? `${q.trim()} (about ${KINDS[sel.kind]?.label.replace(/s$/, "").toLowerCase() ?? sel.kind} "${sel.label}")` : q.trim(),
-            sel ? { kind: "map_node", subject: sel.label } : undefined, true);
-    setQuestion("");
+    const full = sel ? `${q.trim()} (about ${KINDS[sel.kind]?.label.replace(/s$/, "").toLowerCase() ?? sel.kind} "${sel.label}")` : q.trim();
+    setQuestion(""); setAskOpen(true);
+    setMapAnswer({ q: full, text: "", found: [], busy: true, ctx: sel ? sel.label : undefined });
+    try {
+      const a = await api.ask(full);
+      const text = String(a.answer ?? "");
+      const low = text.toLowerCase();
+      const found = data.nodes.filter((n) => n.label.length > 3 && low.includes(n.label.toLowerCase()))
+        .sort((x, y) => low.indexOf(x.label.toLowerCase()) - low.indexOf(y.label.toLowerCase())).slice(0, 8);
+      setMapAnswer({ q: full, text, found: found.map((n) => n.id), busy: false, ctx: sel ? sel.label : undefined,
+                     status: String(a.status ?? "") });
+      if (found[0]) flyTo(found[0].id);
+    } catch {
+      setMapAnswer({ q: full, text: "The answer couldn't be loaded. Try again.", found: [], busy: false });
+    }
   }
+  const openInChat = () => mapAnswer && ask.ask(mapAnswer.q,
+    mapAnswer.ctx ? { kind: "map_node", subject: mapAnswer.ctx } : undefined, true);
 
-  const QUICK = ["Who owns the most blocked work?", "What depends on Atlas GA?", "Which concerns rest on a single source?"];
+  const QUICK = ["What depends on Atlas GA?", "Why did Atlas GA move?", "Who holds primary on-call most often?"];
   return (
     <div className="map-stage" ref={wrap}>
       <canvas ref={canvas} aria-label="Risk and dependency map. Use the search and the panel to explore it with a keyboard." />
@@ -308,6 +326,22 @@ function MapView({ data }: { data: MapOut }) {
             <div className="follow-ups">{QUICK.map((q) => <button key={q} className="chip" onClick={() => askAbout(q)}>{q}</button>)}</div>
           </div>
         )}
+        {mapAnswer && (
+          <div className="map-answer" aria-live="polite">
+            <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
+              <strong className="small">{mapAnswer.q}</strong>
+              <button className="link small" onClick={() => setMapAnswer(null)}>Clear</button>
+            </div>
+            {mapAnswer.busy ? <Loading lines={2} /> : <>
+              <p className="small map-answer-text">{mapAnswer.text}</p>
+              {mapAnswer.found.length > 0 && <div className="follow-ups">{mapAnswer.found.map((id) => {
+                const n = byId.get(id);
+                return n && <button key={id} className="chip" onClick={() => flyTo(id)}>
+                  <span className="dot" style={{ background: KINDS[n.kind]?.color }} /> {n.label}</button>;
+              })}</div>}
+              <button className="link small" onClick={openInChat}>Open in chat</button>
+            </>}
+          </div>)}
         <form className="map-ask" onSubmit={(e) => { e.preventDefault(); askAbout(question); }}>
           <input className="input" value={question} onChange={(e) => setQuestion(e.target.value)} aria-label="Question about the map"
                  placeholder={sel ? `Ask about “${sel.label.slice(0, 30)}”` : "e.g. who is blocking Atlas GA?"} />

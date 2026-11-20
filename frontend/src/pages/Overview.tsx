@@ -188,7 +188,7 @@ function WorrySummary({ go }: { go: (r: string) => void }) {
               <ul className="plain attention-list">
                 {ranked.slice(0, 4).map((x, i) => (
                   <li key={x.item_id}>
-                    <span className="status-tag ranked"
+                    <span className={`status-tag ranked r${Math.min(i + 1, 3)}`}
                           title={x.tied ? "Close call: the records can't fully separate these concerns" : undefined}>
                       #{i + 1}{x.tied ? " · close call" : ""}</span>
                     <span className="what">{x.title}<span className="small muted" style={{ display: "block" }}>
