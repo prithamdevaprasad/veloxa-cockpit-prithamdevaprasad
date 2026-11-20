@@ -346,7 +346,8 @@ def email(router, q: str, strict: bool = False):
         return None
     if not strict and top < 0.34:
         return None
-    pick = [s for s in scored if s[0] >= top - 0.12 and (not dist or s[1] > 0 or not strict)][:6]
+    window = 0.21 if re.search(r",? and (what|when|who|how|which|why)\b", q, re.I) else 0.12
+    pick = [s for s in scored if s[0] >= top - window and (not dist or s[1] > 0 or not strict)][:6]
     if RECENT.search(q):
         pick.sort(key=lambda s: s[2], reverse=True)               # "now / latest": the newest message first
     pick = pick[:3]
@@ -378,6 +379,28 @@ def email(router, q: str, strict: bool = False):
     return _answer(router, "From your e-mail" + (" (newest first)" if RECENT.search(q) else "") + ":", claims, recs,
                    ["E-mail is a communication, not a verified record: a message states what its sender said."],
                    "what your connected e-mail says about this")
+
+
+ASKS = re.compile(r"\b(need (your|a) (decision|call|approval|sign-?off)|needs? your (approval|decision|sign-?off)|"
+                  r"decision needed|waiting on you|for your approval|please (approve|confirm|decide)|can you confirm|"
+                  r"approve (by|before)|your call by|needs? to be approved)\b", re.I)
+
+
+def pending_asks(router, limit: int = 4) -> list[tuple[str, str, dict]]:
+    """Requests for a decision or approval in the principal's own mail, newest first: [(text, record_id, rec)].
+    Only messages the principal sent or received; each line cites its message."""
+    out = []
+    for r in sorted(_messages(router), key=lambda r: int(r["payload"].get("internal_date") or 0), reverse=True):
+        p = r["payload"]
+        hits = [u for u in _sentences(p.get("body") or "") if ASKS.search(u)]
+        if not hits and ASKS.search(p.get("subject") or ""):
+            hits = _sentences(p.get("body") or "")[:1]
+        if hits:
+            out.append((f"“{p.get('subject') or 'no subject'}” ({_day(_iso(p.get('date')))}): {hits[0]}",
+                        r["record_id"], p))
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _iso(d):

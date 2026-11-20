@@ -106,7 +106,8 @@ GMAIL_ROWS = [
      "to": "Casey Example <ceo@example.test>", "cc": None, "subject": "Northwind after the outage",
      "date": "Tue, 17 Nov 2026 13:10:00 +0530", "labels": ["Veloxa-Test"], "snippet": "Northwind",
      "body": "Dear Casey,\n\nTo proceed with our renewal on 31 December, we need a 99.9% monthly uptime commitment "
-             "and a confirmed date for multi-depot routing.\n\nKim", "locator": "gmail:ceo@example.test/messages/m4",
+             "and a confirmed date for multi-depot routing. Can you confirm by 24 November?\n\nKim",
+     "locator": "gmail:ceo@example.test/messages/m4",
      "evidence_kind": "communication (not verified fact)", "internal_date": "2500"},
 ]
 
@@ -205,6 +206,8 @@ def test_connected_sources_answer_in_sentences_and_mail_stays_with_its_parties(d
         assert "99.9% monthly uptime" in a["answer"] and "multi-depot" in a["answer"], a["answer"]
         a = ask(c, "What is the routing-api p95 latency now?")              # newest message first
         assert a["answer"].index("610 ms") < a["answer"].find("840 ms") or "840" not in a["answer"], a["answer"]
+        a = ask(c, "Which decisions need my approval?")                    # asks in the CEO's own mail are listed
+        assert "Asked of you in your e-mail" in a["answer"] and "Northwind after the outage" in a["answer"], a["answer"]
         a = ask(c, "What is the biggest risk to the company?")             # a general question stays a briefing
         assert all(e.get("system") != "gmail_oauth" for e in a.get("evidence") or [])
     with _client(db, monkeypatch, ws, "person:other") as c:                 # not on the message
@@ -214,6 +217,8 @@ def test_connected_sources_answer_in_sentences_and_mail_stays_with_its_parties(d
         assert c.get(f"/v1/evidence/{quote(rid, safe='')}", headers=H).status_code == 404
         a = ask(c, "What does Northwind need before it will renew?")
         assert "99.9%" not in a["answer"]
+        a = ask(c, "Which decisions need my approval?")
+        assert "Asked of you" not in a["answer"] and "Northwind" not in a["answer"]
 
 
 def test_email_quotes_whole_sentences_from_hard_wrapped_mail():
