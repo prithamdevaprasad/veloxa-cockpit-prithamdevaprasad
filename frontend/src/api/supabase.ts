@@ -109,3 +109,14 @@ export async function signOut(): Promise<void> {
 export function googleSignIn(): void {
   void sb().auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin + "/" } });
 }
+
+/** True when this tab holds a Supabase session (signed in with e-mail and password), not a developer token. */
+export function hasSupabaseSession(): boolean {
+  try {
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i) ?? "";
+      if (k.startsWith("sb-") && k.endsWith("-auth-token")) return true;
+    }
+  } catch { /* storage unavailable */ }
+  return false;
+}

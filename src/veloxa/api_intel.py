@@ -337,8 +337,10 @@ def register(app, *, state, principal_of, now_fn, tz_of) -> None:
         for r in runs:
             r["started_at"] = r["started_at"].isoformat()
             r["finished_at"] = r["finished_at"].isoformat() if r["finished_at"] else None
-        planned = [{"connector": n, "state": "not implemented (interface defined: veloxa.connectors.Connector)"}
-                   for n in ("github", "gitlab", "hrms", "finance", "crm", "incidents")]
+        planned = [{"connector": "github", "state": "available: read-only GitHub App (see Integrations: GitHub)"},
+                   {"connector": "gmail", "state": "available: read-only mailbox (see Integrations: Gmail)"}] + [
+            {"connector": n, "state": "planned, not configured"} for n in ("gitlab", "hrms", "finance", "crm",
+                                                                          "incidents")]
         from .llm.gemini import TenantNotPermitted, check_tenant
 
         status = llm_config.status()

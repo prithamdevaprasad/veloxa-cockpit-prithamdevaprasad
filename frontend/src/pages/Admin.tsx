@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ApiError, getToken } from "../api/client";
 import { product } from "../api/product";
 import { AgentAdministration } from "./Agents";
+import { hasSupabaseSession } from "../api/supabase";
 import { JiraIntegration } from "./Integrations";
 import { GmailIntegration } from "./GmailIntegration";
 import { GitHubIntegration } from "./GitHubIntegration";
@@ -32,7 +33,8 @@ function Account({ onSignOut }: { onSignOut: () => void }) {
   const info = s.state === "ready" ? s.data : null;
   const how = info?.method === "oidc" ? `single sign-on (${info.provider === "entra" ? "Microsoft Entra ID"
     : info.provider === "google" ? "Google Workspace" : info.provider})`
-    : info?.method === "demo" ? "the local demo workspace" : getToken() ? "a developer token (this tab only)" : "—";
+    : info?.method === "demo" ? "the local demo workspace" : hasSupabaseSession() ? "your work e-mail and password"
+    : getToken() ? "a developer token (this tab only)" : "—";
   return (
     <Section title="Signed in" aria-label="Account">
       <p className="small">Signed in with {how}.{info && ` Session ends ${new Date(info.expires_at).toLocaleString()}`
