@@ -58,6 +58,32 @@ BLOCKED = re.compile(r"\b(which|what|how many|list)\b.{0,30}\b(issues?|tasks?|ti
                      r"\b(blocked|blocking|stuck)\b|\bblocked (issues?|tasks?|work)\b", re.I)
 BOARD_ABOUT = re.compile(r"\bboard\b.{0,40}\b(say|said|says|report\w*|mention\w*|state\w*)\b.{0,12}\babout\s+"
                          r"(?P<topic>[A-Za-z0-9][\w .-]{1,40}?)(\s+in\s+(?P<when>\w+))?\s*\??$", re.I)
+EXEC_INTENTS: list[tuple[str, re.Pattern]] = [
+    ("decisions", re.compile(r"\b(decisions?|approv\w+|sign[- ]?off)\b.{0,40}\b(need|needs|waiting|pending|my)\b|"
+                             r"\bwhat (is|are) waiting (for|on) me\b", re.I)),
+    ("consequence", re.compile(r"\b(what happens|what if we|consequences?)\b.{0,30}\b(ignore|delay|don't act|"
+                               r"do nothing)\b", re.I)),
+    ("verify", re.compile(r"\b(what should i|what to) (verify|check|confirm)\b", re.I)),
+    ("good", re.compile(r"\bwhat('s| is) going (well|right)\b|\bwhat is working\b|\bgood news\b", re.I)),
+    ("bad", re.compile(r"\bwhat('s| is) going (badly|wrong|poorly)\b|\bbad news\b|\bwhat is not working\b|"
+                       r"\b(cause|do) the most damage\b|\bbiggest (risk|threat|problem)\b|\bgetting worse\b", re.I)),
+    ("changed", re.compile(r"\bwhat('s| has)? changed( recently| lately| this (week|month))?\b|\bwhat's new\b|"
+                           r"\brecent changes\b", re.I)),
+    ("track", re.compile(r"\b(are we|is the company|are our projects?) on track\b|\bon track overall\b", re.I)),
+    ("people", re.compile(r"\bkey[- ]person\b|\bpeople[- ]related risks?\b|\bcapacity (problems?|issues?|risks?)\b|"
+                          r"\bpeople risks?\b|\bmost important people\b|\bsingle points? of failure\b", re.I)),
+    ("delivery", re.compile(r"\b(deadlines?|projects?|delivery|releases?)\b.{0,20}\b(at risk|on track|slipp\w*|"
+                            r"blocked|blocking|delayed)\b|\bwhat is blocking delivery\b|\bwhich teams have delivery\b|"
+                            r"\bdependencies need escalation\b|\bneed(s)? escalation\b", re.I)),
+    ("finance", re.compile(r"\bfinancial (position|health|situation|picture)\b|\bhow are (our )?finances\b|"
+                           r"\bcommercial risks?\b", re.I)),
+    ("priorities", re.compile(r"\b(focus on|prioriti[sz]e|immediate attention|needs? my attention|"
+                              r"most important things?|five (most )?important|top (\d|three|five) things)\b", re.I)),
+    ("summary", re.compile(r"\b(executive summary|summary of the company|summari[sz]e (the company|where we are)|"
+                           r"how is the company doing|where do we stand|state of the company|company overview)\b",
+                           re.I)),
+]
+EXECUTIVE = re.compile("|".join(f"(?:{rx.pattern})" for _, rx in EXEC_INTENTS), re.I)
 DEPENDS = re.compile(r"\b(what|which|who)\b.{0,30}\b(depends? on|relies? on|rides on|hangs on|is waiting on|"
                      r"is tied to|blocks|is blocking)\s+(?P<x>[A-Za-z0-9][\w .-]{1,40})", re.I)
 HIRING = re.compile(r"\b(roles?|positions?|requisitions?|vacanc\w*|openings?|hires?|hiring)\b.{0,40}"
@@ -185,7 +211,8 @@ class Router:
         return self._worry
 
     # ---- routes
-    def route(self, q: str) -> dict | None:
+    def route(self, q: str, original: str | None = None) -> dict | None:
+        full = original or q                      # the time parser may strip words such as 'board'
         from . import continuity
 
         if continuity.asks(q):                      # before DELAY: "what does the resignation do to the release?"
@@ -194,6 +221,10 @@ class Router:
                 return out
         if re.search(r"\bon-?call\b|\brota\b", q, re.I) and re.search(r"\bwho\b|\bhow often\b|\bmost\b", q, re.I):
             out = self.oncall(q)
+            if out is not None:
+                return out
+        if EXECUTIVE.search(q) and not DEPENDS.search(full) and not re.search(r"\bboard\b", full, re.I):
+            out = self.executive(q)
             if out is not None:
                 return out
         if DEPENDS.search(q):
@@ -498,6 +529,188 @@ class Router:
                        [recs[i] for c in claims for i in c["evidence"]],
                        ["Tracker records are as of their last sync or export; later changes in Jira are not shown "
                         "until the next sync is reviewed and admitted."])
+
+    # ------------------------------------------------------------------ CEO briefing (broad executive questions)
+    def _metrics(self) -> list[dict]:
+        """Board-reported figures, latest period first: [{name, value, period, prev, prev_period, records}]."""
+        k = self.basis.batch_seq
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id, k):
+            rows = self.conn.execute(
+                "SELECT subject, object, record_id FROM knowledge.claim WHERE tenant_id = %s AND batch_seq <= %s"
+                " AND subject_type = 'metric' AND predicate = 'reported_value'", (self.tenant_id, k)).fetchall()
+        by: dict[str, list] = {}
+        for r in rows:
+            o = r["object"] if isinstance(r["object"], dict) else {}
+            by.setdefault(r["subject"].split(":", 1)[1], []).append((str(o.get("issued_on") or ""), o, r["record_id"]))
+        out = []
+        for name, vals in by.items():
+            vals.sort(key=lambda v: v[0], reverse=True)
+            cur, prev = vals[0], (vals[1] if len(vals) > 1 and vals[1][1].get("period") != vals[0][1].get("period")
+                                  else None)
+            label = name.replace(" (recurring)", "").upper() if name.startswith("arr") else name.capitalize()
+            out.append({"name": label,
+                        "value": cur[1].get("value_text"), "period": cur[1].get("period"),
+                        "prev": prev[1].get("value_text") if prev else None,
+                        "prev_period": prev[1].get("period") if prev else None,
+                        "records": [cur[2]] + ([prev[2]] if prev else [])})
+        order = {"ARR": 0, "Customers": 1, "Monthly burn": 2, "Runway": 3, "Team": 4}
+        return sorted(out, key=lambda m: order.get(m["name"], 9))
+
+    def _pending_decisions(self) -> tuple[int, int, list[str]]:
+        """(submissions awaiting a decision, findings still open, their ids) for this principal's tenant."""
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id):
+            subs = self.conn.execute("SELECT count(*) AS n FROM intake.submission_state WHERE tenant_id = %s AND"
+                                     " state IN ('awaiting_review', 'awaiting_authorisation')",
+                                     (self.tenant_id,)).fetchone()["n"]
+            fnd = self.conn.execute("SELECT finding_id FROM runtime.finding_current WHERE tenant_id = %s AND state"
+                                    " IN ('detected', 'verified', 'notified', 'reopened')",
+                                    (self.tenant_id,)).fetchall()
+        return subs, len(fnd), [f["finding_id"] for f in fnd]
+
+    def executive(self, q):
+        """A CEO briefing assembled ONLY from cited facts the system already holds: the latest board figures (with the
+        previous quarter), the ranked concerns (close calls stated), concerns that need more evidence, commitment
+        warnings, people risks and what is waiting for a decision. Which sections appear depends on the question;
+        nothing is inferred beyond the records, and what the records cannot say is listed as unknown."""
+        from ..risk import graph
+
+        intent = next((name for name, rx in EXEC_INTENTS if rx.search(q)), "summary")
+        w = self.worry()
+        recs = dict(w["recs"])
+        ranked, unrank = w.get("ranked", []), w.get("unrankable", [])
+        mets = self._metrics()
+        recs |= self.records({r for m in mets for r in m["records"]})
+        warn = [x for x in graph.build(self.conn, self.basis, self.tz).get("warnings", []) if x.get("commitment")]
+        recs |= self.records({r for x in warn for r in x.get("evidence", [])})
+        claims, lines, unknowns = [], [], []
+
+        def add(text, ids, kind="record"):
+            c = self.claim(text, list(ids), recs, kind)
+            if c:
+                claims.append(c)
+                lines.append(f"- {text}")
+
+        better = {"ARR": 1, "Customers": 1, "Runway": 1, "Monthly burn": -1}   # which way is an improvement
+
+        def direction(m) -> int:
+            """+1 improved, -1 worsened, 0 unknown or unchanged (from the reported values, as numbers)."""
+            num = lambda v: float((re.search(r"\d+(?:\.\d+)?", str(v)) or [None])[0] or "nan")  # noqa: E731
+            try:
+                d = num(m["value"]) - num(m["prev"])
+            except (TypeError, ValueError):
+                return 0
+            return 0 if d != d or d == 0 else (1 if d > 0 else -1) * better.get(m["name"], 0)
+
+        def figures(changes_only=False, want=None):
+            for m in mets:
+                if not m["value"]:
+                    continue
+                if want is not None and (not m["prev"] or direction(m) != want):
+                    continue
+                if m["prev"] and m["prev"] != m["value"]:
+                    add(f"{m['name']}: {m['value']} for {m['period']} (was {m['prev']} for {m['prev_period']}),"
+                        " as reported to the board.", m["records"])
+                elif not changes_only:
+                    add(f"{m['name']}: {m['value']} for {m['period']}, as reported to the board.", m["records"])
+
+        def concerns(n=3):
+            close = any(x.get("tied") for x in ranked[:n])
+            for i, x in enumerate(ranked[:n], 1):
+                add(f"Priority #{i}{' (close call)' if x.get('tied') else ''}: {x['title']}.", x["evidence"], "derived")
+            if close:
+                unknowns.append("The top concerns are close calls: their possible impact overlaps, so the records "
+                                "can't say which comes first. Look at them together.")
+
+        def thin():
+            for x in unrank:
+                add(f"Needs more evidence: {x['title']}. {(x.get('unknowns') or [''])[0]}".strip(), x["evidence"],
+                    "derived")
+
+        def warnings():
+            for x in warn[:4]:
+                add(f"{x['commitment']}: {x['statement']}", x.get("evidence", []))
+
+        def people():
+            for x in ranked + unrank:
+                if any(k in x["item_id"] for k in ("oncall", "notice", "hiring")):
+                    add(f"{x['title']}.", x["evidence"], "derived")
+
+        def decisions():
+            subs, fnd, _ = self._pending_decisions()
+            lines.append(f"- {subs} Data Room submission{'s' if subs != 1 else ''} waiting for review or "
+                         f"authorisation, and {fnd} finding{'s' if fnd != 1 else ''} not yet investigated or resolved"
+                         " (see What to worry about).")
+            unknowns.append("Veloxa only knows about decisions recorded in Veloxa; approvals handled elsewhere "
+                            "(email, meetings) are not visible unless those records are added.")
+
+        heads = {"summary": "Where the company stands, from the verified records:",
+                 "priorities": "What needs you first, from the verified records:",
+                 "good": "What the records show improving (as reported):",
+                 "bad": "What the records show going wrong or at risk:",
+                 "changed": "What changed in the latest records:",
+                 "track": "Whether we're on track, from the verified records:",
+                 "people": "People-related risks in the records:",
+                 "delivery": "Delivery risks in the records:",
+                 "finance": "The financial position as reported (not independently verified):",
+                 "decisions": "What is waiting for a decision in Veloxa:",
+                 "consequence": "What the records say about the biggest concern (they don't project outcomes):",
+                 "verify": "What to verify before deciding:"}
+        if intent == "summary":
+            for f in (figures, concerns, warnings, thin):
+                f()
+        elif intent == "priorities":
+            for f in (concerns, warnings, decisions):
+                f()
+        elif intent == "good":
+            figures(want=1)
+            if any(x["item_id"].startswith("figure:") for x in ranked + unrank):
+                unknowns.append("The sources disagree on ARR, so treat the ARR movement with care.")
+            unknowns.append("Only movements in board-reported figures are listed; the records don't rate "
+                            "performance against a plan.")
+        elif intent == "bad":
+            for f in (concerns, warnings):
+                f()
+            figures(want=-1)
+        elif intent == "changed":
+            figures(changes_only=True)
+            warnings()
+        elif intent == "track":
+            warnings()
+            concerns()
+            unknowns.append("The records hold no company-wide plan to measure 'on track' against, so this lists "
+                            "what has moved or is at risk rather than giving a yes/no.")
+        elif intent == "people":
+            people()
+        elif intent == "delivery":
+            warnings()
+            for x in ranked:
+                if x["item_id"].startswith("slip:"):
+                    add(f"{x['title']}.", x["evidence"], "derived")
+        elif intent == "finance":
+            figures()
+            if any(x["item_id"].startswith("figure:") for x in ranked + unrank):
+                unknowns.append("The sources disagree on ARR, and no approved rule says which figure is right.")
+            unknowns.append("No ledger-based revenue or cash figure is admitted; these are the board's own numbers.")
+        elif intent == "decisions":
+            decisions()
+        elif intent == "consequence":
+            if ranked:
+                x = ranked[0]
+                add(f"{x['title']}.", x["evidence"], "derived")
+                unknowns += list(x.get("unknowns") or [])[:3]
+            unknowns.append("The records don't project what happens if this is ignored. Use What-if to test a "
+                            "specific change, such as moving a date.")
+        elif intent == "verify":
+            for x in ranked:
+                for u in (x.get("unknowns") or [])[:1]:
+                    add(f"{x['title']}: {u}", x["evidence"], "derived")
+            thin()
+        if not lines:
+            return None
+        return _result(self.basis_json, "qualified", f"I read this as: a CEO briefing ({intent}).",
+                       heads[intent] + "\n" + "\n".join(lines), claims,
+                       [recs[i] for c in claims for i in c["evidence"]], list(dict.fromkeys(unknowns)),
+                       ["What should I worry about?", "What is missing from the records?", "Why did Atlas GA move?"])
 
     def depends(self, q):
         """What hangs on a release or epic: the tracker work aimed at it (by its fix version or epic) and the

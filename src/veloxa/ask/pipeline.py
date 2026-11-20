@@ -206,7 +206,7 @@ def _answer_one(conn: psycopg.Connection, tenant_id: uuid.UUID, tz: str, princip
         return _record(conn, tenant_id, principal, now, basis, base, _abstained(
             basis, f"I read this as a question at {basis.banner()}.", [str(e)]))
     routed = routes.Router(conn, tenant_id, tz, principal, basis, _basis_json(basis), SOURCE_CLASS).route(
-        spec.remainder or question)
+        spec.remainder or question, original=question)
     if routed is not None:
         base["diagnostics"] = {"stage": "routed", "route": routed["interpretation"][:80]}
         return _record(conn, tenant_id, principal, now, basis, base, routed)

@@ -26,6 +26,7 @@ SMALL = re.compile(r"^\s*(hi|hello|hey|good (morning|afternoon|evening)|namaste|
                    r"help|what can you do\??|how do i use (this|veloxa)\??)[\s!.?,]*$", re.I)
 MORE = re.compile(r"^\s*(tell me more|more( detail(s)?)?|go on|continue|elaborate|and why\??|why\??|what else\??)"
                   r"[\s!.?]*$", re.I)
+IGNORE = re.compile(r"\b(ignore|do nothing|don't act|do not act|not act)\b", re.I)
 WHATIF = re.compile(r"\b(what if|what happens if|suppose|scenario|if we (move|delay|shift))\b", re.I)
 INVESTIGATE = re.compile(r"^\s*(please\s+)?(investigate|look into|dig into|analy[sz]e)\s+(?P<topic>.+?)[.?!]*$", re.I)
 REVIEW = re.compile(r"\b(request|ask for|raise|submit)\b.{0,20}?\b(an? )?(internal )?(?P<dept>people ops|people|hr|"
@@ -156,7 +157,7 @@ def respond(conn, tenant_id, principal, tz: str, question: str, now, *, state: d
         if policy.prescreen(topic, []) is None:
             return _store(conn, tenant_id, principal, now, q, _review_preview(conn, tenant_id, principal, q, m))
     refusal = policy.prescreen(q, [])                                    # names are re-checked by the pipeline too
-    if refusal is None and WHATIF.search(q):                             # 4
+    if refusal is None and WHATIF.search(q) and not IGNORE.search(q):   # 4 ("if we ignore it" is not a date shift)
         out = _scenario(conn, tenant_id, tz, q, now)
         if out is not None:
             return _store(conn, tenant_id, principal, now, q, out)
