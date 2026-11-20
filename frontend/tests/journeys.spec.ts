@@ -327,7 +327,7 @@ test("AI team: no HR mapping here, so only labelled synthetic agents appear, wit
   await expect(drawer.getByText(/AI assistant/)).toBeVisible();            // the agent's opening
   const box = (await drawer.boundingBox())!, vp = page.viewportSize()!;                    // centred modal, not a drawer
   expect(Math.abs(box.x + box.width / 2 - vp.width / 2)).toBeLessThan(4);
-  expect(box.width / vp.width).toBeGreaterThan(0.6);
+  expect(box.width / vp.width > 0.6 || box.width >= 1000).toBe(true);           // wide, but capped on large screens
   await drawer.getByLabel("Message to the agent").fill("What do you not know?");
   await drawer.getByRole("button", { name: "Send" }).click();
   await expect(drawer.getByText(/My records cover/).first()).toBeVisible();
