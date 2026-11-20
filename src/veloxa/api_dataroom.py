@@ -238,7 +238,12 @@ def register(app, *, state, principal_of, now_fn, store_factory=LocalContentStor
                 return None, None
             if p.access is not None and not p.access.allows(r["system"], r["data_class"]):
                 return None, None
-            if r["data_class"] == "private_comms":
+            if r["system"] == "gmail_oauth":                   # a connected mailbox: its parties only
+                from .chunking import gmail_parties
+
+                if not p.email or p.email.lower() not in gmail_parties(r["payload"]):
+                    return None, None
+            elif r["data_class"] == "private_comms":
                 d = conn.execute("SELECT parties FROM projection.document_text WHERE source_record_id = %s"
                                  " ORDER BY batch_seq DESC LIMIT 1", (record_id,)).fetchone()
                 if not d or not p.email or p.email.lower() not in (d["parties"] or []):

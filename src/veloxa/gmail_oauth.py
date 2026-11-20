@@ -39,6 +39,46 @@ SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 STATE_TTL = 10 * 60
 MAX_IMPORT = 500
 HEADERS = ("From", "To", "Cc", "Subject", "Date", "Message-ID")
+BODY_LIMIT = 20_000          # characters of message text kept per message; attachments are never read
+
+
+def _b64(data: str) -> str:
+    import base64
+
+    try:
+        return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)).decode("utf-8", "replace")
+    except (ValueError, TypeError):
+        return ""
+
+
+def message_text(payload: dict) -> str:
+    """The readable text of a Gmail message: text/plain parts (else text/html with tags removed), never attachments
+    (parts with a filename). Bounded to BODY_LIMIT characters."""
+    import html as _html
+
+    plain, rich = [], []
+
+    def walk(p: dict) -> None:
+        if p.get("filename"):
+            return                                                   # an attachment: not read
+        mt, data = p.get("mimeType", ""), (p.get("body") or {}).get("data")
+        if data and mt == "text/plain":
+            plain.append(_b64(data))
+        elif data and mt == "text/html":
+            rich.append(_b64(data))
+        for c in p.get("parts") or []:
+            walk(c)
+
+    walk(payload)
+    if plain:
+        text = "\n".join(plain)
+    else:
+        text = re.sub(r"(?is)<(script|style).*?</\1>", " ", "\n".join(rich))
+        text = _html.unescape(re.sub(r"(?s)<br\s*/?>|</p>|</div>", "\n", text))
+        text = re.sub(r"(?s)<[^>]+>", " ", text)
+    text = re.sub(r"[ \t]+", " ", text.replace("\r\n", "\n"))
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text[:BODY_LIMIT]
 RECONNECT = "Gmail access expired or was revoked. Reconnect Gmail in Administration > Integrations."
 
 
@@ -255,8 +295,7 @@ class Gmail:
         raise GmailError("Gmail kept refusing the request (rate limit).", 429, "rate_limited")
 
     def _message(self, tenant: str, mid: str, scope: dict) -> dict | None:
-        m = self.call(tenant, "GET", f"/messages/{mid}", params=[("format", "metadata"),
-                                                                *[("metadataHeaders", h) for h in HEADERS]])
+        m = self.call(tenant, "GET", f"/messages/{mid}", params=[("format", "full")])
         h = {x["name"]: x["value"] for x in m.get("payload", {}).get("headers", [])}
         sender = (re.search(r"<([^>]+)>", h.get("From", "")) or re.search(r"(\S+@\S+)", h.get("From", "")))
         addr = (sender.group(1) if sender else "").lower()
@@ -269,7 +308,7 @@ class Gmail:
                 "history_id": m.get("historyId"), "internal_date": m.get("internalDate"),
                 "from": h.get("From"), "to": h.get("To"), "cc": h.get("Cc"), "subject": h.get("Subject"),
                 "date": h.get("Date"), "rfc822_message_id": h.get("Message-ID"), "labels": m.get("labelIds", []),
-                "snippet": m.get("snippet"),
+                "snippet": m.get("snippet"), "body": message_text(m.get("payload") or {}),
                 "locator": f"gmail:{self.vault.get(tenant).mailbox}/messages/{m['id']}",
                 "access_scope": {"mailbox": self.vault.get(tenant).mailbox, "labels": scope["labels"],
                                  "senders": scope["senders"]},

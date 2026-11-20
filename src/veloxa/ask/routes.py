@@ -243,6 +243,12 @@ class Router:
             out = self.oncall(q)
             if out is not None:
                 return out
+        from . import connectors
+
+        if connectors.asks(full) and not ISSUE_KEY.search(q) and not JIRA_ABOUT.search(q):
+            out = connectors.answer(self, full)         # names GitHub / Jira / e-mail: before the CEO briefing
+            if out is not None:
+                return out
         if EXECUTIVE.search(q) and not _is_dependency(full) and not re.search(r"\bboard\b", full, re.I):
             out = self.executive(q)
             if out is not None:

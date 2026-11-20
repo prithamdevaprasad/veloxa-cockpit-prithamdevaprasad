@@ -9,7 +9,9 @@ source record:
 
 **Row exports** contribute ONE descriptive unit per row: string fields with their column names. Figures stay
 with governed metrics. Only rows of class `internal` or `confidential` contribute; personal records, private
-communications and protected classes never do.
+communications and protected classes never do. Exception: messages imported by the Gmail connector are indexed
+as e-mail (paragraph units, subject as title) and as `private_comms` with their parties, so only the sender and
+recipients can retrieve them.
 """
 
 from __future__ import annotations
@@ -57,6 +59,28 @@ def chunks(kind: str, record_id: str, payload: dict, title: str) -> list[tuple[s
     return out
 
 
+def gmail_parties(payload: dict) -> list[str]:
+    from email.utils import getaddresses
+
+    return sorted({a.lower() for _, a in getaddresses([payload.get(x) or "" for x in ("from", "to", "cc")]) if a})
+
+
+def gmail_units(payload: dict) -> tuple[str, object, list[str], list[tuple[str, dict, str]]]:
+    """(title, event_at, parties, units) of one message imported by the Gmail connector. Indexed as a private
+    communication: the units carry the sender and recipients, and search only returns them to those parties."""
+    from email.utils import parsedate_to_datetime
+
+    title = (payload.get("subject") or "(no subject)").strip()
+    try:
+        event_at = parsedate_to_datetime(payload["date"]) if payload.get("date") else None
+    except (TypeError, ValueError):
+        event_at = None
+    text = payload.get("body") or payload.get("snippet") or ""
+    paras = [p.strip() for p in _BLANK.split(text) if p.strip()]
+    units = [("message", {"paragraph": i + 1}, p) for i, p in enumerate(paras)]
+    return title, event_at, gmail_parties(payload), units
+
+
 def row_text(payload: dict) -> str:
     parts = [f"{k}: {v}" for k, v in payload.items()
              if isinstance(v, str) and v.strip() and not _NUMERIC.fullmatch(v)]
@@ -72,6 +96,17 @@ def project_batch(conn: psycopg.Connection, tenant_id: uuid.UUID, k: int, prose_
         " OR (kind = 'export' AND data_class = ANY(%(rc)s)))",
         {"t": tenant_id, "k": k, "kinds": list(prose_kinds), "rc": list(ROW_TEXT_CLASSES)}).fetchall()
     for r in recs:
+        if r["kind"] == "export" and r["system"] == "gmail_oauth":
+            title, event_at, parties, units = gmail_units(r["payload"])
+            for n, (unit, loc, body) in enumerate(units):       # PRIVATE: only the message's parties may find it
+                conn.execute(
+                    "INSERT INTO projection.text_chunk (tenant_id, batch_seq, source_record_id, source_version,"
+                    " chunk_no, chunk_locator, unit, kind, system, data_class, title, body, event_at, parties)"
+                    " VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'private_comms',%s,%s,%s,%s)",
+                    (tenant_id, k, r["record_id"], r["version"], n, json.dumps(loc), unit, r["kind"], r["system"],
+                     title[:300], body, event_at, parties))
+                rows += 1
+            continue
         if r["kind"] == "export":
             body = row_text(r["payload"])
             title = r["source_path"].rsplit("/", 1)[-1]
