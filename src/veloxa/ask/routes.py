@@ -59,6 +59,13 @@ BLOCKED = re.compile(r"\b(which|what|how many|list)\b.{0,30}\b(issues?|tasks?|ti
 BOARD_ABOUT = re.compile(r"\bboard\b.{0,40}\b(say|said|says|report\w*|mention\w*|state\w*)\b.{0,12}\babout\s+"
                          r"(?P<topic>[A-Za-z0-9][\w .-]{1,40}?)(\s+in\s+(?P<when>\w+))?\s*\??$", re.I)
 EXEC_INTENTS: list[tuple[str, re.Pattern]] = [
+    ("leaders", re.compile(r"\b(most important|key|senior|leadership|critical) (people|persons|leaders|staff)\b"
+                           r"|\bwho (are|is) (the |our )?(leaders?|leadership)\b", re.I)),
+    ("escalate", re.compile(r"\b(dependenc\w+|blockers?)\b.{0,30}\bescalat\w*|\bescalat\w* .{0,20}"
+                            r"\b(dependenc\w+|blockers?)\b", re.I)),
+    ("fin_missing", re.compile(r"\bfinancial (information|data|figures?|records?) (is |are )?(missing|absent|"
+                               r"lacking|not available)\b|\bmissing financial\b|\bwhat financial .{0,20}"
+                               r"\b(missing|don't we have|lacking)\b", re.I)),
     ("decisions", re.compile(r"\b(decisions?|approv\w+|sign[- ]?off)\b.{0,40}\b(need|needs|waiting|pending|my)\b|"
                              r"\bwhat (is|are) waiting (for|on) me\b", re.I)),
     ("consequence", re.compile(r"\b(what happens|what if we|consequences?)\b.{0,30}\b(ignore|delay|don't act|"
@@ -71,7 +78,7 @@ EXEC_INTENTS: list[tuple[str, re.Pattern]] = [
                            r"\brecent changes\b", re.I)),
     ("track", re.compile(r"\b(are we|is the company|are our projects?) on track\b|\bon track overall\b", re.I)),
     ("people", re.compile(r"\bkey[- ]person\b|\bpeople[- ]related risks?\b|\bcapacity (problems?|issues?|risks?)\b|"
-                          r"\bpeople risks?\b|\bmost important people\b|\bsingle points? of failure\b", re.I)),
+                          r"\bpeople risks?\b|\bsingle points? of failure\b", re.I)),
     ("delivery", re.compile(r"\b(deadlines?|projects?|delivery|releases?)\b.{0,20}\b(at risk|on track|slipp\w*|"
                             r"blocked|blocking|delayed)\b|\bwhat is blocking delivery\b|\bwhich teams have delivery\b|"
                             r"\bdependencies need escalation\b|\bneed(s)? escalation\b", re.I)),
@@ -617,6 +624,35 @@ class Router:
                 sorted({r for d in ds for r in d["_records"]}))
         unknowns.append("Root causes are not recorded, so repeated incidents on a service show where to look, not why.")
 
+    def _leaders(self, add, recs):
+        """Holders of senior titles in the HR records (title words only; nobody is ranked)."""
+        from .continuity import _claims
+
+        k = self.basis.batch_seq
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id, k):
+            people = _claims(self.conn, self.tenant_id, k, "person")
+        senior = re.compile(r"\b(ceo|cto|cfo|coo|chief|founder|vp|vice president|head|director)\b", re.I)
+        rows = [d for d in people.values() if senior.search(str(d.get("title") or ""))
+                and str(d.get("employment_status") or "active").lower() not in ("exited", "inactive", "left")]
+        recs |= self.records({r for d in rows for r in d["_records"]})
+        for d in sorted(rows, key=lambda d: str(d.get("title")))[:10]:
+            add(f"{d.get('name') or 'Name not recorded'}: {d.get('title')}"
+                + (f", {d['department']}" if d.get("department") else "") + ".", sorted(d["_records"]))
+
+    def _blocked_lines(self, add, recs):
+        """Tracker issues marked blocked, with what the record says blocks them."""
+        from .continuity import _claims
+
+        k = self.basis.batch_seq
+        with tenant_tx(self.conn, self.tenant_id, self.principal.principal_id, k):
+            issues = _claims(self.conn, self.tenant_id, k, "issue")
+        blocked = {s: d for s, d in issues.items() if d.get("blocked_by")
+                   or str(d.get("status_at_export", "")).lower() == "blocked"}
+        recs |= self.records({r for d in blocked.values() for r in d["_records"]})
+        for s, d in sorted(blocked.items())[:6]:
+            add(f"{s.split(':', 1)[1]} ({d.get('summary') or 'no summary'}) is blocked"
+                + (f" by {d['blocked_by']}." if d.get("blocked_by") else "."), sorted(d["_records"]))
+
     def executive(self, q):
         """A CEO briefing assembled ONLY from cited facts the system already holds: the latest board figures (with the
         previous quarter), the ranked concerns (close calls stated), concerns that need more evidence, commitment
@@ -707,7 +743,10 @@ class Router:
                  "verify": "What to verify before deciding:",
                  "weak": "Concerns whose evidence is incomplete:",
                  "evidence": "The evidence behind the top concern:",
-                 "ops": "Recurring operational issues in the incident records:"}
+                 "ops": "Recurring operational issues in the incident records:",
+                 "leaders": "The people in leadership roles, from the HR records:",
+                 "escalate": "Dependencies and blockers that may need escalation:",
+                 "fin_missing": "What the financial records establish, and what they don't:"}
         if intent == "summary":
             for f in (figures, concerns, warnings, thin):
                 f()
@@ -774,6 +813,31 @@ class Router:
                 unknowns += list(x.get("unknowns") or [])[:3]
         elif intent == "ops":
             self._incident_lines(add, unknowns, recs)
+        elif intent == "leaders":
+            self._leaders(add, recs)
+            people()
+            unknowns.append("Importance is read from job titles in the HR records; the records don't rank people.")
+        elif intent == "escalate":
+            warnings()
+            for x in ranked:
+                if x["item_id"].startswith("slip:"):
+                    add(f"{x['title']}.", x["evidence"], "derived")
+            self._blocked_lines(add, recs)
+            unknowns.append("No record marks a dependency as escalated or says who should escalate it; these are the "
+                            "commitments and blockers the records show at risk.")
+        elif intent == "fin_missing":
+            have = [m["name"] for m in mets if m["value"]]
+            if have:
+                add("Recorded (board-reported, not independently verified): " + ", ".join(have) + ".",
+                    {r for m in mets for r in m["records"]})
+            disputed = [x for x in ranked + unrank if x["item_id"].startswith("figure:")]
+            if disputed:
+                add("ARR is disputed: the sources give different figures and no approved rule picks one.",
+                    disputed[0]["evidence"], "derived")
+            for n in ("cash balance", "gross margin", "revenue by customer", "receivables and collections",
+                      "budget against actual"):
+                unknowns.append(f"No {n} figure is in the admitted records.")
+            unknowns.append("No ledger-based revenue or cash figure is admitted; the figures are the board's own.")
         if not lines:
             return None
         return _result(self.basis_json, "qualified", f"I read this as: a CEO briefing ({intent}).",
